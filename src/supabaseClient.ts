@@ -64,5 +64,18 @@ export const mockAuth = {
       workspaceName
     };
     return { data: { user }, error: null };
+  },
+  signInWithPhone: async (phone: string, customWorkspaceName?: string) => {
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const domain = 'phone.giinmeet.com';
+    const workspaceName = customWorkspaceName?.trim() || 'Personal Workspace';
+    const user: MockUser = {
+      id: 'mock-phone-id-' + Math.random().toString(36).substr(2, 5),
+      email: `${phone.replace(/\D/g, '')}@phone.giinmeet.com`,
+      name: `Phone User (${phone})`,
+      domain,
+      workspaceName
+    };
+    return { data: { user }, error: null };
   }
 };
