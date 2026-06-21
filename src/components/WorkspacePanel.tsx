@@ -1,0 +1,317 @@
+import React, { useState } from 'react';
+import { Edit, CheckSquare, Plus, User, Calendar, Save, ClipboardCopy } from 'lucide-react';
+
+interface ActionItem {
+  id: string;
+  text: string;
+  assignee: string;
+  dueDate: string;
+  completed: boolean;
+}
+
+interface WorkspacePanelProps {
+  workspaceUsers: { name: string; role: string }[];
+  onSaveWorkspaceData: (notes: string, actionItemsCount: number) => void;
+  onClose: () => void;
+}
+
+export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
+  workspaceUsers,
+  onSaveWorkspaceData,
+  onClose
+}) => {
+  const [activeTab, setActiveTab] = useState<'minutes' | 'actions'>('minutes');
+  
+  // Collaborative minutes text state
+  const [minutesText, setMinutesText] = useState(
+    `# Meeting Minutes: GIIN MEET Alignment\n\n` +
+    `## Discussion Notes:\n` +
+    `- Reviewing browser DRM overlays for Phase 3 E2EE.\n` +
+    `- Lucas verified WebRTC video constraints configuration.\n` +
+    `- Sarah presented the design tokens inside index.css.`
+  );
+
+  // Action Items State
+  const [actionItems, setActionItems] = useState<ActionItem[]>([
+    { id: 'a1', text: 'Confirm browser DRM mix-blend-mode compatibility', assignee: 'Sarah Jenkins', dueDate: '2026-06-25', completed: false },
+    { id: 'a2', text: 'Audit peer-to-peer WebCrypto handshake parameters', assignee: 'Lucas Lima', dueDate: '2026-06-28', completed: false }
+  ]);
+
+  // Form states to add task
+  const [taskText, setTaskText] = useState('');
+  const [taskAssignee, setTaskAssignee] = useState(workspaceUsers[0]?.name || 'Lucas Lima');
+  const [taskDate, setTaskDate] = useState('');
+
+  const handleAddTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!taskText.trim() || !taskDate) return;
+
+    const newTask: ActionItem = {
+      id: Math.random().toString(36).substr(2, 9),
+      text: taskText,
+      assignee: taskAssignee,
+      dueDate: taskDate,
+      completed: false
+    };
+
+    setActionItems(prev => [...prev, newTask]);
+    setTaskText('');
+    setTaskDate('');
+  };
+
+  const toggleTaskCompleted = (id: string) => {
+    setActionItems(prev => 
+      prev.map(task => task.id === id ? { ...task, completed: !task.completed } : task)
+    );
+  };
+
+  const handleSaveAll = () => {
+    onSaveWorkspaceData(minutesText, actionItems.length);
+  };
+
+  return (
+    <div style={{
+      width: '340px',
+      borderLeft: '1px solid var(--border-color)',
+      backgroundColor: 'var(--bg-card)',
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      zIndex: 10,
+      animation: 'slide-in 0.25s ease'
+    }}>
+      
+      {/* Workspace panel tabs */}
+      <div style={{
+        display: 'flex',
+        borderBottom: '1px solid var(--border-color)',
+        backgroundColor: 'rgba(var(--color-primary-rgb), 0.02)'
+      }}>
+        <button
+          onClick={() => setActiveTab('minutes')}
+          style={{
+            flex: 1,
+            padding: '1rem',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === 'minutes' ? '3px solid var(--color-primary)' : '3px solid transparent',
+            color: activeTab === 'minutes' ? 'var(--color-primary)' : 'var(--text-muted)',
+            fontWeight: activeTab === 'minutes' ? 700 : 500,
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.4rem'
+          }}
+        >
+          <Edit size={14} />
+          <span>Room Notes</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('actions')}
+          style={{
+            flex: 1,
+            padding: '1rem',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === 'actions' ? '3px solid var(--color-primary)' : '33px solid transparent',
+            color: activeTab === 'actions' ? 'var(--color-primary)' : 'var(--text-muted)',
+            fontWeight: activeTab === 'actions' ? 700 : 500,
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.4rem'
+          }}
+        >
+          <CheckSquare size={14} />
+          <span>Action Items</span>
+        </button>
+      </div>
+
+      {/* Main tab panel body */}
+      <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        
+        {activeTab === 'minutes' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%' }}>
+            <div className="flex-between">
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>COLLABORATIVE MINUTES</span>
+              <button 
+                onClick={() => {
+                  navigator.clipboard.writeText(minutesText);
+                  alert('Notes copied to clipboard!');
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.75rem' }}
+              >
+                <ClipboardCopy size={12} />
+                <span>Copy</span>
+              </button>
+            </div>
+            
+            <textarea
+              value={minutesText}
+              onChange={(e) => setMinutesText(e.target.value)}
+              style={{
+                flex: 1,
+                minHeight: '280px',
+                padding: '0.75rem',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-app)',
+                color: 'var(--text-main)',
+                fontFamily: 'monospace',
+                fontSize: '0.85rem',
+                resize: 'none',
+                lineHeight: 1.4
+              }}
+            />
+          </div>
+        )}
+
+        {activeTab === 'actions' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            
+            {/* Create task form */}
+            <form onSubmit={handleAddTask} style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              padding: '1rem',
+              border: '1px solid var(--border-color)',
+              borderRadius: '6px',
+              backgroundColor: 'var(--bg-app)'
+            }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-main)' }}>ASSIGN NEW TASK</span>
+              
+              <input 
+                type="text" 
+                placeholder="Task description..."
+                value={taskText}
+                onChange={(e) => setTaskText(e.target.value)}
+                className="premium-input"
+                style={{ padding: '0.4rem 0.65rem', fontSize: '0.8rem' }}
+                required
+              />
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '0.5rem' }}>
+                {/* Assignee */}
+                <select 
+                  value={taskAssignee}
+                  onChange={(e) => setTaskAssignee(e.target.value)}
+                  className="premium-input"
+                  style={{ padding: '0.4rem 0.65rem', fontSize: '0.8rem' }}
+                >
+                  {workspaceUsers.map(u => (
+                    <option key={u.name} value={u.name}>{u.name}</option>
+                  ))}
+                </select>
+
+                {/* Calendar Date */}
+                <input 
+                  type="date" 
+                  value={taskDate}
+                  onChange={(e) => setTaskDate(e.target.value)}
+                  className="premium-input"
+                  style={{ padding: '0.4rem 0.65rem', fontSize: '0.8rem' }}
+                  required
+                />
+              </div>
+
+              <button type="submit" className="premium-btn premium-btn-primary" style={{ padding: '0.4rem', fontSize: '0.8rem', borderRadius: '4px' }}>
+                <Plus size={14} />
+                <span>Add Task</span>
+              </button>
+            </form>
+
+            {/* Tasks list */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>CHECKLIST</span>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '200px', overflowY: 'auto' }}>
+                {actionItems.map(item => (
+                  <div 
+                    key={item.id} 
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '0.5rem',
+                      padding: '0.6rem',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '4px',
+                      backgroundColor: 'var(--bg-card)'
+                    }}
+                  >
+                    <input 
+                      type="checkbox" 
+                      checked={item.completed}
+                      onChange={() => toggleTaskCompleted(item.id)}
+                      style={{ marginTop: '0.15rem', cursor: 'pointer' }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ 
+                        fontSize: '0.8rem', 
+                        fontWeight: 500,
+                        textDecoration: item.completed ? 'line-through' : 'none',
+                        color: item.completed ? 'var(--text-muted)' : 'var(--text-main)',
+                        wordBreak: 'break-word'
+                      }}>
+                        {item.text}
+                      </p>
+                      
+                      {/* Assignee details */}
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.2rem', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                          <User size={10} />
+                          <span>{item.assignee}</span>
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                          <Calendar size={10} />
+                          <span>{item.dueDate}</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {actionItems.length === 0 && (
+                  <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.75rem', padding: '1rem 0' }}>
+                    No items assigned.
+                  </p>
+                )}
+              </div>
+            </div>
+
+          </div>
+        )}
+      </div>
+
+      {/* Footer Save & Close */}
+      <div style={{
+        padding: '1rem',
+        borderTop: '1px solid var(--border-color)',
+        display: 'flex',
+        gap: '0.5rem',
+        backgroundColor: 'rgba(var(--color-primary-rgb), 0.02)'
+      }}>
+        <button 
+          onClick={handleSaveAll}
+          className="premium-btn premium-btn-primary" 
+          style={{ flex: 1, fontSize: '0.8rem', padding: '0.5rem', borderRadius: '4px' }}
+        >
+          <Save size={14} />
+          <span>Save Workspace</span>
+        </button>
+        
+        <button 
+          onClick={onClose}
+          className="premium-btn premium-btn-secondary" 
+          style={{ fontSize: '0.8rem', padding: '0.5rem', borderRadius: '4px' }}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+};
