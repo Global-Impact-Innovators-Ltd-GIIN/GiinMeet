@@ -343,7 +343,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
       <div style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}>
         
         {/* Grid Container */}
-        <div style={{
+        <div className="meeting-grid" style={{
           flex: 1,
           display: 'grid',
           // If screen sharing is on, we give it a large top space or double column
@@ -939,7 +939,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
             }}
           >
             <Users size={16} />
-            <span>Participants</span>
+            <span className="hide-mobile-text">Participants</span>
           </button>
 
           <button 
@@ -959,7 +959,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
             title="Meeting Workspace Notes"
           >
             <Edit2 size={16} />
-            <span>Workspace</span>
+            <span className="hide-mobile-text">Workspace</span>
           </button>
 
           <button 
@@ -978,7 +978,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
             }}
           >
             <MessageSquare size={16} />
-            <span>Chat</span>
+            <span className="hide-mobile-text">Chat</span>
           </button>
 
           <button 
@@ -993,7 +993,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
             }}
           >
             <PhoneOff size={16} />
-            <span>End Call</span>
+            <span className="hide-mobile-text">End Call</span>
           </button>
         </div>
       </div>

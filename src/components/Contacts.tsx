@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Star, MessageSquare, Phone, Calendar, Mail, Smartphone, Briefcase } from 'lucide-react';
+import { Search, Star, MessageSquare, Phone, Calendar, Mail, Smartphone, Briefcase, ArrowLeft } from 'lucide-react';
 
 interface Contact {
   id: string;
@@ -29,6 +29,7 @@ export const Contacts: React.FC<ContactsProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'starred'>('all');
+  const [showDetailsMobile, setShowDetailsMobile] = useState(false);
   
   const [contacts, setContacts] = useState<Contact[]>([
     {
@@ -164,7 +165,7 @@ export const Contacts: React.FC<ContactsProps> = ({
     }} className="grid-2">
       
       {/* Left panel: Contacts list */}
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
+      <div className={`glass-panel ${showDetailsMobile ? 'mobile-hidden' : ''}`} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
         <div>
           <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)' }}>
             {userWorkspaceName}
@@ -242,7 +243,10 @@ export const Contacts: React.FC<ContactsProps> = ({
               {depts[deptName].map(c => (
                 <div 
                   key={c.id}
-                  onClick={() => setSelectedContactId(c.id)}
+                  onClick={() => {
+                    setSelectedContactId(c.id);
+                    setShowDetailsMobile(true);
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -321,7 +325,29 @@ export const Contacts: React.FC<ContactsProps> = ({
 
       {/* Right panel: Contact Details */}
       {selectedContact ? (
-        <div className="glass-panel" style={{ padding: '2.5rem', display: 'flex', flexDirection: 'column', gap: '2rem', overflowY: 'auto' }}>
+        <div className={`glass-panel ${!showDetailsMobile ? 'mobile-hidden' : ''}`} style={{ padding: '2.5rem', display: 'flex', flexDirection: 'column', gap: '2rem', overflowY: 'auto' }}>
+          
+          {/* Mobile Back Button */}
+          <button
+            className="mobile-only-back"
+            onClick={() => setShowDetailsMobile(false)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-main)',
+              cursor: 'pointer',
+              display: 'none',
+              alignItems: 'center',
+              gap: '0.25rem',
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              padding: '0.5rem 0',
+              alignSelf: 'flex-start'
+            }}
+          >
+            <ArrowLeft size={20} />
+            <span>Back to Contacts</span>
+          </button>
           
           {/* Header info */}
           <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>

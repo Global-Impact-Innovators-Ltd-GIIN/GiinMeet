@@ -36,6 +36,7 @@
   --glass-bg: rgba(255, 255, 255, 0.7);
   --glass-border: rgba(255, 255, 255, 0.4);
   --glass-blur: 12px;
+  --color-active-nav: var(--color-primary);
 }
 
 [data-theme="dark"] {
@@ -58,6 +59,7 @@
   --glass-bg: rgba(18, 24, 38, 0.75);
   --glass-border: rgba(255, 255, 255, 0.06);
   --glass-blur: 16px;
+  --color-active-nav: var(--color-accent);
 }
 
 /* Global Reset & Base Styling */
@@ -316,7 +318,56 @@ h1, h2, h3, h4, h5, h6 {
 
 @media (max-width: 768px) {
   .grid-2 {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
+    height: auto !important;
+  }
+  
+  .sidebar-desktop {
+    display: none !important;
+  }
+  
+  .bottom-nav-mobile {
+    display: flex !important;
+  }
+  
+  main {
+    padding: 1rem 1rem 85px 1rem !important;
+  }
+  
+  header {
+    padding: 0 1.25rem !important;
+  }
+  
+  header h2 {
+    font-size: 1.1rem !important;
+  }
+  
+  header button.premium-btn-primary {
+    display: none !important;
+  }
+  
+  .mobile-hidden {
+    display: none !important;
+  }
+  
+  .mobile-only-back {
+    display: flex !important;
+  }
+  
+  .meeting-grid {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .hide-mobile-text {
+    display: none !important;
+  }
+  
+  .meeting-grid {
+    gap: 0.5rem !important;
+    padding: 0.5rem !important;
   }
 }
 

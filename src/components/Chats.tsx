@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Smile, Paperclip, Search, PlusCircle, MoreVertical, 
-  Video, CheckCheck
+  Video, CheckCheck, ArrowLeft
 } from 'lucide-react';
 
 interface Message {
@@ -38,6 +38,7 @@ export const Chats: React.FC<ChatsProps> = ({
   const [chatInput, setChatInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [showConversationMobile, setShowConversationMobile] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -100,6 +101,7 @@ export const Chats: React.FC<ChatsProps> = ({
       const existingThread = threads.find(t => t.name.toLowerCase() === initialTargetContact.toLowerCase());
       if (existingThread) {
         setActiveThreadId(existingThread.id);
+        setShowConversationMobile(true);
       } else {
         // Create new simulated thread
         const newId = initialTargetContact.toLowerCase().replace(/\s+/g, '-');
@@ -116,6 +118,7 @@ export const Chats: React.FC<ChatsProps> = ({
         };
         setThreads(prev => [newThread, ...prev]);
         setActiveThreadId(newId);
+        setShowConversationMobile(true);
       }
       if (onClearTargetContact) {
         onClearTargetContact();
@@ -210,7 +213,7 @@ export const Chats: React.FC<ChatsProps> = ({
     }} className="grid-2">
       
       {/* Sidebar List */}
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
+      <div className={`glass-panel ${showConversationMobile ? 'mobile-hidden' : ''}`} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
         <div className="flex-between">
           <h2 style={{ fontSize: '1.4rem', fontFamily: 'var(--font-heading)' }}>Conversations</h2>
           <button style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer' }}>
@@ -238,7 +241,10 @@ export const Chats: React.FC<ChatsProps> = ({
             return (
               <div 
                 key={t.id}
-                onClick={() => setActiveThreadId(t.id)}
+                onClick={() => {
+                  setActiveThreadId(t.id);
+                  setShowConversationMobile(true);
+                }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -292,7 +298,7 @@ export const Chats: React.FC<ChatsProps> = ({
       </div>
 
       {/* Main Conversation Window */}
-      <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div className={`glass-panel ${!showConversationMobile ? 'mobile-hidden' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         
         {/* Chat Room Header */}
         <div style={{
@@ -304,6 +310,21 @@ export const Chats: React.FC<ChatsProps> = ({
           backgroundColor: 'rgba(var(--color-primary-rgb), 0.02)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <button
+              className="mobile-only-back"
+              onClick={() => setShowConversationMobile(false)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-main)',
+                cursor: 'pointer',
+                display: 'none',
+                alignItems: 'center',
+                padding: '0.25rem'
+              }}
+            >
+              <ArrowLeft size={20} />
+            </button>
             <div style={{
               width: '44px',
               height: '44px',

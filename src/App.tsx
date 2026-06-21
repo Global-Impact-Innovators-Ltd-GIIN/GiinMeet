@@ -224,7 +224,7 @@ function App() {
     }}>
       
       {/* Sidebar Navigation */}
-      <aside style={{
+      <aside className="sidebar-desktop" style={{
         width: '260px',
         backgroundColor: 'var(--bg-sidebar)',
         display: 'flex',
@@ -795,7 +795,146 @@ function App() {
           )}
         </main>
       </div>
-      
+
+      {/* Mobile Bottom Navigation Bar */}
+      <div className="bottom-nav-mobile" style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '65px',
+        backgroundColor: 'var(--bg-card)',
+        borderTop: '1px solid var(--border-color)',
+        display: 'none', // Shown on mobile via media query in index.css
+        alignItems: 'center',
+        justifyContent: 'space-around',
+        zIndex: 100,
+        boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.05)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        paddingBottom: 'env(safe-area-inset-bottom)'
+      }}>
+        <button 
+          onClick={() => { setTargetContactName(null); setCurrentView('dashboard'); }}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'none',
+            border: 'none',
+            gap: '4px',
+            cursor: 'pointer',
+            padding: '0.25rem',
+            flex: 1
+          }}
+        >
+          <Home size={20} color={currentView === 'dashboard' ? 'var(--color-active-nav)' : 'var(--text-muted)'} style={{ color: currentView === 'dashboard' ? 'var(--color-active-nav)' : 'var(--text-muted)' }} />
+          <span style={{
+            fontSize: '0.65rem',
+            fontWeight: currentView === 'dashboard' ? 700 : 500,
+            color: currentView === 'dashboard' ? 'var(--color-active-nav)' : 'var(--text-muted)',
+            fontFamily: 'var(--font-heading)'
+          }}>Home</span>
+        </button>
+
+        <button 
+          onClick={() => setCurrentView('chats')}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'none',
+            border: 'none',
+            gap: '4px',
+            cursor: 'pointer',
+            padding: '0.25rem',
+            flex: 1
+          }}
+        >
+          <MessageSquare size={20} color={currentView === 'chats' ? 'var(--color-active-nav)' : 'var(--text-muted)'} style={{ color: currentView === 'chats' ? 'var(--color-active-nav)' : 'var(--text-muted)' }} />
+          <span style={{
+            fontSize: '0.65rem',
+            fontWeight: currentView === 'chats' ? 700 : 500,
+            color: currentView === 'chats' ? 'var(--color-active-nav)' : 'var(--text-muted)',
+            fontFamily: 'var(--font-heading)'
+          }}>Chats</span>
+        </button>
+
+        <button 
+          onClick={() => setCurrentView('contacts')}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'none',
+            border: 'none',
+            gap: '4px',
+            cursor: 'pointer',
+            padding: '0.25rem',
+            flex: 1
+          }}
+        >
+          <Users size={20} color={currentView === 'contacts' ? 'var(--color-active-nav)' : 'var(--text-muted)'} style={{ color: currentView === 'contacts' ? 'var(--color-active-nav)' : 'var(--text-muted)' }} />
+          <span style={{
+            fontSize: '0.65rem',
+            fontWeight: currentView === 'contacts' ? 700 : 500,
+            color: currentView === 'contacts' ? 'var(--color-active-nav)' : 'var(--text-muted)',
+            fontFamily: 'var(--font-heading)'
+          }}>Contacts</span>
+        </button>
+
+        <button 
+          onClick={() => setCurrentView('private')}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'none',
+            border: 'none',
+            gap: '4px',
+            cursor: 'pointer',
+            padding: '0.25rem',
+            flex: 1
+          }}
+        >
+          <Shield size={20} color={currentView === 'private' ? '#EF4444' : 'var(--text-muted)'} style={{ color: currentView === 'private' ? '#EF4444' : 'var(--text-muted)' }} />
+          <span style={{
+            fontSize: '0.65rem',
+            fontWeight: currentView === 'private' ? 700 : 500,
+            color: currentView === 'private' ? '#EF4444' : 'var(--text-muted)',
+            fontFamily: 'var(--font-heading)'
+          }}>Vault</span>
+        </button>
+
+        <button 
+          onClick={() => setCurrentView('settings')}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'none',
+            border: 'none',
+            gap: '4px',
+            cursor: 'pointer',
+            padding: '0.25rem',
+            flex: 1
+          }}
+        >
+          <SettingsIcon size={20} color={currentView === 'settings' ? 'var(--color-active-nav)' : 'var(--text-muted)'} style={{ color: currentView === 'settings' ? 'var(--color-active-nav)' : 'var(--text-muted)' }} />
+          <span style={{
+            fontSize: '0.65rem',
+            fontWeight: currentView === 'settings' ? 700 : 500,
+            color: currentView === 'settings' ? 'var(--color-active-nav)' : 'var(--text-muted)',
+            fontFamily: 'var(--font-heading)'
+          }}>Settings</span>
+        </button>
+      </div>
+
     </div>
   );
 }
