@@ -17,6 +17,7 @@ export interface MockUser {
   domain: string;
   workspaceName: string;
   is_premium?: boolean;
+  is_superadmin?: boolean;
 }
 
 // Wrapper object for direct auth and database operations
@@ -51,7 +52,8 @@ export const mockAuth = {
       email: data.user?.email || email,
       name: name || email.split('@')[0],
       workspaceName,
-      domain
+      domain,
+      is_superadmin: false
     };
 
     return { data: { user }, error: null };
@@ -80,7 +82,8 @@ export const mockAuth = {
       name: profile?.name || email.split('@')[0].split('.').map((n: string) => n.charAt(0).toUpperCase() + n.slice(1)).join(' '),
       domain: profile?.domain || domain,
       workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
-      is_premium: profile?.is_premium || false
+      is_premium: profile?.is_premium || false,
+      is_superadmin: profile?.is_superadmin || false
     };
 
     return { data: { user }, error: null };
@@ -132,7 +135,8 @@ export const mockAuth = {
         name: profile?.name || name || `Phone User (${phone})`,
         workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
         domain: profile?.domain || 'phone.giinmeet.com',
-        is_premium: profile?.is_premium || false
+        is_premium: profile?.is_premium || false,
+        is_superadmin: profile?.is_superadmin || false
       };
 
       return { data: { user }, error: null };
@@ -145,7 +149,8 @@ export const mockAuth = {
         name: name || `Phone User (${phone})`,
         workspaceName: customWorkspaceName || 'Personal Workspace',
         domain: 'phone.giinmeet.com',
-        is_premium: false
+        is_premium: false,
+        is_superadmin: false
       };
       return { data: { user }, error: null };
     }
@@ -184,11 +189,17 @@ export const mockAuth = {
     return data || [];
   },
 
-  // Save new meeting
+  // Save new meeting with auto-generated passcode
   createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string }) => {
+    const passcode = Math.random().toString(36).substr(2, 6).toUpperCase();
+    const payload = {
+      ...meeting,
+      passcode,
+      admin_id: meeting.user_id
+    };
     const { data, error } = await supabase
       .from('meetings')
-      .insert([meeting])
+      .insert([payload])
       .select()
       .single();
     if (error) {
@@ -250,6 +261,128 @@ export const mockAuth = {
       console.warn('[Supabase Client] Failed to fetch workspace contacts.', error.message);
       return [];
     }
+    return data || [];
+  },
+
+  // Fetch meeting details (passcode verification)
+  getMeetingDetails: async (meetingId: string) => {
+    const { data, error } = await supabase
+      .from('meetings')
+      .select('*')
+      .eq('id', meetingId)
+      .maybeSingle();
+    return { data, error };
+  },
+
+  // Add participant to Waiting Room
+  joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant') => {
+    const { data, error } = await supabase
+      .from('meeting_participants')
+      .insert([{
+        meeting_id: meetingId,
+        user_id: userId || null,
+        name: name,
+        status: role === 'Admin' ? 'Admitted' : 'Waiting',
+        role: role
+      }])
+      .select()
+      .single();
+    if (error) {
+      console.warn('[Supabase Client] Failed to join waitroom:', error.message);
+    }
+    return data;
+  },
+
+  // Check waiting status for participant
+  checkParticipantStatus: async (participantId: string) => {
+    const { data } = await supabase
+      .from('meeting_participants')
+      .select('status')
+      .eq('id', participantId)
+      .maybeSingle();
+    return data?.status || 'Waiting';
+  },
+
+  // Get waiting participants for Host approval
+  getWaitingParticipants: async (meetingId: string) => {
+    const { data } = await supabase
+      .from('meeting_participants')
+      .select('*')
+      .eq('meeting_id', meetingId)
+      .eq('status', 'Waiting')
+      .order('updated_at', { ascending: true });
+    return data || [];
+  },
+
+  // Update participant status (Admit/Decline)
+  updateParticipantStatus: async (participantId: string, status: 'Admitted' | 'Declined') => {
+    const { data, error } = await supabase
+      .from('meeting_participants')
+      .update({ status, updated_at: new Date() })
+      .eq('id', participantId);
+    return { data, error };
+  },
+
+  // Get active admitted participants in the call room
+  getAdmittedParticipants: async (meetingId: string) => {
+    const { data } = await supabase
+      .from('meeting_participants')
+      .select('*')
+      .eq('meeting_id', meetingId)
+      .eq('status', 'Admitted');
+    return data || [];
+  },
+
+  // Change meeting admin / designate new host
+  changeMeetingAdmin: async (meetingId: string, newAdminId: string) => {
+    const { data, error } = await supabase
+      .from('meetings')
+      .update({ admin_id: newAdminId })
+      .eq('id', meetingId);
+    return { data, error };
+  },
+
+  // Get all users in the system (for Superadmin)
+  getAllProfiles: async () => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('name', { ascending: true });
+    return data || [];
+  },
+
+  // Update profile superadmin designation
+  updateProfileSuperadmin: async (userId: string, isSuperadmin: boolean) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ is_superadmin: isSuperadmin })
+      .eq('id', userId);
+    return { data, error };
+  },
+
+  // Delete a user profile/account
+  deleteProfile: async (userId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', userId);
+    return { data, error };
+  },
+
+  // Toggle user Pro/Premium plan limits
+  toggleProfilePremium: async (userId: string, isPremium: boolean) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ is_premium: isPremium })
+      .eq('id', userId);
+    return { data, error };
+  },
+
+  // Get all meetings (for Superadmin stats)
+  getAllMeetings: async () => {
+    const { data } = await supabase
+      .from('meetings')
+      .select('*');
     return data || [];
   }
 };

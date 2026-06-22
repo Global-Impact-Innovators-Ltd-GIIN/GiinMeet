@@ -8,6 +8,7 @@ import { WorkspacePanel } from './WorkspacePanel';
 
 interface Participant {
   id: string;
+  userId?: string;
   name: string;
   avatar: string;
   role: string;
@@ -29,13 +30,17 @@ export const getWebRTCScreenshareConstraints = () => {
   };
 };
 
+import { mockAuth } from '../supabaseClient';
+
 interface MeetingRoomProps {
+  meetingId: string;
   meetingTitle: string;
   onEndMeeting: () => void;
   onSaveWorkspaceData?: (notes: string, actionItemsCount: number) => void;
+  currentUser: { id: string; name: string; email: string } | null;
 }
 
-export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMeeting, onSaveWorkspaceData }) => {
+export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitle, onEndMeeting, onSaveWorkspaceData, currentUser }) => {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(true);
@@ -44,6 +49,74 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
   const [isAnnotating, setIsAnnotating] = useState(false);
   const [isColleagueSharing, setIsColleagueSharing] = useState(false);
   const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace'>('none');
+
+  // Waiting list and role delegation states
+  const [meetingAdminId, setMeetingAdminId] = useState<string>('');
+  const [passcode, setPasscode] = useState<string>('');
+  const [waitingList, setWaitingList] = useState<any[]>([]);
+  const isAdmin = currentUser && meetingAdminId === currentUser.id;
+
+  // Load meeting details (admin_id and passcode)
+  useEffect(() => {
+    const loadDetails = async () => {
+      try {
+        const { data } = await mockAuth.getMeetingDetails(meetingId);
+        if (data) {
+          setMeetingAdminId(data.admin_id || '');
+          setPasscode(data.passcode || '');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    loadDetails();
+  }, [meetingId]);
+
+  // Admins periodically poll for waiting participants
+  useEffect(() => {
+    if (!isAdmin) return;
+    const checkWaitroom = async () => {
+      try {
+        const list = await mockAuth.getWaitingParticipants(meetingId);
+        setWaitingList(list);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    checkWaitroom();
+    const interval = setInterval(checkWaitroom, 4000);
+    return () => clearInterval(interval);
+  }, [meetingId, isAdmin]);
+
+  // Handle host admission action
+  const handleAdmitParticipant = async (participantId: string, status: 'Admitted' | 'Declined') => {
+    try {
+      await mockAuth.updateParticipantStatus(participantId, status);
+      setWaitingList(prev => prev.filter(p => p.id !== participantId));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Delegate admin host rights to another user
+  const handleDesignateAdmin = async (targetUserId: string) => {
+    if (!confirm('Are you sure you want to designate this user as the meeting admin? You will transfer host settings.')) return;
+    try {
+      await mockAuth.changeMeetingAdmin(meetingId, targetUserId);
+      setMeetingAdminId(targetUserId);
+      alert('Meeting administrator transferred successfully!');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Share link and passcode
+  const handleCopyCredentials = () => {
+    const link = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
+    const text = `Join my GIIN MEET call:\nTitle: ${meetingTitle}\nLink: ${link}\nPasscode: ${passcode}`;
+    navigator.clipboard.writeText(text);
+    alert('Meeting credentials (link & passcode) copied to clipboard!');
+  };
   
   const colleagueCanvasRef = useRef<HTMLCanvasElement | null>(null);
   
@@ -332,6 +405,47 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
 
       {/* Main workspace (Grid & Panels) */}
       <div style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}>
+        
+        {/* Waiting Room Alert Overlay for Hosts */}
+        {isAdmin && waitingList.length > 0 && (
+          <div style={{
+            position: 'absolute',
+            top: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: '#00205B',
+            border: '1px solid var(--color-accent)',
+            color: 'white',
+            padding: '0.75rem 1.5rem',
+            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '1.5rem',
+            zIndex: 100,
+            boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
+            animation: 'pop-in 0.3s ease'
+          }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+              {waitingList[0].name} is waiting in the waiting room.
+            </span>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button 
+                onClick={() => handleAdmitParticipant(waitingList[0].id, 'Admitted')}
+                className="premium-btn premium-btn-accent" 
+                style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
+              >
+                Admit
+              </button>
+              <button 
+                onClick={() => handleAdmitParticipant(waitingList[0].id, 'Declined')}
+                className="premium-btn premium-btn-danger" 
+                style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px', backgroundColor: '#EF4444' }}
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        )}
         
         {/* Grid Container */}
         <div className="meeting-grid" style={{
@@ -745,7 +859,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
                   </div>
                   <div>
                     <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>You</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Host</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{isAdmin ? 'Host/Admin' : 'Participant'}</div>
                   </div>
                 </div>
                 <div>
@@ -757,7 +871,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
               {participants.map(p => (
                 <div key={p.id} className="flex-between">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: p.avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '0.85rem' }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: p.avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '0.85rem', color: 'white' }}>
                       {p.avatar}
                     </div>
                     <div>
@@ -767,6 +881,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     {p.isSpeaking && !p.isMuted && <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', animation: 'pulse-ring 2s infinite' }} />}
+                    {isAdmin && p.userId && (
+                      <button 
+                        onClick={() => handleDesignateAdmin(p.userId!)}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, marginRight: '6px' }}
+                        title="Designate Admin"
+                      >
+                        Make Admin
+                      </button>
+                    )}
                     {p.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />}
                   </div>
                 </div>
@@ -801,7 +924,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
         {/* Left Side details */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
           <span>ID: </span>
-          <span style={{ color: 'white', fontWeight: 500 }}>giin-abc-xyz</span>
+          <span style={{ color: 'white', fontWeight: 500 }}>{meetingId.slice(0, 8)}</span>
+          <button 
+            onClick={handleCopyCredentials}
+            className="premium-btn premium-btn-secondary" 
+            style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            title="Copy link and passcode to clipboard"
+          >
+            Share
+          </button>
         </div>
 
         {/* Center Controls */}
@@ -980,11 +1111,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
               borderRadius: 'var(--radius-sm)',
               fontSize: '0.85rem',
               fontWeight: 600,
-              gap: '0.35rem'
+              gap: '0.35rem',
+              backgroundColor: '#EF4444'
             }}
           >
             <PhoneOff size={16} />
-            <span className="hide-mobile-text">End Call</span>
+            <span className="hide-mobile-text">{isAdmin ? 'End for All' : 'Leave Call'}</span>
           </button>
         </div>
       </div>

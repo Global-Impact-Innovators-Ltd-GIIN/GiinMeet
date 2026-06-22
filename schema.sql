@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   domain TEXT DEFAULT 'personal',
   phone TEXT,
   is_premium BOOLEAN DEFAULT false,
+  is_superadmin BOOLEAN DEFAULT false,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
@@ -38,7 +39,9 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   host TEXT,
   notes TEXT,
   action_items_count INTEGER DEFAULT 0,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  passcode TEXT,
+  admin_id UUID REFERENCES auth.users(id) ON DELETE SET NULL
 );
 
 -- Enable RLS on Meetings
@@ -128,3 +131,34 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 5. MEETING PARTICIPANTS TABLE (Waiting Room & Admission Status)
+CREATE TABLE IF NOT EXISTS public.meeting_participants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  meeting_id UUID NOT NULL REFERENCES public.meetings(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  status TEXT CHECK (status IN ('Waiting', 'Admitted', 'Declined')) DEFAULT 'Waiting',
+  role TEXT CHECK (role IN ('Admin', 'Participant')) DEFAULT 'Participant',
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- Enable RLS on meeting participants
+ALTER TABLE public.meeting_participants ENABLE ROW LEVEL SECURITY;
+
+-- Select policy: Allow anyone to view participant status (required for waiting room checks)
+CREATE POLICY "Allow public read access to meeting participants"
+  ON public.meeting_participants FOR SELECT USING (true);
+
+-- Insert policy: Allow anyone to add themselves to waitroom
+CREATE POLICY "Allow public insert access to meeting participants"
+  ON public.meeting_participants FOR INSERT WITH CHECK (true);
+
+-- Update policy: Allow anyone to update status (updates done by hosts, or users toggling role)
+CREATE POLICY "Allow public update access to meeting participants"
+  ON public.meeting_participants FOR UPDATE USING (true);
+
+-- MIGRATION STATEMENTS FOR EXISTING DATABASES
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN DEFAULT false;
+ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS passcode TEXT;
+ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS admin_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;

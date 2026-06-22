@@ -12,6 +12,8 @@ import { Billing } from './components/Billing';
 import { HelpCenter } from './components/HelpCenter';
 import { Auth } from './components/Auth';
 import { PrivateSpace } from './components/PrivateSpace';
+import { Waitroom } from './components/Waitroom';
+import { Superadmin } from './components/Superadmin';
 import { mockAuth, supabase } from './supabaseClient';
 
 interface Meeting {
@@ -25,10 +27,12 @@ interface Meeting {
 
 function App() {
   // Authentication & Directory Discovery
-  const [user, setUser] = useState<{ id: string; email: string; name: string; workspaceName: string; domain: string } | null>(() => {
+  const [user, setUser] = useState<{ id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean } | null>(() => {
     const saved = localStorage.getItem('giin_user');
     return saved ? JSON.parse(saved) : null;
   });
+
+  const [joinMeetingData, setJoinMeetingData] = useState<{ meetingId: string; passcode: string } | null>(null);
 
   // Navigation & Theme
   const [currentView, setCurrentView] = useState<string>(() => {
@@ -53,6 +57,25 @@ function App() {
   const [meetingHistory, setMeetingHistory] = useState<Meeting[]>([]);
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
 
+  // Hash query router listener
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash;
+      if (hash.startsWith('#/join')) {
+        const urlParams = new URLSearchParams(hash.split('?')[1]);
+        const id = urlParams.get('id') || '';
+        const passcode = urlParams.get('passcode') || '';
+        if (id) {
+          setJoinMeetingData({ meetingId: id, passcode });
+          setCurrentView('join');
+        }
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    handleHashChange();
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
   // Sync session and fetch profile details on load
   useEffect(() => {
     const checkSession = async () => {
@@ -65,7 +88,8 @@ function App() {
           email: session.user.email || '',
           name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User',
           workspaceName: profile?.workspace_name || session.user.user_metadata?.workspace_name || 'Personal Workspace',
-          domain: profile?.domain || domain
+          domain: profile?.domain || domain,
+          is_superadmin: profile?.is_superadmin || false
         };
         setUser(authenticatedUser);
         setUserName(authenticatedUser.name);
@@ -85,7 +109,8 @@ function App() {
           email: session.user.email || '',
           name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User',
           workspaceName: profile?.workspace_name || session.user.user_metadata?.workspace_name || 'Personal Workspace',
-          domain: profile?.domain || domain
+          domain: profile?.domain || domain,
+          is_superadmin: profile?.is_superadmin || false
         };
         setUser(authenticatedUser);
         setUserName(authenticatedUser.name);
@@ -266,7 +291,7 @@ function App() {
     setNotifications(prev => [newNotif, ...prev]);
   };
 
-  const handleAuthSuccess = (authenticatedUser: { id: string; email: string; name: string; workspaceName: string; domain: string }) => {
+  const handleAuthSuccess = (authenticatedUser: { id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean }) => {
     setUser(authenticatedUser);
     setUserName(authenticatedUser.name);
     setUserEmail(authenticatedUser.email);
@@ -343,6 +368,27 @@ function App() {
   };
 
   const unreadNotifCount = notifications.filter(n => !n.read).length;
+
+  if (currentView === 'join' && joinMeetingData) {
+    return (
+      <Waitroom 
+        meetingId={joinMeetingData.meetingId}
+        initialPasscode={joinMeetingData.passcode}
+        user={user}
+        onAdmitted={(title, _participantId) => {
+          setActiveCallTitle(title);
+          setActiveMeetingId(joinMeetingData.meetingId);
+          setCurrentView('meeting');
+        }}
+        onDeclined={() => {
+          setCurrentView(user ? 'dashboard' : 'auth');
+        }}
+        onBack={() => {
+          setCurrentView(user ? 'dashboard' : 'auth');
+        }}
+      />
+    );
+  }
 
   if (user === null) {
     return <Auth onAuthSuccess={handleAuthSuccess} />;
@@ -538,6 +584,32 @@ function App() {
               <HelpCircle size={18} />
               <span>Help & Support</span>
             </button>
+
+            {/* Superadmin Portal Link */}
+            {user?.is_superadmin && (
+              <button 
+                onClick={() => setCurrentView('superadmin')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: currentView === 'superadmin' ? '1px solid var(--color-accent)' : 'none',
+                  background: currentView === 'superadmin' ? 'rgba(250, 189, 2, 0.15)' : 'transparent',
+                  color: currentView === 'superadmin' ? 'var(--color-accent)' : 'rgba(255,255,255,0.7)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontWeight: currentView === 'superadmin' ? 700 : 400,
+                  fontSize: '0.95rem',
+                  width: '100%',
+                  transition: 'all var(--transition-fast)'
+                }}
+              >
+                <Shield size={18} color={currentView === 'superadmin' ? 'var(--color-accent)' : 'rgba(255,255,255,0.6)'} />
+                <span>Superadmin Portal</span>
+              </button>
+            )}
 
             {/* Settings Link */}
             <button 
@@ -878,11 +950,13 @@ function App() {
             />
           )}
 
-          {currentView === 'meeting' && (
+          {currentView === 'meeting' && activeMeetingId && (
             <MeetingRoom 
+              meetingId={activeMeetingId}
               meetingTitle={activeCallTitle || 'GIIN MEET Video Room'}
               onEndMeeting={handleEndMeeting}
               onSaveWorkspaceData={handleSaveWorkspaceData}
+              currentUser={user}
             />
           )}
 
@@ -929,6 +1003,10 @@ function App() {
               onUpgradeSuccess={handleUpgradeSuccess}
               onDowngrade={handleDowngrade}
             />
+          )}
+
+          {currentView === 'superadmin' && (
+            <Superadmin />
           )}
 
           {currentView === 'help' && (
