@@ -12,6 +12,7 @@ import { Billing } from './components/Billing';
 import { HelpCenter } from './components/HelpCenter';
 import { Auth } from './components/Auth';
 import { PrivateSpace } from './components/PrivateSpace';
+import { mockAuth, supabase } from './supabaseClient';
 
 interface Meeting {
   id: string;
@@ -24,7 +25,7 @@ interface Meeting {
 
 function App() {
   // Authentication & Directory Discovery
-  const [user, setUser] = useState<{ email: string; name: string; workspaceName: string; domain: string } | null>(() => {
+  const [user, setUser] = useState<{ id: string; email: string; name: string; workspaceName: string; domain: string } | null>(() => {
     const saved = localStorage.getItem('giin_user');
     return saved ? JSON.parse(saved) : null;
   });
@@ -49,16 +50,104 @@ function App() {
   });
 
   // Meeting History State
-  const [meetingHistory, setMeetingHistory] = useState<Meeting[]>(() => {
-    const saved = localStorage.getItem('giin_meetings');
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: '1', title: 'Vite React Architecture Review', time: 'June 21, 2026 3:30 PM', duration: '45 mins', status: 'Completed', host: 'Lucas Lima' },
-      { id: '2', title: 'UI/UX Interactive Mockups Sync', time: 'June 21, 2026 6:00 PM', duration: '30 mins', status: 'Completed', host: 'Theresa Watson' },
-      { id: '3', title: 'GIIN MEET Pro Release Demo', time: 'June 21, 2026 8:00 PM', duration: 'Remaining: 15m', status: 'In Progress', host: 'You' },
-      { id: '4', title: 'Marketing Virtualization Launch', time: 'June 22, 2026 10:00 AM', duration: '1 hour', status: 'Scheduled', host: 'Sofia Brant' }
-    ];
-  });
+  const [meetingHistory, setMeetingHistory] = useState<Meeting[]>([]);
+  const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+
+  // Sync session and fetch profile details on load
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const { data: profile } = await mockAuth.getProfile(session.user.id);
+        const domain = session.user.email?.split('@')[1] || 'personal';
+        const authenticatedUser = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User',
+          workspaceName: profile?.workspace_name || session.user.user_metadata?.workspace_name || 'Personal Workspace',
+          domain: profile?.domain || domain
+        };
+        setUser(authenticatedUser);
+        setUserName(authenticatedUser.name);
+        setUserEmail(authenticatedUser.email);
+        setIsPremium(profile?.is_premium || false);
+      }
+    };
+    checkSession();
+
+    // Listen to real auth session state updates
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
+      if (session?.user) {
+        const { data: profile } = await mockAuth.getProfile(session.user.id);
+        const domain = session.user.email?.split('@')[1] || 'personal';
+        const authenticatedUser = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User',
+          workspaceName: profile?.workspace_name || session.user.user_metadata?.workspace_name || 'Personal Workspace',
+          domain: profile?.domain || domain
+        };
+        setUser(authenticatedUser);
+        setUserName(authenticatedUser.name);
+        setUserEmail(authenticatedUser.email);
+        setIsPremium(profile?.is_premium || false);
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Fetch meetings from Supabase database when user updates
+  useEffect(() => {
+    if (user && user.id) {
+      const loadMeetings = async () => {
+        try {
+          const data = await mockAuth.getMeetings(user.id);
+          if (data && data.length > 0) {
+            const mapped: Meeting[] = data.map((m: any) => ({
+              id: m.id,
+              title: m.title,
+              time: new Date(m.time).toLocaleString(),
+              duration: m.duration || '40m limit',
+              status: m.status as 'Completed' | 'In Progress' | 'Scheduled',
+              host: m.host || 'You'
+            }));
+            setMeetingHistory(mapped);
+          } else {
+            // Setup default database seed meetings for fresh workspace
+            const seedMeetings = [
+              { user_id: user.id, title: 'Vite React Architecture Review', time: new Date(Date.now() - 7200000).toISOString(), duration: '45 mins', status: 'Completed' as const, host: 'Lucas Lima' },
+              { user_id: user.id, title: 'UI/UX Interactive Mockups Sync', time: new Date(Date.now() - 3600000).toISOString(), duration: '30 mins', status: 'Completed' as const, host: 'Theresa Watson' },
+              { user_id: user.id, title: 'GIIN MEET Pro Release Demo', time: new Date().toISOString(), duration: 'Remaining: 15m', status: 'In Progress' as const, host: 'You' },
+              { user_id: user.id, title: 'Marketing Virtualization Launch', time: new Date(Date.now() + 86400000).toISOString(), duration: '1 hour', status: 'Scheduled' as const, host: 'Sofia Brant' }
+            ];
+            const saved: Meeting[] = [];
+            for (const meet of seedMeetings) {
+              const res = await mockAuth.createMeeting(meet);
+              if (res) {
+                saved.push({
+                  id: res.id,
+                  title: res.title,
+                  time: new Date(res.time).toLocaleString(),
+                  duration: res.duration || '40m limit',
+                  status: res.status as 'Completed' | 'In Progress' | 'Scheduled',
+                  host: res.host || 'You'
+                });
+              }
+            }
+            setMeetingHistory(saved);
+          }
+        } catch (err) {
+          console.error('Failed to load meetings from database:', err);
+        }
+      };
+      loadMeetings();
+    }
+  }, [user]);
 
   // Active call states
   const [activeCallTitle, setActiveCallTitle] = useState<string | null>(null);
@@ -102,35 +191,96 @@ function App() {
     setIsDarkMode(!isDarkMode);
   };
 
-  const handleStartCall = (title?: string) => {
+  const handleStartCall = async (title?: string) => {
     const finalTitle = title || 'Instant Call';
     setActiveCallTitle(finalTitle);
     
-    // Add to history list as In Progress
-    const newMeet: Meeting = {
-      id: Math.random().toString(36).substr(2, 9),
-      title: finalTitle,
-      time: new Date().toLocaleString(),
-      duration: 'Active now',
-      status: 'In Progress',
-      host: 'You'
-    };
-    setMeetingHistory(prev => [newMeet, ...prev]);
+    if (user && user.id) {
+      try {
+        const newDbMeet = {
+          user_id: user.id,
+          title: finalTitle,
+          time: new Date().toISOString(),
+          duration: 'Active now',
+          status: 'In Progress',
+          host: user.name || 'You'
+        };
+        const saved = await mockAuth.createMeeting(newDbMeet);
+        if (saved) {
+          setActiveMeetingId(saved.id);
+          const mapped: Meeting = {
+            id: saved.id,
+            title: saved.title,
+            time: new Date(saved.time).toLocaleString(),
+            duration: saved.duration || 'Active now',
+            status: saved.status as 'Completed' | 'In Progress' | 'Scheduled',
+            host: saved.host || 'You'
+          };
+          setMeetingHistory(prev => [mapped, ...prev]);
+        }
+      } catch (err) {
+        console.error('Failed to create instant meeting in database:', err);
+      }
+    } else {
+      const newMeet: Meeting = {
+        id: Math.random().toString(36).substr(2, 9),
+        title: finalTitle,
+        time: new Date().toLocaleString(),
+        duration: 'Active now',
+        status: 'In Progress',
+        host: 'You'
+      };
+      setMeetingHistory(prev => [newMeet, ...prev]);
+    }
     setCurrentView('meeting');
   };
 
-  const handleEndMeeting = () => {
+  const handleEndMeeting = async () => {
     setActiveCallTitle(null);
-    // Update meeting history records to Completed
+    if (activeMeetingId) {
+      try {
+        await mockAuth.updateMeetingNotes(activeMeetingId, 'Meeting completed successfully.', 0, 'Completed');
+      } catch (err) {
+        console.error('Failed to update end status of meeting in database:', err);
+      }
+      setActiveMeetingId(null);
+    }
     setMeetingHistory(prev => 
       prev.map(m => m.status === 'In Progress' ? { ...m, status: 'Completed', duration: 'Ended call' } : m)
     );
     setCurrentView('dashboard');
   };
 
-  const handleAddMeeting = (meet: Meeting) => {
-    setMeetingHistory(prev => [meet, ...prev]);
-    // Add notification
+  const handleAddMeeting = async (meet: Meeting) => {
+    if (user && user.id) {
+      try {
+        const newDbMeet = {
+          user_id: user.id,
+          title: meet.title,
+          time: new Date(meet.time).toISOString(),
+          duration: meet.duration,
+          status: 'Scheduled',
+          host: user.name || 'You'
+        };
+        const saved = await mockAuth.createMeeting(newDbMeet);
+        if (saved) {
+          const mapped: Meeting = {
+            id: saved.id,
+            title: saved.title,
+            time: new Date(saved.time).toLocaleString(),
+            duration: saved.duration || '40m limit',
+            status: 'Scheduled',
+            host: saved.host || 'You'
+          };
+          setMeetingHistory(prev => [mapped, ...prev]);
+        }
+      } catch (err) {
+        console.error('Failed to schedule meeting in database:', err);
+      }
+    } else {
+      setMeetingHistory(prev => [meet, ...prev]);
+    }
+
     const newNotif = {
       id: Math.random().toString(36).substr(2, 9),
       text: `Scheduled new meeting: "${meet.title}"`,
@@ -140,7 +290,7 @@ function App() {
     setNotifications(prev => [newNotif, ...prev]);
   };
 
-  const handleAuthSuccess = (authenticatedUser: { email: string; name: string; workspaceName: string; domain: string }) => {
+  const handleAuthSuccess = (authenticatedUser: { id: string; email: string; name: string; workspaceName: string; domain: string }) => {
     setUser(authenticatedUser);
     setUserName(authenticatedUser.name);
     setUserEmail(authenticatedUser.email);
@@ -158,7 +308,7 @@ function App() {
     setCurrentView('dashboard');
   };
 
-  const handleSaveWorkspaceData = (_notes: string, actionItemsCount: number) => {
+  const handleSaveWorkspaceData = async (notes: string, actionItemsCount: number) => {
     const newNotif = {
       id: Math.random().toString(36).substr(2, 9),
       text: `Synced collaborative notes: Saved ${actionItemsCount} action tasks.`,
@@ -166,6 +316,14 @@ function App() {
       read: false
     };
     setNotifications(prev => [newNotif, ...prev]);
+
+    if (activeMeetingId) {
+      try {
+        await mockAuth.updateMeetingNotes(activeMeetingId, notes, actionItemsCount);
+      } catch (err) {
+        console.error('Failed to update meeting notes in database:', err);
+      }
+    }
 
     setMeetingHistory(prev => 
       prev.map(m => m.status === 'In Progress' ? { ...m, duration: `Saved notes (${actionItemsCount} tasks)` } : m)
@@ -460,7 +618,12 @@ function App() {
           </div>
 
           <button 
-            onClick={() => {
+            onClick={async () => {
+              try {
+                await supabase.auth.signOut();
+              } catch (err) {
+                console.warn('Signout issue:', err);
+              }
               localStorage.clear();
               window.location.reload();
             }}
@@ -735,6 +898,7 @@ function App() {
               onStartMeeting={handleStartCall}
               meetingHistory={meetingHistory}
               onAddMeeting={handleAddMeeting}
+              userName={user?.name || userName}
             />
           )}
 
@@ -769,6 +933,7 @@ function App() {
               initialTargetContact={targetContactName}
               onClearTargetContact={() => setTargetContactName(null)}
               onStartMeeting={handleStartCall}
+              user={user}
             />
           )}
 

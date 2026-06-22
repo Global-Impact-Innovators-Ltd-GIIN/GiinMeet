@@ -16,6 +16,7 @@ interface DashboardProps {
   onStartMeeting: (title?: string) => void;
   meetingHistory: Meeting[];
   onAddMeeting: (meeting: Meeting) => void;
+  userName: string;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -24,6 +25,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onStartMeeting,
   meetingHistory,
   onAddMeeting,
+  userName,
 }) => {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -68,7 +70,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {/* Welcome Banner */}
       <div style={{ marginBottom: '2rem' }}>
         <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '0.5rem', fontFamily: 'var(--font-heading)' }}>
-          Welcome back, <span style={{ color: 'var(--color-secondary)' }}>Giin User</span>
+          Welcome back, <span style={{ color: 'var(--color-secondary)' }}>{userName}</span>
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '1.05rem' }}>
           Connect, collaborate, and virtualize with HD audio and video.

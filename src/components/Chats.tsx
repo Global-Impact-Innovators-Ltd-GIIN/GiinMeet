@@ -3,6 +3,7 @@ import {
   Send, Smile, Paperclip, Search, PlusCircle, MoreVertical, 
   Video, CheckCheck, ArrowLeft
 } from 'lucide-react';
+import { mockAuth } from '../supabaseClient';
 
 interface Message {
   id: string;
@@ -26,12 +27,14 @@ interface ChatsProps {
   initialTargetContact?: string | null;
   onClearTargetContact?: () => void;
   onStartMeeting: (title: string) => void;
+  user: { id: string; email: string; name: string; workspaceName: string; domain: string } | null;
 }
 
 export const Chats: React.FC<ChatsProps> = ({ 
   initialTargetContact, 
   onClearTargetContact,
-  onStartMeeting
+  onStartMeeting,
+  user
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeThreadId, setActiveThreadId] = useState<string>('group');
@@ -135,16 +138,46 @@ export const Chats: React.FC<ChatsProps> = ({
     scrollToBottom();
   }, [threads, isTyping]);
 
+  // Load messages from Supabase when activeThreadId changes
+  useEffect(() => {
+    const loadMessages = async () => {
+      try {
+        const dbMessages = await mockAuth.getMessages(activeThreadId);
+        if (dbMessages && dbMessages.length > 0) {
+          const mapped: Message[] = dbMessages.map((m: any) => ({
+            id: m.id,
+            sender: m.sender_name,
+            text: m.text,
+            time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            self: m.sender_name === 'You' || !!(user && m.user_id === user.id)
+          }));
+          setThreads(prev => 
+            prev.map(t => t.id === activeThreadId ? { ...t, messages: mapped } : t)
+          );
+        }
+      } catch (err) {
+        console.error('Error fetching messages from database:', err);
+      }
+    };
+    
+    loadMessages();
+  }, [activeThreadId, user]);
+
   const activeThread = threads.find(t => t.id === activeThreadId) || threads[0];
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
+    const currentText = chatInput;
+    setChatInput('');
+
+    // Generate unique random string for message ID (used locally before database saves)
+    const localId = Math.random().toString(36).substr(2, 9);
     const newMsg: Message = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: localId,
       sender: 'You',
-      text: chatInput,
+      text: currentText,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       self: true
     };
@@ -157,13 +190,24 @@ export const Chats: React.FC<ChatsProps> = ({
         return t;
       })
     );
-    setChatInput('');
+
+    // Save user message to Supabase
+    try {
+      await mockAuth.sendMessage({
+        thread_id: activeThreadId,
+        sender_name: 'You',
+        text: currentText,
+        user_id: user?.id || undefined
+      });
+    } catch (err) {
+      console.error('Failed to send user message to database:', err);
+    }
 
     // Trigger typing simulation
     setIsTyping(true);
 
     // Simulated responses based on the message content and thread
-    setTimeout(() => {
+    setTimeout(async () => {
       setIsTyping(false);
       
       let botResponse = 'Thank you for reaching out! Let\'s discuss this in detail.';
@@ -175,9 +219,10 @@ export const Chats: React.FC<ChatsProps> = ({
         botResponse = 'Awesome. I will notify the QA team to confirm. Thanks for the quick update!';
       }
 
+      const botSender = activeThread.name === 'My Project Team' ? 'Sarah Jenkins' : activeThread.name;
       const replyMsg: Message = {
         id: Math.random().toString(36).substr(2, 9),
-        sender: activeThread.name === 'My Project Team' ? 'Sarah Jenkins' : activeThread.name,
+        sender: botSender,
         text: botResponse,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         self: false
@@ -191,6 +236,17 @@ export const Chats: React.FC<ChatsProps> = ({
           return t;
         })
       );
+
+      // Save bot message to Supabase
+      try {
+        await mockAuth.sendMessage({
+          thread_id: activeThreadId,
+          sender_name: botSender,
+          text: botResponse
+        });
+      } catch (err) {
+        console.error('Failed to send bot response to database:', err);
+      }
     }, 2000);
   };
 
