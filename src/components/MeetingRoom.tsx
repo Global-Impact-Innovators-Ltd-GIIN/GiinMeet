@@ -48,10 +48,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
   const colleagueCanvasRef = useRef<HTMLCanvasElement | null>(null);
   
   // Chat state
-  const [messages, setMessages] = useState<{ sender: string; text: string; time: string; self: boolean }[]>([
-    { sender: 'Lucas Lima', text: 'Welcome everyone! Let us review the virtualization project details.', time: '10:02 AM', self: false },
-    { sender: 'Mariana Santos', text: 'Sounds good. Sarah, do you have the wireframes ready?', time: '10:03 AM', self: false },
-  ]);
+  const [messages, setMessages] = useState<{ sender: string; text: string; time: string; self: boolean }[]>([]);
   const [chatInput, setChatInput] = useState('');
   
   // Camera video ref
@@ -59,13 +56,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingTitle, onEndMee
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Initial participants
-  const [participants, setParticipants] = useState<Participant[]>([
-    { id: '1', name: 'Sarah Jenkins', role: 'UI/UX Designer', avatar: 'SJ', isMuted: false, isSpeaking: true, isVideoOn: true, avatarBg: '#7082BE' },
-    { id: '2', name: 'Lucas Lima', role: 'Tech Lead', avatar: 'LL', isMuted: false, isSpeaking: false, isVideoOn: true, avatarBg: '#00205B' },
-    { id: '3', name: 'Mariana Santos', role: 'Product Manager', avatar: 'MS', isMuted: true, isSpeaking: false, isVideoOn: false, avatarBg: '#FABD02' },
-    { id: '4', name: 'David Chen', role: 'QA Engineer', avatar: 'DC', isMuted: false, isSpeaking: false, isVideoOn: true, avatarBg: '#10B981' },
-    { id: '5', name: 'Sofia Brant', role: 'Marketing Specialist', avatar: 'SB', isMuted: true, isSpeaking: false, isVideoOn: true, avatarBg: '#EC4899' },
-  ]);
+  const [participants, setParticipants] = useState<Participant[]>([]);
 
   // Handle media devices (webcam)
   useEffect(() => {

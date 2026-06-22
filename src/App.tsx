@@ -118,28 +118,7 @@ function App() {
             }));
             setMeetingHistory(mapped);
           } else {
-            // Setup default database seed meetings for fresh workspace
-            const seedMeetings = [
-              { user_id: user.id, title: 'Vite React Architecture Review', time: new Date(Date.now() - 7200000).toISOString(), duration: '45 mins', status: 'Completed' as const, host: 'Lucas Lima' },
-              { user_id: user.id, title: 'UI/UX Interactive Mockups Sync', time: new Date(Date.now() - 3600000).toISOString(), duration: '30 mins', status: 'Completed' as const, host: 'Theresa Watson' },
-              { user_id: user.id, title: 'GIIN MEET Pro Release Demo', time: new Date().toISOString(), duration: 'Remaining: 15m', status: 'In Progress' as const, host: 'You' },
-              { user_id: user.id, title: 'Marketing Virtualization Launch', time: new Date(Date.now() + 86400000).toISOString(), duration: '1 hour', status: 'Scheduled' as const, host: 'Sofia Brant' }
-            ];
-            const saved: Meeting[] = [];
-            for (const meet of seedMeetings) {
-              const res = await mockAuth.createMeeting(meet);
-              if (res) {
-                saved.push({
-                  id: res.id,
-                  title: res.title,
-                  time: new Date(res.time).toLocaleString(),
-                  duration: res.duration || '40m limit',
-                  status: res.status as 'Completed' | 'In Progress' | 'Scheduled',
-                  host: res.host || 'You'
-                });
-              }
-            }
-            setMeetingHistory(saved);
+            setMeetingHistory([]);
           }
         } catch (err) {
           console.error('Failed to load meetings from database:', err);
@@ -156,10 +135,7 @@ function App() {
   const [targetContactName, setTargetContactName] = useState<string | null>(null);
 
   // Notifications State
-  const [notifications, setNotifications] = useState<{ id: string; text: string; time: string; read: boolean }[]>([
-    { id: 'n1', text: 'Theresa Watson invited you to join "UI/UX Interactive Mockups Sync"', time: '2 hours ago', read: false },
-    { id: 'n2', text: 'Upgrade to Pro to host unlimited meeting rooms', time: '5 hours ago', read: false }
-  ]);
+  const [notifications, setNotifications] = useState<{ id: string; text: string; time: string; read: boolean }[]>([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
 

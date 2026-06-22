@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Star, MessageSquare, Phone, Calendar, Mail, Smartphone, Briefcase, ArrowLeft } from 'lucide-react';
+import { mockAuth } from '../supabaseClient';
 
 interface Contact {
   id: string;
@@ -31,99 +32,52 @@ export const Contacts: React.FC<ContactsProps> = ({
   const [activeTab, setActiveTab] = useState<'all' | 'starred'>('all');
   const [showDetailsMobile, setShowDetailsMobile] = useState(false);
   
-  const [contacts, setContacts] = useState<Contact[]>([
-    {
-      id: '1',
-      name: 'Theresa Watson',
-      role: 'Lead Designer',
-      email: `theresa@${userDomain}`,
-      phone: '+1 (555) 234-5678',
-      avatar: 'TW',
-      avatarBg: '#00205B',
-      isStarred: true,
-      status: 'Online',
-      history: [
-        { type: 'Video Meeting', date: 'June 18, 2026', duration: '45 mins' },
-        { type: 'Chat Conversation', date: 'June 17, 2026' },
-        { type: 'Video Meeting', date: 'June 12, 2026', duration: '1h 10m' }
-      ]
-    },
-    {
-      id: '2',
-      name: 'Sarah Jenkins',
-      role: 'UI/UX Designer',
-      email: `sarah@${userDomain}`,
-      phone: '+1 (555) 345-6789',
-      avatar: 'SJ',
-      avatarBg: '#7082BE',
-      isStarred: false,
-      status: 'Online',
-      history: [
-        { type: 'Video Meeting', date: 'June 15, 2026', duration: '30 mins' },
-        { type: 'Chat Conversation', date: 'June 14, 2026' }
-      ]
-    },
-    {
-      id: '3',
-      name: 'Lucas Lima',
-      role: 'Tech Lead',
-      email: `lucas@${userDomain}`,
-      phone: '+1 (555) 456-7890',
-      avatar: 'LL',
-      avatarBg: '#FABD02',
-      isStarred: true,
-      status: 'In a Meeting',
-      history: [
-        { type: 'Video Meeting', date: 'June 19, 2026', duration: '1h 15m' },
-        { type: 'Video Meeting', date: 'June 16, 2026', duration: '55 mins' }
-      ]
-    },
-    {
-      id: '4',
-      name: 'Mariana Santos',
-      role: 'Product Manager',
-      email: `mariana@${userDomain}`,
-      phone: '+1 (555) 567-8901',
-      avatar: 'MS',
-      avatarBg: '#10B981',
-      isStarred: false,
-      status: 'Offline',
-      history: [
-        { type: 'Video Meeting', date: 'June 10, 2026', duration: '20 mins' }
-      ]
-    },
-    {
-      id: '5',
-      name: 'David Chen',
-      role: 'QA Engineer',
-      email: `david@${userDomain}`,
-      phone: '+1 (555) 678-9012',
-      avatar: 'DC',
-      avatarBg: '#EC4899',
-      isStarred: false,
-      status: 'Online',
-      history: [
-        { type: 'Chat Conversation', date: 'June 20, 2026' }
-      ]
-    },
-    {
-      id: '6',
-      name: 'Sofia Brant',
-      role: 'Marketing Specialist',
-      email: `sofia@${userDomain}`,
-      phone: '+1 (555) 789-0123',
-      avatar: 'SB',
-      avatarBg: '#8B5CF6',
-      isStarred: true,
-      status: 'Online',
-      history: [
-        { type: 'Video Meeting', date: 'June 14, 2026', duration: '40 mins' },
-        { type: 'Chat Conversation', date: 'June 12, 2026' }
-      ]
-    }
-  ]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [selectedContactId, setSelectedContactId] = useState<string>('');
 
-  const [selectedContactId, setSelectedContactId] = useState<string>('1');
+  useEffect(() => {
+    const loadWorkspaceContacts = async () => {
+      if (!userDomain) return;
+      try {
+        const dbProfiles = await mockAuth.getContacts(userDomain);
+        if (dbProfiles) {
+          const mapped: Contact[] = dbProfiles.map((p: any) => {
+            const avatar = p.name ? p.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
+            
+            // Generate a consistent HSL background color based on name/id hash
+            let hash = 0;
+            const nameToHash = p.name || 'User';
+            for (let i = 0; i < nameToHash.length; i++) {
+              hash = nameToHash.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const hue = Math.abs(hash % 360);
+            const avatarBg = `hsl(${hue}, 60%, 40%)`;
+
+            return {
+              id: p.id,
+              name: p.name || 'Phone User',
+              role: 'Workspace Member',
+              email: p.email || `${(p.name || 'user').toLowerCase().replace(/\s+/g, '')}@${userDomain}`,
+              phone: p.phone || 'N/A',
+              avatar: avatar,
+              avatarBg: avatarBg,
+              isStarred: false,
+              status: 'Online',
+              history: []
+            };
+          });
+          setContacts(mapped);
+          if (mapped.length > 0) {
+            setSelectedContactId(mapped[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to query workspace contacts:', err);
+      }
+    };
+
+    loadWorkspaceContacts();
+  }, [userDomain]);
 
   // Toggle favorite/starred
   const toggleStarred = (id: string, e: React.MouseEvent) => {
