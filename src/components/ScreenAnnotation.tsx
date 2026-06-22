@@ -34,11 +34,8 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter:
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
 
-  // Simulated remote cursors for high-fidelity virtualization
-  const [remoteCursors, setRemoteCursors] = useState<RemoteCursor[]>([
-    { name: 'Lucas Lima', x: 200, y: 150, color: '#7082BE', isDrawing: false },
-    { name: 'Sarah Jenkins', x: 400, y: 300, color: '#EC4899', isDrawing: false }
-  ]);
+  // Active remote cursors
+  const [remoteCursors] = useState<RemoteCursor[]>([]);
 
   const canvasWidth = 800;
   const canvasHeight = 450;
@@ -111,45 +108,9 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter:
     });
   }, [strokes, currentPoints, remoteCursors, drawColor, brushSize]);
 
-  // Simulate remote annotation updates (Lucas & Sarah commenting/drawing)
+  // Remote annotations listener (for future live data sync)
   useEffect(() => {
-    let frame = 0;
-    const interval = setInterval(() => {
-      frame++;
-      
-      // Update Lucas coordinates to circle around some layout point
-      const lucasAngle = frame * 0.1;
-      const lx = 250 + Math.cos(lucasAngle) * 80;
-      const ly = 180 + Math.sin(lucasAngle) * 40;
-
-      // Update Sarah coordinates to point at specific presentation locations
-      const sx = 450 + Math.sin(frame * 0.05) * 120;
-      const sy = 250 + Math.cos(frame * 0.08) * 80;
-
-      // Randomly simulate Sarah drawing key points
-      const isSarahDrawing = frame % 12 > 4;
-
-      setRemoteCursors([
-        { name: 'Lucas Lima (Spotlight)', x: lx, y: ly, color: 'var(--color-accent)', isDrawing: true },
-        { name: 'Sarah Jenkins', x: sx, y: sy, color: '#EC4899', isDrawing: isSarahDrawing }
-      ]);
-
-      if (isSarahDrawing && frame % 12 === 5) {
-        // Sarah begins drawing a line
-        const remoteStroke: Stroke = {
-          points: [
-            { x: sx - 20, y: sy - 10 },
-            { x: sx, y: sy },
-            { x: sx + 20, y: sy + 15 }
-          ],
-          color: '#EC4899',
-          size: 2
-        };
-        setStrokes(prev => [...prev, remoteStroke]);
-      }
-    }, 250);
-
-    return () => clearInterval(interval);
+    // Sync hooks can be added here for WebRTC datachannel/realtime channel draw updates
   }, []);
 
   const getCoordinates = (e: React.MouseEvent<HTMLCanvasElement>): Point => {

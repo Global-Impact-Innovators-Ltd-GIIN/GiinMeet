@@ -57,9 +57,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
   const [meetingAdminId, setMeetingAdminId] = useState<string>('');
   const [passcode, setPasscode] = useState<string>('');
   const [waitingList, setWaitingList] = useState<any[]>([]);
+  const [initialNotes, setInitialNotes] = useState<string>('');
   const isAdmin = currentUser && meetingAdminId === currentUser.id;
 
-  // Load meeting details (admin_id and passcode)
+  // Load meeting details (admin_id, passcode, and notes)
   useEffect(() => {
     const loadDetails = async () => {
       try {
@@ -67,6 +68,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
         if (data) {
           setMeetingAdminId(data.admin_id || '');
           setPasscode(data.passcode || '');
+          setInitialNotes(data.notes || '');
         }
       } catch (err) {
         console.error(err);
@@ -74,6 +76,33 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
     };
     loadDetails();
   }, [meetingId]);
+
+  // Poll live chat messages from database
+  useEffect(() => {
+    const loadMessages = async () => {
+      try {
+        const list = await mockAuth.getMessages(meetingId);
+        if (list) {
+          const mapped = list.map((msg: any) => {
+            const isSelf = currentUser ? (msg.user_id === currentUser.id) : false;
+            return {
+              sender: msg.sender_name,
+              text: msg.text,
+              time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              self: isSelf
+            };
+          });
+          setMessages(mapped);
+        }
+      } catch (err) {
+        console.error('Failed to load call messages:', err);
+      }
+    };
+
+    loadMessages();
+    const interval = setInterval(loadMessages, 3000);
+    return () => clearInterval(interval);
+  }, [meetingId, currentUser]);
 
   // Load admitted participants from database periodically
   useEffect(() => {
@@ -416,17 +445,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
             ctx.fillText(line, 30, 50 + idx * 20);
           });
 
-          // Draw laser cursor
-          const cy = 100 + Math.sin(frame * 0.05) * 50;
-          ctx.fillStyle = '#EF4444';
-          ctx.beginPath();
-          ctx.arc(150, cy, 6, 0, 2 * Math.PI);
-          ctx.fill();
-
-          ctx.fillStyle = '#EF4444';
-          ctx.font = '10px sans-serif';
-          ctx.fillText('Lucas pointing...', 160, cy + 3);
-
           ctx.strokeStyle = `rgba(112, 130, 190, ${Math.abs(Math.sin(frame * 0.07))})`;
           ctx.lineWidth = 4;
           ctx.strokeRect(0, 0, canvas.width, canvas.height);
@@ -442,30 +460,38 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
   }, [isColleagueSharing]);
 
 
-  const sendChatMessage = (e: React.FormEvent) => {
+  const sendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
-    const newMsg = {
-      sender: 'You',
-      text: chatInput,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      self: true
-    };
-
-    setMessages(prev => [...prev, newMsg]);
+    const senderName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Guest';
+    const text = chatInput;
     setChatInput('');
 
-    // Simulate participant response
-    setTimeout(() => {
-      const responseMsg = {
-        sender: 'Sarah Jenkins',
-        text: 'Awesome screenshare! That looks solid.',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        self: false
-      };
-      setMessages(prev => [...prev, responseMsg]);
-    }, 1500);
+    try {
+      await mockAuth.sendMessage({
+        thread_id: meetingId,
+        sender_name: senderName,
+        text: text,
+        user_id: currentUser?.id
+      });
+      
+      const list = await mockAuth.getMessages(meetingId);
+      if (list) {
+        const mapped = list.map((msg: any) => {
+          const isSelf = currentUser ? (msg.user_id === currentUser.id) : false;
+          return {
+            sender: msg.sender_name,
+            text: msg.text,
+            time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            self: isSelf
+          };
+        });
+        setMessages(mapped);
+      }
+    } catch (err) {
+      console.error('Failed to send chat message:', err);
+    }
   };
 
   return (
@@ -1003,10 +1029,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
         {activePanel === 'workspace' && (
           <WorkspacePanel 
             workspaceUsers={participants.map(p => ({ name: p.name, role: p.role }))}
+            initialNotes={initialNotes}
+            meetingTitle={meetingTitle}
             onSaveWorkspaceData={(notes, itemsCount) => {
               if (onSaveWorkspaceData) {
                 onSaveWorkspaceData(notes, itemsCount);
               }
+              setInitialNotes(notes);
               setActivePanel('none');
             }}
             onClose={() => setActivePanel('none')}
@@ -1082,7 +1111,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
 
           {/* Screen Share */}
           <button 
-            onClick={() => setIsScreenSharing(!isScreenSharing)}
+            onClick={() => {
+              const nextVal = !isScreenSharing;
+              setIsScreenSharing(nextVal);
+              if (nextVal) {
+                setIsColleagueSharing(false);
+              }
+            }}
             style={{
               width: '44px',
               height: '44px',
@@ -1126,7 +1161,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
 
           {/* Simulate Colleague Share */}
           <button 
-            onClick={() => setIsColleagueSharing(!isColleagueSharing)}
+            onClick={() => {
+              const nextVal = !isColleagueSharing;
+              setIsColleagueSharing(nextVal);
+              if (nextVal) {
+                setIsScreenSharing(false);
+              }
+            }}
             style={{
               width: '44px',
               height: '44px',

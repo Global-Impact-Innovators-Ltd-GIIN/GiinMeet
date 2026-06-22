@@ -11,12 +11,16 @@ interface ActionItem {
 
 interface WorkspacePanelProps {
   workspaceUsers: { name: string; role: string }[];
+  initialNotes?: string;
+  meetingTitle?: string;
   onSaveWorkspaceData: (notes: string, actionItemsCount: number) => void;
   onClose: () => void;
 }
 
 export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
   workspaceUsers,
+  initialNotes,
+  meetingTitle,
   onSaveWorkspaceData,
   onClose
 }) => {
@@ -24,22 +28,17 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
   
   // Collaborative minutes text state
   const [minutesText, setMinutesText] = useState(
-    `# Meeting Minutes: GIIN MEET Alignment\n\n` +
-    `## Discussion Notes:\n` +
-    `- Reviewing browser DRM overlays for Phase 3 E2EE.\n` +
-    `- Lucas verified WebRTC video constraints configuration.\n` +
-    `- Sarah presented the design tokens inside index.css.`
+    initialNotes ||
+    (`# Meeting Minutes: ${meetingTitle || 'GIIN MEET Alignment'}\n\n` +
+     `## Discussion Notes:\n- `)
   );
 
   // Action Items State
-  const [actionItems, setActionItems] = useState<ActionItem[]>([
-    { id: 'a1', text: 'Confirm browser DRM mix-blend-mode compatibility', assignee: 'Sarah Jenkins', dueDate: '2026-06-25', completed: false },
-    { id: 'a2', text: 'Audit peer-to-peer WebCrypto handshake parameters', assignee: 'Lucas Lima', dueDate: '2026-06-28', completed: false }
-  ]);
+  const [actionItems, setActionItems] = useState<ActionItem[]>([]);
 
   // Form states to add task
   const [taskText, setTaskText] = useState('');
-  const [taskAssignee, setTaskAssignee] = useState(workspaceUsers[0]?.name || 'Lucas Lima');
+  const [taskAssignee, setTaskAssignee] = useState(workspaceUsers[0]?.name || 'You');
   const [taskDate, setTaskDate] = useState('');
 
   const handleAddTask = (e: React.FormEvent) => {
