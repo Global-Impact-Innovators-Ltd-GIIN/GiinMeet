@@ -3,7 +3,7 @@ import {
   Send, Smile, Paperclip, Search, PlusCircle, MoreVertical, 
   Video, CheckCheck, ArrowLeft, MessageSquare
 } from 'lucide-react';
-import { mockAuth } from '../supabaseClient';
+import { mockAuth, supabase } from '../supabaseClient';
 
 interface Message {
   id: string;
@@ -45,6 +45,160 @@ export const Chats: React.FC<ChatsProps> = ({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const [threads, setThreads] = useState<ChatThread[]>([]);
+
+  // Add Contact states
+  const [showAddContactModal, setShowAddContactModal] = useState(false);
+  const [queryAdd, setQueryAdd] = useState('');
+  const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle');
+  const [foundContact, setFoundContact] = useState<any | null>(null);
+  const [toastMessage, setToastMessage] = useState('');
+
+  // Dynamically load threads based on database messages
+  useEffect(() => {
+    const loadAllThreads = async () => {
+      try {
+        const { data: dbMessages } = await supabase
+          .from('messages')
+          .select('*')
+          .order('created_at', { ascending: true });
+        
+        if (dbMessages && dbMessages.length > 0) {
+          const threadGroups: { [key: string]: any[] } = {};
+          dbMessages.forEach(m => {
+            if (!threadGroups[m.thread_id]) {
+              threadGroups[m.thread_id] = [];
+            }
+            threadGroups[m.thread_id].push(m);
+          });
+
+          const profilesRes = await supabase.from('profiles').select('*');
+          const profilesMap = new Map(profilesRes.data?.map(p => [p.id, p]) || []);
+
+          const loadedThreads: ChatThread[] = Object.keys(threadGroups).map(threadId => {
+            const msgs = threadGroups[threadId];
+
+            let name = threadId;
+            let avatar = threadId.substring(0, 2).toUpperCase();
+            let avatarBg = '#8B5CF6';
+
+            const profile = profilesMap.get(threadId);
+            if (profile) {
+              name = profile.name || 'Giin User';
+              avatar = profile.avatar_url ? profile.avatar_url : (profile.name ? profile.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U');
+              let hash = 0;
+              for (let i = 0; i < name.length; i++) {
+                hash = name.charCodeAt(i) + ((hash << 5) - hash);
+              }
+              avatarBg = `hsl(${Math.abs(hash % 360)}, 60%, 40%)`;
+            } else if (threadId.includes('-') && !threadId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+              name = threadId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+              avatar = name.split(' ').map(n => n[0]).join('');
+            }
+
+            return {
+              id: threadId,
+              name: name,
+              avatar: avatar,
+              avatarBg: avatarBg,
+              isGroup: false,
+              status: 'Online',
+              messages: msgs.map(m => ({
+                id: m.id,
+                sender: m.sender_name,
+                text: m.text,
+                time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                self: m.sender_name === 'You' || !!(user && m.user_id === user.id)
+              }))
+            };
+          });
+
+          setThreads(prev => {
+            const merged = [...prev];
+            loadedThreads.forEach(lt => {
+              const idx = merged.findIndex(m => m.id === lt.id);
+              if (idx >= 0) {
+                merged[idx] = lt;
+              } else {
+                merged.push(lt);
+              }
+            });
+            return merged;
+          });
+
+          if (loadedThreads.length > 0 && !activeThreadId) {
+            setActiveThreadId(loadedThreads[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load threads from database:', err);
+      }
+    };
+
+    loadAllThreads();
+  }, [user]);
+
+  // Search profiles database for new contact
+  const handleSearchContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!queryAdd.trim()) return;
+
+    setSearchStatus('searching');
+    try {
+      const { data } = await mockAuth.searchProfile(queryAdd);
+      if (data) {
+        setFoundContact(data);
+        setSearchStatus('found');
+      } else {
+        setFoundContact(null);
+        setSearchStatus('not_found');
+      }
+    } catch (err) {
+      console.error('Error searching contact:', err);
+      setSearchStatus('not_found');
+    }
+  };
+
+  // Add search profile to threads
+  const handleStartChatWithContact = (contact: any) => {
+    const existingThread = threads.find(t => t.id === contact.id);
+    if (existingThread) {
+      setActiveThreadId(existingThread.id);
+    } else {
+      const initials = contact.name ? contact.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
+      let hash = 0;
+      for (let i = 0; i < (contact.name || '').length; i++) {
+        hash = (contact.name || '').charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const hue = Math.abs(hash % 360);
+      const avatarBg = `hsl(${hue}, 60%, 40%)`;
+
+      const newThread: ChatThread = {
+        id: contact.id,
+        name: contact.name || 'User',
+        avatar: contact.avatar_url ? contact.avatar_url : initials,
+        avatarBg: avatarBg,
+        isGroup: false,
+        status: 'Online',
+        messages: []
+      };
+      setThreads(prev => [newThread, ...prev]);
+      setActiveThreadId(contact.id);
+    }
+    setShowAddContactModal(false);
+    setQueryAdd('');
+    setSearchStatus('idle');
+    setFoundContact(null);
+    setShowConversationMobile(true);
+  };
+
+  // Generate invitation link for non-registered contacts
+  const handleCopyInviteLink = () => {
+    const inviteLink = `${window.location.origin}/#/join`;
+    const inviteText = `Hey! Join me on GiinMeet for secure virtual meetings and instant chats. Sign up here: ${inviteLink}`;
+    navigator.clipboard.writeText(inviteText);
+    setToastMessage('Invitation copied to clipboard!');
+    setTimeout(() => setToastMessage(''), 3000);
+  };
 
   // Handle redirect from Contacts click
   useEffect(() => {
@@ -175,7 +329,10 @@ export const Chats: React.FC<ChatsProps> = ({
       <div className={`glass-panel ${showConversationMobile ? 'mobile-hidden' : ''}`} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
         <div className="flex-between">
           <h2 style={{ fontSize: '1.4rem', fontFamily: 'var(--font-heading)' }}>Conversations</h2>
-          <button style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer' }}>
+          <button 
+            onClick={() => setShowAddContactModal(true)}
+            style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer' }}
+          >
             <PlusCircle size={20} />
           </button>
         </div>
@@ -226,9 +383,14 @@ export const Chats: React.FC<ChatsProps> = ({
                   justifyContent: 'center',
                   fontWeight: 600,
                   fontSize: '0.9rem',
-                  marginRight: '0.75rem'
+                  marginRight: '0.75rem',
+                  overflow: 'hidden'
                 }}>
-                  {t.avatar}
+                  {t.avatar && (t.avatar.startsWith('http') || t.avatar.startsWith('data:image')) ? (
+                    <img src={t.avatar} alt={t.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    t.avatar
+                  )}
                 </div>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -294,9 +456,14 @@ export const Chats: React.FC<ChatsProps> = ({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontWeight: 700
+                  fontWeight: 700,
+                  overflow: 'hidden'
                 }}>
-                  {activeThread.avatar}
+                  {activeThread.avatar && (activeThread.avatar.startsWith('http') || activeThread.avatar.startsWith('data:image')) ? (
+                    <img src={activeThread.avatar} alt={activeThread.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    activeThread.avatar
+                  )}
                 </div>
                 <div>
                   <h3 style={{ fontSize: '1.05rem', fontFamily: 'var(--font-heading)' }}>{activeThread.name}</h3>
@@ -482,6 +649,167 @@ export const Chats: React.FC<ChatsProps> = ({
           </div>
         )}
       </div>
+      {/* Add Contact Modal */}
+      {showAddContactModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div className="glass-panel" style={{
+            width: '100%',
+            maxWidth: '440px',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '2rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            position: 'relative',
+            animation: 'pop-in 0.25s ease'
+          }}>
+            <div className="flex-between">
+              <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)' }}>Start a Chat</h3>
+              <button 
+                onClick={() => {
+                  setShowAddContactModal(false);
+                  setQueryAdd('');
+                  setSearchStatus('idle');
+                  setFoundContact(null);
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.5rem' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleSearchContact} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+                  Search by Email or Phone number
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. contact@email.com or +15551234567" 
+                  value={queryAdd}
+                  onChange={(e) => setQueryAdd(e.target.value)}
+                  className="premium-input"
+                  required
+                />
+              </div>
+
+              <button type="submit" className="premium-btn premium-btn-primary" style={{ justifyContent: 'center' }}>
+                Search
+              </button>
+            </form>
+
+            {searchStatus === 'searching' && (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                Searching profiles directory...
+              </div>
+            )}
+
+            {searchStatus === 'found' && foundContact && (
+              <div style={{ 
+                padding: '1rem', 
+                borderRadius: 'var(--radius-md)', 
+                border: '1px solid var(--border-color)', 
+                backgroundColor: 'rgba(255,255,255,0.02)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--color-primary)',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700,
+                    overflow: 'hidden'
+                  }}>
+                    {foundContact.avatar_url ? (
+                      <img src={foundContact.avatar_url} alt={foundContact.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      (foundContact.name || 'User').split(' ').map((n: string) => n[0]).join('').toUpperCase()
+                    )}
+                  </div>
+                  <div>
+                    <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>{foundContact.name || 'Phone User'}</h4>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {foundContact.email || foundContact.phone || 'GiinMeet Member'}
+                    </span>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => handleStartChatWithContact(foundContact)}
+                  className="premium-btn premium-btn-accent" 
+                  style={{ justifyContent: 'center', width: '100%' }}
+                >
+                  Start Secure Chat
+                </button>
+              </div>
+            )}
+
+            {searchStatus === 'not_found' && (
+              <div style={{ 
+                padding: '1rem', 
+                borderRadius: 'var(--radius-md)', 
+                border: '1px solid var(--border-color)', 
+                backgroundColor: 'rgba(239,68,68,0.02)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.75rem',
+                textAlign: 'center'
+              }}>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  This contact is not currently using GiinMeet.
+                </p>
+                <button 
+                  onClick={handleCopyInviteLink}
+                  className="premium-btn premium-btn-secondary" 
+                  style={{ justifyContent: 'center', width: '100%' }}
+                >
+                  Copy Invitation Link
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Floating success toast */}
+      {toastMessage && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          backgroundColor: '#10B981',
+          color: 'white',
+          padding: '0.75rem 1.5rem',
+          borderRadius: 'var(--radius-md)',
+          boxShadow: 'var(--shadow-lg)',
+          zIndex: 99999,
+          fontWeight: 600,
+          animation: 'slide-in 0.2s ease'
+        }}>
+          {toastMessage}
+        </div>
+      )}
     </div>
   );
 };

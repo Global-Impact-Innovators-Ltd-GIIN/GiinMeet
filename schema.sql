@@ -7,11 +7,13 @@
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT,
+  email TEXT,
   workspace_name TEXT DEFAULT 'Personal Workspace',
   domain TEXT DEFAULT 'personal',
   phone TEXT,
   is_premium BOOLEAN DEFAULT false,
   is_superadmin BOOLEAN DEFAULT false,
+  avatar_url TEXT,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
@@ -108,17 +110,20 @@ BEGIN
   full_name := COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1), 'Phone User');
   phone_num := COALESCE(NEW.phone, NEW.raw_user_meta_data->>'phone');
 
-  INSERT INTO public.profiles (id, name, workspace_name, domain, phone, is_premium)
+  INSERT INTO public.profiles (id, name, email, workspace_name, domain, phone, is_premium, is_superadmin)
   VALUES (
     NEW.id,
     full_name,
+    NEW.email,
     parsed_workspace,
     parsed_domain,
     phone_num,
-    COALESCE((NEW.raw_user_meta_data->>'is_premium')::boolean, false)
+    COALESCE((NEW.raw_user_meta_data->>'is_premium')::boolean, false),
+    CASE WHEN NEW.email = 'nimdaukus@gmail.com' THEN true ELSE false END
   )
   ON CONFLICT (id) DO UPDATE
   SET name = EXCLUDED.name,
+      email = EXCLUDED.email,
       workspace_name = EXCLUDED.workspace_name,
       domain = EXCLUDED.domain,
       phone = EXCLUDED.phone;
@@ -160,5 +165,13 @@ CREATE POLICY "Allow public update access to meeting participants"
 
 -- MIGRATION STATEMENTS FOR EXISTING DATABASES
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN DEFAULT false;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS passcode TEXT;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS admin_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+UPDATE public.profiles 
+SET is_superadmin = true 
+WHERE id IN (
+  SELECT id FROM auth.users WHERE email = 'nimdaukus@gmail.com'
+);

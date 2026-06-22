@@ -6,7 +6,8 @@ interface SettingsProps {
   onToggleTheme: () => void;
   userName: string;
   userEmail: string;
-  onUpdateProfile: (name: string, email: string) => void;
+  userAvatarUrl?: string;
+  onUpdateProfile: (name: string, email: string, avatarUrl?: string) => void;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
@@ -14,6 +15,7 @@ export const Settings: React.FC<SettingsProps> = ({
   onToggleTheme,
   userName,
   userEmail,
+  userAvatarUrl,
   onUpdateProfile,
 }) => {
   const [activeCategory, setActiveCategory] = useState<'profile' | 'notifications' | 'meetings' | 'security' | 'language'>('profile');
@@ -21,7 +23,55 @@ export const Settings: React.FC<SettingsProps> = ({
   // Profile state
   const [name, setName] = useState(userName);
   const [email, setEmail] = useState(userEmail);
+  const [avatarUrl, setAvatarUrl] = useState(userAvatarUrl || '');
   const [showSavedToast, setShowSavedToast] = useState(false);
+
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (userAvatarUrl) {
+      setAvatarUrl(userAvatarUrl);
+    }
+  }, [userAvatarUrl]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 150;
+        const MAX_HEIGHT = 150;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+        setAvatarUrl(compressedBase64);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Toggle states
   const [emailNotif, setEmailNotif] = useState(true);
@@ -40,7 +90,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleProfileSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateProfile(name, email);
+    onUpdateProfile(name, email, avatarUrl);
     setShowSavedToast(true);
     setTimeout(() => setShowSavedToast(false), 3000);
   };
@@ -121,6 +171,13 @@ export const Settings: React.FC<SettingsProps> = ({
             <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '500px' }}>
               {/* Picture simulation */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginBottom: '0.5rem' }}>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileChange} 
+                  accept="image/*" 
+                  style={{ display: 'none' }} 
+                />
                 <div style={{
                   width: '72px',
                   height: '72px',
@@ -131,12 +188,26 @@ export const Settings: React.FC<SettingsProps> = ({
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: '1.8rem',
-                  fontWeight: 700
+                  fontWeight: 700,
+                  overflow: 'hidden'
                 }}>
-                  {name ? name.split(' ').map(n => n[0]).join('') : 'U'}
+                  {avatarUrl ? (
+                    <img 
+                      src={avatarUrl} 
+                      alt={name} 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    />
+                  ) : (
+                    name ? name.split(' ').map(n => n[0]).join('') : 'U'
+                  )}
                 </div>
                 <div>
-                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }}>
+                  <button 
+                    type="button" 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="premium-btn premium-btn-secondary" 
+                    style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }}
+                  >
                     Upload Photo
                   </button>
                   <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>PNG, JPG or GIF up to 5MB.</span>

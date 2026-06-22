@@ -18,6 +18,7 @@ export interface MockUser {
   workspaceName: string;
   is_premium?: boolean;
   is_superadmin?: boolean;
+  avatar_url?: string;
 }
 
 // Wrapper object for direct auth and database operations
@@ -53,7 +54,8 @@ export const mockAuth = {
       name: name || email.split('@')[0],
       workspaceName,
       domain,
-      is_superadmin: false
+      is_superadmin: email.toLowerCase() === 'nimdaukus@gmail.com',
+      avatar_url: ''
     };
 
     return { data: { user }, error: null };
@@ -83,7 +85,8 @@ export const mockAuth = {
       domain: profile?.domain || domain,
       workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
       is_premium: profile?.is_premium || false,
-      is_superadmin: profile?.is_superadmin || false
+      is_superadmin: profile?.is_superadmin || email.toLowerCase() === 'nimdaukus@gmail.com' || false,
+      avatar_url: profile?.avatar_url || ''
     };
 
     return { data: { user }, error: null };
@@ -136,7 +139,8 @@ export const mockAuth = {
         workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
         domain: profile?.domain || 'phone.giinmeet.com',
         is_premium: profile?.is_premium || false,
-        is_superadmin: profile?.is_superadmin || false
+        is_superadmin: profile?.is_superadmin || false,
+        avatar_url: profile?.avatar_url || ''
       };
 
       return { data: { user }, error: null };
@@ -150,7 +154,8 @@ export const mockAuth = {
         workspaceName: customWorkspaceName || 'Personal Workspace',
         domain: 'phone.giinmeet.com',
         is_premium: false,
-        is_superadmin: false
+        is_superadmin: false,
+        avatar_url: ''
       };
       return { data: { user }, error: null };
     }
@@ -167,10 +172,14 @@ export const mockAuth = {
   },
 
   // Update profile details
-  updateProfile: async (userId: string, name: string, _email: string) => {
+  updateProfile: async (userId: string, name: string, email: string, avatarUrl?: string) => {
+    const payload: any = { name, email, updated_at: new Date() };
+    if (avatarUrl !== undefined) {
+      payload.avatar_url = avatarUrl;
+    }
     const { data, error } = await supabase
       .from('profiles')
-      .update({ name, updated_at: new Date() })
+      .update(payload)
       .eq('id', userId);
     return { data, error };
   },
@@ -384,5 +393,78 @@ export const mockAuth = {
       .from('meetings')
       .select('*');
     return data || [];
+  },
+
+  // Search profiles by exact email match or phone number match
+  searchProfile: async (query: string) => {
+    const cleanQuery = query.trim();
+    // Try email match first
+    let { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', cleanQuery)
+      .maybeSingle();
+    
+    // If no email match, try phone match
+    if (!data) {
+      const phoneRes = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('phone', cleanQuery)
+        .maybeSingle();
+      data = phoneRes.data;
+      error = phoneRes.error;
+    }
+    return { data, error };
+  },
+
+  // Upload profile photo
+  uploadAvatar: async (userId: string, base64Data: string) => {
+    try {
+      const matches = base64Data.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+      if (matches) {
+        const mimeType = matches[1];
+        const rawData = matches[2];
+        const byteCharacters = atob(rawData);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+        
+        const filePath = `${userId}/avatar.jpg`;
+        const { error: uploadError } = await supabase.storage
+          .from('avatars')
+          .upload(filePath, blob, {
+            contentType: mimeType,
+            upsert: true
+          });
+        
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage
+            .from('avatars')
+            .getPublicUrl(filePath);
+          
+          if (publicUrlData?.publicUrl) {
+            const { error } = await supabase
+              .from('profiles')
+              .update({ avatar_url: publicUrlData.publicUrl, updated_at: new Date() })
+              .eq('id', userId);
+            return { data: publicUrlData.publicUrl, error };
+          }
+        } else {
+          console.warn('[Supabase Client] Storage bucket upload failed, using base64 database fallback.', uploadError.message);
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Supabase Client] Storage bucket upload failed, using base64 database fallback.', err.message);
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ avatar_url: base64Data, updated_at: new Date() })
+      .eq('id', userId);
+    return { data: base64Data, error };
   }
 };

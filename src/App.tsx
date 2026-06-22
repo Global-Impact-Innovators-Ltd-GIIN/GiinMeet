@@ -27,7 +27,7 @@ interface Meeting {
 
 function App() {
   // Authentication & Directory Discovery
-  const [user, setUser] = useState<{ id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean } | null>(() => {
+  const [user, setUser] = useState<{ id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean; avatar_url?: string } | null>(() => {
     const saved = localStorage.getItem('giin_user');
     return saved ? JSON.parse(saved) : null;
   });
@@ -83,13 +83,21 @@ function App() {
       if (session?.user) {
         const { data: profile } = await mockAuth.getProfile(session.user.id);
         const domain = session.user.email?.split('@')[1] || 'personal';
+        const isSuperAdminEmail = session.user.email?.toLowerCase() === 'nimdaukus@gmail.com';
+        const isSuperadmin = profile?.is_superadmin || isSuperAdminEmail || false;
+        
+        if (isSuperAdminEmail && profile && !profile.is_superadmin) {
+          mockAuth.updateProfileSuperadmin(session.user.id, true);
+        }
+
         const authenticatedUser = {
           id: session.user.id,
           email: session.user.email || '',
           name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User',
           workspaceName: profile?.workspace_name || session.user.user_metadata?.workspace_name || 'Personal Workspace',
           domain: profile?.domain || domain,
-          is_superadmin: profile?.is_superadmin || false
+          is_superadmin: isSuperadmin,
+          avatar_url: profile?.avatar_url || ''
         };
         setUser(authenticatedUser);
         setUserName(authenticatedUser.name);
@@ -104,13 +112,21 @@ function App() {
       if (session?.user) {
         const { data: profile } = await mockAuth.getProfile(session.user.id);
         const domain = session.user.email?.split('@')[1] || 'personal';
+        const isSuperAdminEmail = session.user.email?.toLowerCase() === 'nimdaukus@gmail.com';
+        const isSuperadmin = profile?.is_superadmin || isSuperAdminEmail || false;
+        
+        if (isSuperAdminEmail && profile && !profile.is_superadmin) {
+          mockAuth.updateProfileSuperadmin(session.user.id, true);
+        }
+
         const authenticatedUser = {
           id: session.user.id,
           email: session.user.email || '',
           name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User',
           workspaceName: profile?.workspace_name || session.user.user_metadata?.workspace_name || 'Personal Workspace',
           domain: profile?.domain || domain,
-          is_superadmin: profile?.is_superadmin || false
+          is_superadmin: isSuperadmin,
+          avatar_url: profile?.avatar_url || ''
         };
         setUser(authenticatedUser);
         setUserName(authenticatedUser.name);
@@ -291,7 +307,7 @@ function App() {
     setNotifications(prev => [newNotif, ...prev]);
   };
 
-  const handleAuthSuccess = (authenticatedUser: { id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean }) => {
+  const handleAuthSuccess = (authenticatedUser: { id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean; avatar_url?: string }) => {
     setUser(authenticatedUser);
     setUserName(authenticatedUser.name);
     setUserEmail(authenticatedUser.email);
@@ -336,11 +352,27 @@ function App() {
     setCurrentView('chats');
   };
 
-  const handleUpdateProfile = (name: string, email: string) => {
+  const handleUpdateProfile = async (name: string, email: string, avatarUrl?: string) => {
     setUserName(name);
     setUserEmail(email);
     localStorage.setItem('giin_name', name);
     localStorage.setItem('giin_email', email);
+
+    if (user && user.id) {
+      try {
+        await mockAuth.updateProfile(user.id, name, email, avatarUrl);
+        const updatedUser = {
+          ...user,
+          name,
+          email,
+          avatar_url: avatarUrl !== undefined ? avatarUrl : user.avatar_url
+        };
+        setUser(updatedUser);
+        localStorage.setItem('giin_user', JSON.stringify(updatedUser));
+      } catch (err) {
+        console.error('Failed to update profile in database:', err);
+      }
+    }
   };
 
   const handleUpgradeSuccess = () => {
@@ -858,9 +890,18 @@ function App() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontWeight: 700,
-                  fontSize: '0.85rem'
+                  fontSize: '0.85rem',
+                  overflow: 'hidden'
                 }}>
-                  {userName.split(' ').map(n => n[0]).join('')}
+                  {user?.avatar_url ? (
+                    <img 
+                      src={user.avatar_url} 
+                      alt={userName} 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    />
+                  ) : (
+                    userName.split(' ').map(n => n[0]).join('')
+                  )}
                 </div>
                 <ChevronDown size={14} color="var(--text-muted)" />
               </div>
@@ -993,6 +1034,7 @@ function App() {
               onToggleTheme={handleToggleTheme}
               userName={userName}
               userEmail={userEmail}
+              userAvatarUrl={user?.avatar_url || ''}
               onUpdateProfile={handleUpdateProfile}
             />
           )}

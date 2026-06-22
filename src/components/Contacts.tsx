@@ -42,7 +42,7 @@ export const Contacts: React.FC<ContactsProps> = ({
         const dbProfiles = await mockAuth.getContacts(userDomain);
         if (dbProfiles) {
           const mapped: Contact[] = dbProfiles.map((p: any) => {
-            const avatar = p.name ? p.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
+            const avatar = p.avatar_url || (p.name ? p.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U');
             
             // Generate a consistent HSL background color based on name/id hash
             let hash = 0;
@@ -235,9 +235,14 @@ export const Contacts: React.FC<ContactsProps> = ({
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontWeight: 600,
-                        fontSize: '0.85rem'
+                        fontSize: '0.85rem',
+                        overflow: 'hidden'
                       }}>
-                        {c.avatar}
+                        {c.avatar && (c.avatar.startsWith('http') || c.avatar.startsWith('data:image')) ? (
+                          <img src={c.avatar} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          c.avatar
+                        )}
                       </div>
                       {/* Status indicator dot */}
                       <span style={{
@@ -315,9 +320,14 @@ export const Contacts: React.FC<ContactsProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '2rem',
-              fontWeight: 800
+              fontWeight: 800,
+              overflow: 'hidden'
             }}>
-              {selectedContact.avatar}
+              {selectedContact.avatar && (selectedContact.avatar.startsWith('http') || selectedContact.avatar.startsWith('data:image')) ? (
+                <img src={selectedContact.avatar} alt={selectedContact.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                selectedContact.avatar
+              )}
             </div>
             
             <div style={{ flex: 1 }}>
