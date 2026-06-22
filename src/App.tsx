@@ -992,6 +992,33 @@ function App() {
                     <CreditCard size={14} />
                     <span>Billing & Plans</span>
                   </button>
+                  <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)', margin: '0.25rem 0' }} />
+                  <button 
+                    onClick={async () => {
+                      try {
+                        await supabase.auth.signOut();
+                      } catch (err) {
+                        console.warn('Signout issue:', err);
+                      }
+                      localStorage.clear();
+                      window.location.reload();
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      background: 'none',
+                      border: 'none',
+                      color: '#EF4444',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontWeight: 600
+                    }}
+                  >
+                    <LogOut size={14} color="#EF4444" />
+                    <span>Log Out</span>
+                  </button>
                 </div>
               )}
             </div>
