@@ -71,7 +71,7 @@ export const mockAuth = {
       .from('profiles')
       .select('*')
       .eq('id', data.user?.id)
-      .single();
+      .maybeSingle();
 
     const domain = email.split('@')[1] || 'personal';
     const user: MockUser = {
@@ -124,7 +124,7 @@ export const mockAuth = {
         .from('profiles')
         .select('*')
         .eq('id', data.user?.id)
-        .single();
+        .maybeSingle();
 
       const user: MockUser = {
         id: data.user?.id || '',
@@ -157,7 +157,7 @@ export const mockAuth = {
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
     return { data, error };
   },
 
