@@ -103,6 +103,16 @@ function App() {
         setUserName(authenticatedUser.name);
         setUserEmail(authenticatedUser.email);
         setIsPremium(profile?.is_premium || false);
+
+        // Persist session to localStorage
+        localStorage.setItem('giin_user', JSON.stringify(authenticatedUser));
+        localStorage.setItem('giin_name', authenticatedUser.name);
+        localStorage.setItem('giin_email', authenticatedUser.email);
+
+        if (isSuperadmin) {
+          setCurrentView('superadmin');
+          localStorage.setItem('giin_view', 'superadmin');
+        }
       }
     };
     checkSession();
@@ -132,6 +142,16 @@ function App() {
         setUserName(authenticatedUser.name);
         setUserEmail(authenticatedUser.email);
         setIsPremium(profile?.is_premium || false);
+
+        // Persist session to localStorage
+        localStorage.setItem('giin_user', JSON.stringify(authenticatedUser));
+        localStorage.setItem('giin_name', authenticatedUser.name);
+        localStorage.setItem('giin_email', authenticatedUser.email);
+
+        if (isSuperadmin) {
+          setCurrentView('superadmin');
+          localStorage.setItem('giin_view', 'superadmin');
+        }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
       }
@@ -322,7 +342,13 @@ function App() {
       read: false
     };
     setNotifications(prev => [newNotif, ...prev]);
-    setCurrentView('dashboard');
+    
+    if (authenticatedUser.is_superadmin) {
+      setCurrentView('superadmin');
+      localStorage.setItem('giin_view', 'superadmin');
+    } else {
+      setCurrentView('dashboard');
+    }
   };
 
   const handleSaveWorkspaceData = async (notes: string, actionItemsCount: number) => {
