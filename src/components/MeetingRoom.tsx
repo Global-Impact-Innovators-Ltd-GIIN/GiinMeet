@@ -50,6 +50,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
   const [isColleagueSharing, setIsColleagueSharing] = useState(false);
   const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace'>('none');
 
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+
   // Waiting list and role delegation states
   const [meetingAdminId, setMeetingAdminId] = useState<string>('');
   const [passcode, setPasscode] = useState<string>('');
@@ -71,6 +74,100 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
     };
     loadDetails();
   }, [meetingId]);
+
+  // Load admitted participants from database periodically
+  useEffect(() => {
+    const loadParticipants = async () => {
+      try {
+        const list = await mockAuth.getAdmittedParticipants(meetingId);
+        if (list) {
+          const mapped: Participant[] = list
+            .filter((p: any) => p.user_id !== currentUser?.id)
+            .map((p: any) => {
+              const initials = p.name ? p.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
+              let hash = 0;
+              for (let i = 0; i < (p.name || '').length; i++) {
+                hash = (p.name || '').charCodeAt(i) + ((hash << 5) - hash);
+              }
+              const hue = Math.abs(hash % 360);
+              const avatarBg = `hsl(${hue}, 60%, 40%)`;
+
+              return {
+                id: p.id,
+                userId: p.user_id,
+                name: p.name || 'Participant',
+                avatar: initials,
+                role: p.role || 'Participant',
+                isMuted: false,
+                isSpeaking: false,
+                isVideoOn: true,
+                avatarBg: avatarBg
+              };
+            });
+          setParticipants(mapped);
+        }
+      } catch (err) {
+        console.error('Failed to load call participants:', err);
+      }
+    };
+
+    loadParticipants();
+    const interval = setInterval(loadParticipants, 5000);
+    return () => clearInterval(interval);
+  }, [meetingId, currentUser]);
+
+  // Toggle Screen Sharing with Browser getDisplayMedia API and Fallback
+  useEffect(() => {
+    async function startScreenShare() {
+      try {
+        const constraints = getWebRTCScreenshareConstraints();
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: constraints.video,
+          audio: false
+        });
+        
+        setScreenStream(displayStream);
+        
+        const video = document.createElement('video');
+        video.srcObject = displayStream;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        
+        video.onloadedmetadata = () => {
+          video.play();
+          screenVideoRef.current = video;
+        };
+
+        displayStream.getVideoTracks()[0].onended = () => {
+          stopScreenShare();
+          setIsScreenSharing(false);
+        };
+
+      } catch (err) {
+        console.warn('[Screen Share] Access denied or cancelled. Using simulated fallback.', err);
+        screenVideoRef.current = null;
+      }
+    }
+
+    if (isScreenSharing) {
+      startScreenShare();
+    } else {
+      stopScreenShare();
+    }
+
+    return () => {
+      stopScreenShare();
+    };
+  }, [isScreenSharing]);
+
+  const stopScreenShare = () => {
+    if (screenStream) {
+      screenStream.getTracks().forEach(track => track.stop());
+      setScreenStream(null);
+    }
+    screenVideoRef.current = null;
+  };
 
   // Admins periodically poll for waiting participants
   useEffect(() => {
@@ -168,10 +265,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
 
   // Toggle buttons
   const toggleMute = () => {
-    setIsMuted(!isMuted);
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
     if (stream) {
       stream.getAudioTracks().forEach(track => {
-        track.enabled = isMuted; // set track audio enabled state (opposite of state before toggle)
+        track.enabled = !nextMuted;
       });
     }
   };
@@ -206,54 +304,59 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
         let frame = 0;
         const draw = () => {
           frame++;
-          ctx.fillStyle = '#0B0F19';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
           
-          // Draw grid patterns
-          ctx.strokeStyle = 'rgba(112, 130, 190, 0.15)';
-          ctx.lineWidth = 1;
-          for (let i = 0; i < canvas.width; i += 40) {
-            ctx.beginPath();
-            ctx.moveTo(i, 0);
-            ctx.lineTo(i, canvas.height);
-            ctx.stroke();
-          }
-          for (let j = 0; j < canvas.height; j += 40) {
-            ctx.beginPath();
-            ctx.moveTo(0, j);
-            ctx.lineTo(canvas.width, j);
-            ctx.stroke();
-          }
-
-          // Draw sample presentation chart
-          ctx.fillStyle = '#FABD02';
-          ctx.font = 'bold 16px sans-serif';
-          ctx.fillText('GIIN MEET VIRTUALIZATION REPORT', 24, 40);
-
-          ctx.fillStyle = '#FFFFFF';
-          ctx.font = '12px sans-serif';
-          ctx.fillText('Active Analytics Presentation Share (Live Feed)', 24, 65);
-
-          // Draw bar chart
-          const data = [120, 190, 80, 250, 160, 210];
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = '#7082BE';
-          
-          data.forEach((val, index) => {
-            const x = 50 + index * 60;
-            const y = canvas.height - 40;
-            const h = (val * (Math.sin(frame * 0.05) + 2)) / 3;
+          if (screenVideoRef.current && screenVideoRef.current.readyState >= 2) {
+            ctx.drawImage(screenVideoRef.current, 0, 0, canvas.width, canvas.height);
+          } else {
+            ctx.fillStyle = '#0B0F19';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Bar
-            ctx.fillStyle = 'rgba(112, 130, 190, 0.3)';
-            ctx.fillRect(x, y - h, 35, h);
-            ctx.strokeStyle = '#7082BE';
-            ctx.strokeRect(x, y - h, 35, h);
+            // Draw grid patterns
+            ctx.strokeStyle = 'rgba(112, 130, 190, 0.15)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < canvas.width; i += 40) {
+              ctx.beginPath();
+              ctx.moveTo(i, 0);
+              ctx.lineTo(i, canvas.height);
+              ctx.stroke();
+            }
+            for (let j = 0; j < canvas.height; j += 40) {
+              ctx.beginPath();
+              ctx.moveTo(0, j);
+              ctx.lineTo(canvas.width, j);
+              ctx.stroke();
+            }
 
-            // Gold indicator line
+            // Draw sample presentation chart
             ctx.fillStyle = '#FABD02';
-            ctx.fillRect(x + 10, y - h - 5, 15, 3);
-          });
+            ctx.font = 'bold 16px sans-serif';
+            ctx.fillText('GIIN MEET VIRTUALIZATION REPORT', 24, 40);
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '12px sans-serif';
+            ctx.fillText('Active Analytics Presentation Share (Live Feed)', 24, 65);
+
+            // Draw bar chart
+            const data = [120, 190, 80, 250, 160, 210];
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#7082BE';
+            
+            data.forEach((val, index) => {
+              const x = 50 + index * 60;
+              const y = canvas.height - 40;
+              const h = (val * (Math.sin(frame * 0.05) + 2)) / 3;
+              
+              // Bar
+              ctx.fillStyle = 'rgba(112, 130, 190, 0.3)';
+              ctx.fillRect(x, y - h, 35, h);
+              ctx.strokeStyle = '#7082BE';
+              ctx.strokeRect(x, y - h, 35, h);
+
+              // Gold indicator line
+              ctx.fillStyle = '#FABD02';
+              ctx.fillRect(x + 10, y - h - 5, 15, 3);
+            });
+          }
 
           // Pulse screen share outline
           ctx.strokeStyle = `rgba(250, 189, 2, ${Math.abs(Math.sin(frame * 0.07))})`;
