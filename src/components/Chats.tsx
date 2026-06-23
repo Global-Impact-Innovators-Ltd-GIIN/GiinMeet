@@ -26,7 +26,7 @@ export interface ChatThread {
 }
 
 interface ChatsProps {
-  initialTargetContact?: string | null;
+  initialTargetContactId?: string | null;
   onClearTargetContact?: () => void;
   onStartMeeting: (title: string) => void;
   user: { id: string; email: string; name: string; workspaceName: string; domain: string } | null;
@@ -37,7 +37,7 @@ interface ChatsProps {
 }
 
 export const Chats: React.FC<ChatsProps> = ({ 
-  initialTargetContact, 
+  initialTargetContactId, 
   onClearTargetContact,
   onStartMeeting,
   user,
@@ -130,18 +130,17 @@ export const Chats: React.FC<ChatsProps> = ({
 
   // Handle redirect from Contacts click
   useEffect(() => {
-    if (initialTargetContact && user) {
+    if (initialTargetContactId && user) {
       const loadRedirect = async () => {
-        const existingThread = threads.find(t => t.name.toLowerCase() === initialTargetContact.toLowerCase());
+        const dmId = ['dm', user.id, initialTargetContactId].sort().join('-');
+        const existingThread = threads.find(t => t.id === dmId);
         if (existingThread) {
           setActiveThreadId(existingThread.id);
           setShowConversationMobile(true);
         } else {
-          // Fetch contact details by name to get contact.id
-          const { data } = await mockAuth.searchProfile(initialTargetContact);
-          const contact = data && data.length > 0 ? data[0] : null;
+          // Fetch contact details directly by profile ID
+          const { data: contact } = await mockAuth.getProfile(initialTargetContactId);
           if (contact) {
-            const dmId = ['dm', user.id, contact.id].sort().join('-');
             const initials = contact.name ? contact.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
             let hash = 0;
             for (let i = 0; i < (contact.name || '').length; i++) {
@@ -162,24 +161,6 @@ export const Chats: React.FC<ChatsProps> = ({
             setThreads(prev => [newThread, ...prev]);
             setActiveThreadId(dmId);
             setShowConversationMobile(true);
-          } else {
-            // Fallback to simulated ID
-            const newId = initialTargetContact.toLowerCase().replace(/\s+/g, '-');
-            const newThread: ChatThread = {
-              id: newId,
-              name: initialTargetContact,
-              avatar: initialTargetContact.split(' ').map(n => n[0]).join(''),
-              avatarBg: '#8B5CF6',
-              isGroup: false,
-              status: 'Online',
-              unreadCount: 0,
-              messages: [
-                { id: '1', sender: initialTargetContact, text: `Hello! Nice to connect with you. Let me know if we need a video call.`, time: 'Now', self: false }
-              ]
-            };
-            setThreads(prev => [newThread, ...prev]);
-            setActiveThreadId(newId);
-            setShowConversationMobile(true);
           }
         }
         if (onClearTargetContact) {
@@ -188,7 +169,7 @@ export const Chats: React.FC<ChatsProps> = ({
       };
       loadRedirect();
     }
-  }, [initialTargetContact, threads, user, onClearTargetContact]);
+  }, [initialTargetContactId, threads, user, onClearTargetContact]);
 
   // Auto scroll to bottom
   const scrollToBottom = () => {

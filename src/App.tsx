@@ -126,11 +126,12 @@ function App() {
 
           const mappedThreadsPromises = Object.keys(threadGroups)
             .filter(threadId => {
+              // ONLY load DM threads for Chat Center sidebar
               if (threadId.startsWith('dm-')) {
                 const parts = threadId.split('-');
                 return parts.includes(user.id);
               }
-              return true;
+              return false; // Ignore meeting chats and other non-DM threads
             })
             .map(async (threadId) => {
               const msgs = threadGroups[threadId];
@@ -233,11 +234,10 @@ function App() {
           const newMsg = payload.new;
           if (!newMsg) return;
 
-          // Ignore DMs not involving the current user
-          if (newMsg.thread_id.startsWith('dm-')) {
-            const parts = newMsg.thread_id.split('-');
-            if (!parts.includes(user.id)) return;
-          }
+          // ONLY process DM messages involving the current user
+          if (!newMsg.thread_id.startsWith('dm-')) return;
+          const parts = newMsg.thread_id.split('-');
+          if (!parts.includes(user.id)) return;
 
           // Decrypt if it's an encrypted direct message
           let text = newMsg.text;
@@ -552,7 +552,7 @@ function App() {
   const [activeCallTitle, setActiveCallTitle] = useState<string | null>(null);
 
   // Chat redirect helper
-  const [targetContactName, setTargetContactName] = useState<string | null>(null);
+  const [targetContactId, setTargetContactId] = useState<string | null>(null);
 
   // Notifications State
   const [notifications, setNotifications] = useState<{ id: string; text: string; time: string; read: boolean }[]>([]);
@@ -739,8 +739,8 @@ function App() {
     );
   };
 
-  const handleNavigateToChat = (contactName: string) => {
-    setTargetContactName(contactName);
+  const handleNavigateToChat = (contactId: string) => {
+    setTargetContactId(contactId);
     setCurrentView('chats');
   };
 
@@ -904,7 +904,7 @@ function App() {
             {/* Dashboard Link */}
             <button 
               onClick={() => {
-                setTargetContactName(null);
+                setTargetContactId(null);
                 setCurrentView('dashboard');
               }}
               style={{
@@ -1498,8 +1498,8 @@ function App() {
 
           {currentView === 'chats' && (
             <Chats 
-              initialTargetContact={targetContactName}
-              onClearTargetContact={() => setTargetContactName(null)}
+              initialTargetContactId={targetContactId}
+              onClearTargetContact={() => setTargetContactId(null)}
               onStartMeeting={handleStartCall}
               user={user}
               threads={threads}
@@ -1557,7 +1557,7 @@ function App() {
         paddingBottom: 'env(safe-area-inset-bottom)'
       }}>
         <button 
-          onClick={() => { setTargetContactName(null); setCurrentView('dashboard'); }}
+          onClick={() => { setTargetContactId(null); setCurrentView('dashboard'); }}
           style={{
             display: 'flex',
             flexDirection: 'column',

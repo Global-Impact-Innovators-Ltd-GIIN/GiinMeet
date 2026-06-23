@@ -357,7 +357,7 @@ export const Contacts: React.FC<ContactsProps> = ({
           {/* Action Grid Buttons */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
             <button 
-              onClick={() => onNavigateToChat(selectedContact.name)}
+              onClick={() => onNavigateToChat(selectedContact.id)}
               className="premium-btn premium-btn-primary" 
               style={{ justifyContent: 'center', height: '46px' }}
             >
@@ -375,7 +375,7 @@ export const Contacts: React.FC<ContactsProps> = ({
             </button>
 
             <button 
-              onClick={() => onNavigateToChat(selectedContact.name)} // schedules or navigates
+              onClick={() => onNavigateToChat(selectedContact.id)} // schedules or navigates
               className="premium-btn premium-btn-secondary" 
               style={{ justifyContent: 'center', height: '46px' }}
             >
