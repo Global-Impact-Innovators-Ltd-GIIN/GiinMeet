@@ -4,6 +4,7 @@ import {
   Video, CheckCheck, ArrowLeft, MessageSquare
 } from 'lucide-react';
 import { mockAuth, supabase } from '../supabaseClient';
+import { encryptMessage, decryptMessage } from '../services/e2ee';
 
 interface Message {
   id: string;
@@ -21,6 +22,7 @@ interface ChatThread {
   isGroup: boolean;
   status: 'Online' | 'Offline' | 'typing...';
   messages: Message[];
+  unreadCount?: number;
 }
 
 interface ChatsProps {
@@ -52,6 +54,7 @@ export const Chats: React.FC<ChatsProps> = ({
   const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle');
   const [foundContacts, setFoundContacts] = useState<any[]>([]);
   const [toastMessage, setToastMessage] = useState('');
+  const [activeNotification, setActiveNotification] = useState<{ sender: string; text: string } | null>(null);
 
   // Dynamically load threads based on database messages
   useEffect(() => {
@@ -74,7 +77,7 @@ export const Chats: React.FC<ChatsProps> = ({
           const profilesRes = await supabase.from('profiles').select('*');
           const profilesMap = new Map(profilesRes.data?.map(p => [p.id, p]) || []);
 
-          const loadedThreads: ChatThread[] = Object.keys(threadGroups).map(threadId => {
+          const mappedThreadsPromises = Object.keys(threadGroups).map(async (threadId) => {
             const msgs = threadGroups[threadId];
 
             let name = threadId;
@@ -90,10 +93,38 @@ export const Chats: React.FC<ChatsProps> = ({
                 hash = name.charCodeAt(i) + ((hash << 5) - hash);
               }
               avatarBg = `hsl(${Math.abs(hash % 360)}, 60%, 40%)`;
+            } else if (user && threadId.startsWith('dm-')) {
+              const parts = threadId.split('-');
+              const otherUserId = parts[1] === user.id ? parts[2] : parts[1];
+              const otherProfile = profilesMap.get(otherUserId);
+              if (otherProfile) {
+                name = otherProfile.name || 'Giin User';
+                avatar = otherProfile.avatar_url ? otherProfile.avatar_url : (otherProfile.name ? otherProfile.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U');
+                let hash = 0;
+                for (let i = 0; i < name.length; i++) {
+                  hash = name.charCodeAt(i) + ((hash << 5) - hash);
+                }
+                avatarBg = `hsl(${Math.abs(hash % 360)}, 60%, 40%)`;
+              }
             } else if (threadId.includes('-') && !threadId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
               name = threadId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
               avatar = name.split(' ').map(n => n[0]).join('');
             }
+
+            // Asynchronously decrypt all messages in the group
+            const decryptedMessages = await Promise.all(msgs.map(async (m) => {
+              let text = m.text;
+              if (threadId.startsWith('dm-')) {
+                text = await decryptMessage(m.text, threadId);
+              }
+              return {
+                id: m.id,
+                sender: m.sender_name,
+                text: text,
+                time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                self: m.sender_name === 'You' || !!(user && m.user_id === user.id)
+              };
+            }));
 
             return {
               id: threadId,
@@ -101,16 +132,13 @@ export const Chats: React.FC<ChatsProps> = ({
               avatar: avatar,
               avatarBg: avatarBg,
               isGroup: false,
-              status: 'Online',
-              messages: msgs.map(m => ({
-                id: m.id,
-                sender: m.sender_name,
-                text: m.text,
-                time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                self: m.sender_name === 'You' || !!(user && m.user_id === user.id)
-              }))
+              status: 'Online' as const,
+              unreadCount: 0,
+              messages: decryptedMessages
             };
           });
+
+          const loadedThreads = await Promise.all(mappedThreadsPromises);
 
           setThreads(prev => {
             const merged = [...prev];
@@ -137,6 +165,127 @@ export const Chats: React.FC<ChatsProps> = ({
     loadAllThreads();
   }, [user]);
 
+  const triggerInAppNotification = (sender: string, text: string) => {
+    setActiveNotification({ sender, text });
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5 note
+      gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } catch (e) {
+      console.warn('Audio play blocked:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (activeNotification) {
+      const timer = setTimeout(() => {
+        setActiveNotification(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeNotification]);
+
+  // Real-time messages sync and unread/audio notification handler
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('messages-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        async (payload: any) => {
+          const newMsg = payload.new;
+          if (!newMsg) return;
+
+          // Decrypt if it's an encrypted direct message
+          let text = newMsg.text;
+          if (newMsg.thread_id.startsWith('dm-')) {
+            text = await decryptMessage(newMsg.text, newMsg.thread_id);
+          }
+
+          const mappedMsg: Message = {
+            id: newMsg.id,
+            sender: newMsg.sender_name,
+            text: text,
+            time: new Date(newMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            self: newMsg.user_id === user.id || newMsg.sender_name === 'You'
+          };
+
+          setThreads(prev => {
+            const hasThread = prev.some(t => t.id === newMsg.thread_id);
+            if (!hasThread) {
+              // Load the thread dynamically if someone starts a new chat
+              const loadNewThread = async () => {
+                if (newMsg.thread_id.startsWith('dm-')) {
+                  const parts = newMsg.thread_id.split('-');
+                  const otherUserId = parts[1] === user.id ? parts[2] : parts[1];
+                  const { data: profile } = await supabase.from('profiles').select('*').eq('id', otherUserId).maybeSingle();
+                  if (profile) {
+                    const initials = profile.name ? profile.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
+                    let hash = 0;
+                    for (let i = 0; i < (profile.name || '').length; i++) {
+                      hash = (profile.name || '').charCodeAt(i) + ((hash << 5) - hash);
+                    }
+                    const avatarBg = `hsl(${Math.abs(hash % 360)}, 60%, 40%)`;
+                    const newThread: ChatThread = {
+                      id: newMsg.thread_id,
+                      name: profile.name || 'User',
+                      avatar: profile.avatar_url || initials,
+                      avatarBg,
+                      isGroup: false,
+                      status: 'Online',
+                      unreadCount: activeThreadId !== newMsg.thread_id ? 1 : 0,
+                      messages: [mappedMsg]
+                    };
+                    if (newMsg.user_id !== user.id) {
+                      triggerInAppNotification(profile.name || 'New Contact', text);
+                    }
+                    setThreads(current => [newThread, ...current.filter(t => t.id !== newMsg.thread_id)]);
+                  }
+                }
+              };
+              loadNewThread();
+              return prev;
+            }
+
+            return prev.map(t => {
+              if (t.id === newMsg.thread_id) {
+                if (t.messages.some(m => m.id === mappedMsg.id)) return t;
+
+                const isCurrent = t.id === activeThreadId;
+                const unreadCount = !isCurrent && newMsg.user_id !== user.id ? (t.unreadCount || 0) + 1 : 0;
+
+                if (!isCurrent && newMsg.user_id !== user.id) {
+                  triggerInAppNotification(t.name, text);
+                }
+
+                return {
+                  ...t,
+                  unreadCount,
+                  messages: [...t.messages, mappedMsg]
+                };
+              }
+              return t;
+            });
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, activeThreadId]);
+
   // Search profiles database for new contact
   const handleSearchContact = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,9 +308,10 @@ export const Chats: React.FC<ChatsProps> = ({
     }
   };
 
-  // Add search profile to threads
   const handleStartChatWithContact = (contact: any) => {
-    const existingThread = threads.find(t => t.id === contact.id);
+    if (!user) return;
+    const dmId = ['dm', user.id, contact.id].sort().join('-');
+    const existingThread = threads.find(t => t.id === dmId);
     if (existingThread) {
       setActiveThreadId(existingThread.id);
     } else {
@@ -174,16 +324,17 @@ export const Chats: React.FC<ChatsProps> = ({
       const avatarBg = `hsl(${hue}, 60%, 40%)`;
 
       const newThread: ChatThread = {
-        id: contact.id,
+        id: dmId,
         name: contact.name || 'User',
         avatar: contact.avatar_url ? contact.avatar_url : initials,
         avatarBg: avatarBg,
         isGroup: false,
         status: 'Online',
+        unreadCount: 0,
         messages: []
       };
       setThreads(prev => [newThread, ...prev]);
-      setActiveThreadId(contact.id);
+      setActiveThreadId(dmId);
     }
     setShowAddContactModal(false);
     setQueryAdd('');
@@ -203,34 +354,65 @@ export const Chats: React.FC<ChatsProps> = ({
 
   // Handle redirect from Contacts click
   useEffect(() => {
-    if (initialTargetContact) {
-      const existingThread = threads.find(t => t.name.toLowerCase() === initialTargetContact.toLowerCase());
-      if (existingThread) {
-        setActiveThreadId(existingThread.id);
-        setShowConversationMobile(true);
-      } else {
-        // Create new simulated thread
-        const newId = initialTargetContact.toLowerCase().replace(/\s+/g, '-');
-        const newThread: ChatThread = {
-          id: newId,
-          name: initialTargetContact,
-          avatar: initialTargetContact.split(' ').map(n => n[0]).join(''),
-          avatarBg: '#8B5CF6',
-          isGroup: false,
-          status: 'Online',
-          messages: [
-            { id: '1', sender: initialTargetContact, text: `Hello! Nice to connect with you. Let me know if we need a video call.`, time: 'Now', self: false }
-          ]
-        };
-        setThreads(prev => [newThread, ...prev]);
-        setActiveThreadId(newId);
-        setShowConversationMobile(true);
-      }
-      if (onClearTargetContact) {
-        onClearTargetContact();
-      }
+    if (initialTargetContact && user) {
+      const loadRedirect = async () => {
+        const existingThread = threads.find(t => t.name.toLowerCase() === initialTargetContact.toLowerCase());
+        if (existingThread) {
+          setActiveThreadId(existingThread.id);
+          setShowConversationMobile(true);
+        } else {
+          // Fetch contact details by name to get contact.id
+          const { data } = await mockAuth.searchProfile(initialTargetContact);
+          const contact = data && data.length > 0 ? data[0] : null;
+          if (contact) {
+            const dmId = ['dm', user.id, contact.id].sort().join('-');
+            const initials = contact.name ? contact.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
+            let hash = 0;
+            for (let i = 0; i < (contact.name || '').length; i++) {
+              hash = (contact.name || '').charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const avatarBg = `hsl(${Math.abs(hash % 360)}, 60%, 40%)`;
+
+            const newThread: ChatThread = {
+              id: dmId,
+              name: contact.name || 'User',
+              avatar: contact.avatar_url ? contact.avatar_url : initials,
+              avatarBg: avatarBg,
+              isGroup: false,
+              status: 'Online',
+              unreadCount: 0,
+              messages: []
+            };
+            setThreads(prev => [newThread, ...prev]);
+            setActiveThreadId(dmId);
+            setShowConversationMobile(true);
+          } else {
+            // Fallback to simulated ID
+            const newId = initialTargetContact.toLowerCase().replace(/\s+/g, '-');
+            const newThread: ChatThread = {
+              id: newId,
+              name: initialTargetContact,
+              avatar: initialTargetContact.split(' ').map(n => n[0]).join(''),
+              avatarBg: '#8B5CF6',
+              isGroup: false,
+              status: 'Online',
+              unreadCount: 0,
+              messages: [
+                { id: '1', sender: initialTargetContact, text: `Hello! Nice to connect with you. Let me know if we need a video call.`, time: 'Now', self: false }
+              ]
+            };
+            setThreads(prev => [newThread, ...prev]);
+            setActiveThreadId(newId);
+            setShowConversationMobile(true);
+          }
+        }
+        if (onClearTargetContact) {
+          onClearTargetContact();
+        }
+      };
+      loadRedirect();
     }
-  }, [initialTargetContact, threads, onClearTargetContact]);
+  }, [initialTargetContact, threads, user, onClearTargetContact]);
 
   // Auto scroll to bottom
   const scrollToBottom = () => {
@@ -241,6 +423,15 @@ export const Chats: React.FC<ChatsProps> = ({
     scrollToBottom();
   }, [threads]);
 
+  // Clear unread counts for the active thread when activeThreadId changes
+  useEffect(() => {
+    if (activeThreadId) {
+      setThreads(prev => 
+        prev.map(t => t.id === activeThreadId && (t.unreadCount || 0) > 0 ? { ...t, unreadCount: 0 } : t)
+      );
+    }
+  }, [activeThreadId]);
+
   // Load messages from Supabase when activeThreadId changes
   useEffect(() => {
     const loadMessages = async () => {
@@ -248,15 +439,22 @@ export const Chats: React.FC<ChatsProps> = ({
       try {
         const dbMessages = await mockAuth.getMessages(activeThreadId);
         if (dbMessages && dbMessages.length > 0) {
-          const mapped: Message[] = dbMessages.map((m: any) => ({
-            id: m.id,
-            sender: m.sender_name,
-            text: m.text,
-            time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            self: m.sender_name === 'You' || !!(user && m.user_id === user.id)
+          const decryptedMessages = await Promise.all(dbMessages.map(async (m: any) => {
+            let text = m.text;
+            if (activeThreadId.startsWith('dm-')) {
+              text = await decryptMessage(m.text, activeThreadId);
+            }
+            return {
+              id: m.id,
+              sender: m.sender_name,
+              text: text,
+              time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              self: m.sender_name === 'You' || !!(user && m.user_id === user.id)
+            };
           }));
+          
           setThreads(prev => 
-            prev.map(t => t.id === activeThreadId ? { ...t, messages: mapped } : t)
+            prev.map(t => t.id === activeThreadId ? { ...t, messages: decryptedMessages } : t)
           );
         }
       } catch (err) {
@@ -297,10 +495,14 @@ export const Chats: React.FC<ChatsProps> = ({
 
     // Save user message to Supabase
     try {
+      let dbText = currentText;
+      if (activeThreadId.startsWith('dm-')) {
+        dbText = await encryptMessage(currentText, activeThreadId);
+      }
       await mockAuth.sendMessage({
         thread_id: activeThreadId,
         sender_name: 'You',
-        text: currentText,
+        text: dbText,
         user_id: user?.id || undefined
       });
     } catch (err) {
@@ -403,15 +605,37 @@ export const Chats: React.FC<ChatsProps> = ({
                       {lastMsg ? lastMsg.time : ''}
                     </span>
                   </div>
-                  <p style={{ 
-                    fontSize: '0.8rem', 
-                    color: 'var(--text-muted)', 
-                    whiteSpace: 'nowrap', 
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis' 
-                  }}>
-                    {lastMsg ? `${lastMsg.sender}: ${lastMsg.text}` : 'No messages'}
-                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <p style={{ 
+                      fontSize: '0.8rem', 
+                      color: 'var(--text-muted)', 
+                      whiteSpace: 'nowrap', 
+                      overflow: 'hidden', 
+                      textOverflow: 'ellipsis',
+                      flex: 1
+                    }}>
+                      {lastMsg ? `${lastMsg.sender}: ${lastMsg.text}` : 'No messages'}
+                    </p>
+                    {t.unreadCount && t.unreadCount > 0 ? (
+                      <span style={{
+                        backgroundColor: 'var(--color-secondary)',
+                        color: 'white',
+                        fontSize: '0.7rem',
+                        fontWeight: 'bold',
+                        padding: '0.15rem 0.4rem',
+                        borderRadius: '9999px',
+                        minWidth: '18px',
+                        height: '18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        lineHeight: 1,
+                        flexShrink: 0
+                      }}>
+                        {t.unreadCount}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             );
@@ -815,6 +1039,70 @@ export const Chats: React.FC<ChatsProps> = ({
           animation: 'slide-in 0.2s ease'
         }}>
           {toastMessage}
+        </div>
+      )}
+
+      {/* Slide-down In-App Notification Banner */}
+      {activeNotification && (
+        <div style={{
+          position: 'fixed',
+          top: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 10000,
+          width: '90%',
+          maxWidth: '400px',
+          padding: '1rem',
+          borderRadius: 'var(--radius-lg)',
+          background: 'var(--glass-bg)',
+          backdropFilter: 'blur(var(--glass-blur))',
+          WebkitBackdropFilter: 'blur(var(--glass-blur))',
+          border: '1px solid var(--color-secondary)',
+          boxShadow: 'var(--shadow-premium)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          animation: 'slide-down-bounce 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+        }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '50%',
+            backgroundColor: 'var(--color-primary)',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '1rem',
+            fontWeight: 700,
+            flexShrink: 0
+          }}>
+            {activeNotification.sender ? activeNotification.sender.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', margin: 0 }}>
+              {activeNotification.sender}
+            </h4>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {activeNotification.text}
+            </p>
+          </div>
+          <button 
+            onClick={() => setActiveNotification(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '1.25rem',
+              padding: '0.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            &times;
+          </button>
         </div>
       )}
     </div>
