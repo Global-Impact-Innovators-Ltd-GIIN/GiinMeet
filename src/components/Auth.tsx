@@ -579,21 +579,18 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
       }}>
         {/* Branding header */}
         <div style={{ textAlign: 'center' }}>
-          <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '14px',
-            backgroundColor: 'var(--color-accent)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 0.75rem',
-            color: 'black',
-            fontWeight: 800,
-            fontSize: '1.4rem'
-          }}>
-            G
-          </div>
+          <img 
+            src="/logo.png" 
+            alt="GIIN MEET Logo" 
+            style={{
+              width: '48px',
+              height: '48px',
+              objectFit: 'contain',
+              borderRadius: '8px',
+              margin: '0 auto 0.75rem',
+              display: 'block'
+            }} 
+          />
           <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>
             Welcome to GIIN MEET
           </h2>

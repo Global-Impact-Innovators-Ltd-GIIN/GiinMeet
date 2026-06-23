@@ -571,20 +571,16 @@ function App() {
             marginBottom: '3rem',
             paddingLeft: '0.5rem'
           }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '12px',
-              backgroundColor: 'var(--color-accent)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 800,
-              fontSize: '1.25rem',
-              color: 'black'
-            }}>
-              G
-            </div>
+            <img 
+              src="/logo.png" 
+              alt="GIIN MEET Logo" 
+              style={{
+                width: '40px',
+                height: '40px',
+                objectFit: 'contain',
+                borderRadius: '8px'
+              }} 
+            />
             <div>
               <span style={{ 
                 fontFamily: 'var(--font-heading)', 
