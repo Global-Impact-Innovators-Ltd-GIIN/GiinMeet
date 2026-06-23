@@ -696,11 +696,11 @@ export const Chats: React.FC<ChatsProps> = ({
             <form onSubmit={handleSearchContact} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                  Search by Email or Phone number
+                  Search by Name, Email, or Phone number
                 </label>
                 <input 
                   type="text" 
-                  placeholder="e.g. contact@email.com or +15551234567" 
+                  placeholder="e.g. Sofia Brant, Sofia@gmail.com, or +15550192834" 
                   value={queryAdd}
                   onChange={(e) => setQueryAdd(e.target.value)}
                   className="premium-input"

@@ -472,22 +472,58 @@ export const mockAuth = {
   // Search profiles by exact email match or phone number match
   searchProfile: async (query: string) => {
     const cleanQuery = query.trim();
-    // Try email match first
+    if (!cleanQuery) return { data: null, error: null };
+
+    // 1. Try case-insensitive exact email match
     let { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .eq('email', cleanQuery)
+      .ilike('email', cleanQuery)
       .maybeSingle();
-    
-    // If no email match, try phone match
+
+    // 2. Try case-insensitive exact name match
     if (!data) {
+      const nameRes = await supabase
+        .from('profiles')
+        .select('*')
+        .ilike('name', cleanQuery)
+        .maybeSingle();
+      data = nameRes.data;
+    }
+
+    // 3. Try partial name match (contains)
+    if (!data) {
+      const partialNameRes = await supabase
+        .from('profiles')
+        .select('*')
+        .ilike('name', `%${cleanQuery}%`)
+        .limit(1)
+        .maybeSingle();
+      data = partialNameRes.data;
+    }
+
+    // 4. Try exact or partial phone match (case-insensitive & formatted checks)
+    if (!data) {
+      const cleanPhone = cleanQuery.replace(/\D/g, '');
       const phoneRes = await supabase
         .from('profiles')
         .select('*')
-        .eq('phone', cleanQuery)
+        .ilike('phone', `%${cleanQuery}%`)
+        .limit(1)
         .maybeSingle();
       data = phoneRes.data;
       error = phoneRes.error;
+
+      if (!data && cleanPhone) {
+        const phoneCleanRes = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('phone', `%${cleanPhone}%`)
+          .limit(1)
+          .maybeSingle();
+        data = phoneCleanRes.data;
+        error = phoneCleanRes.error;
+      }
     }
     return { data, error };
   },
