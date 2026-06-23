@@ -14,7 +14,7 @@ import { Auth } from './components/Auth';
 import { PrivateSpace } from './components/PrivateSpace';
 import { Waitroom } from './components/Waitroom';
 import { Superadmin } from './components/Superadmin';
-import { mockAuth, supabase } from './supabaseClient';
+import { mockAuth, supabase, getTransparentLogo } from './supabaseClient';
 
 interface Meeting {
   id: string;
@@ -56,6 +56,12 @@ function App() {
   // Meeting History State
   const [meetingHistory, setMeetingHistory] = useState<Meeting[]>([]);
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+
+  // Transparent logo loading state
+  const [logoUrl, setLogoUrl] = useState('/logo.png');
+  useEffect(() => {
+    getTransparentLogo('/logo.png').then(url => setLogoUrl(url));
+  }, []);
 
   // Hash query router listener
   useEffect(() => {
@@ -572,13 +578,14 @@ function App() {
             paddingLeft: '0.5rem'
           }}>
             <img 
-              src="/logo.png" 
+              src={logoUrl} 
               alt="GIIN MEET Logo" 
               style={{
-                width: '40px',
-                height: '40px',
+                width: '48px',
+                height: '48px',
                 objectFit: 'contain',
-                borderRadius: '8px'
+                borderRadius: '8px',
+                filter: 'brightness(0) invert(1)'
               }} 
             />
             <div>
@@ -857,7 +864,34 @@ function App() {
           flexShrink: 0,
           zIndex: 40
         }}>
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {/* Mobile Branding Header */}
+            <div className="mobile-brand-container" style={{
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}>
+              <img 
+                src={logoUrl} 
+                alt="GIIN MEET Logo" 
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  objectFit: 'contain',
+                  filter: isDarkMode ? 'brightness(0) invert(1)' : 'none'
+                }} 
+              />
+              <span style={{
+                fontFamily: 'var(--font-heading)',
+                fontWeight: 800,
+                fontSize: '1.1rem',
+                letterSpacing: '0.03em',
+                color: 'var(--text-main)'
+              }}>
+                GIIN MEET
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0.25rem' }}>|</span>
+            </div>
+
             <h2 style={{ fontSize: '1.25rem', fontWeight: 700, textTransform: 'capitalize', fontFamily: 'var(--font-heading)' }}>
               {currentView === 'help' ? 'Help Center & Support' : currentView === 'chats' ? 'Chat Center' : currentView === 'meeting' ? 'Active Call Room' : currentView}
             </h2>

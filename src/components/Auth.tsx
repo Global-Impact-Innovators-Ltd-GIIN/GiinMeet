@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Mail, Lock, User, ArrowRight, Globe, Phone, ArrowLeft } from 'lucide-react';
-import { mockAuth, supabase } from '../supabaseClient';
+import { mockAuth, supabase, getTransparentLogo } from '../supabaseClient';
 import { generate6DigitOTP, sendTwilioSMS, sendResendEmail } from '../services/authIntegration';
 
 const WORLD_DIALING_CODES = [
@@ -217,6 +217,12 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
 
   // Simulated Alert Overlay State
   const [otpNotification, setOtpNotification] = useState<{ destination: string; code: string; channel: string } | null>(null);
+
+  // Transparent logo loading state
+  const [logoUrl, setLogoUrl] = useState('/logo.png');
+  useEffect(() => {
+    getTransparentLogo('/logo.png').then(url => setLogoUrl(url));
+  }, []);
 
   // Refs for the 6 OTP input boxes
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -580,15 +586,16 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
         {/* Branding header */}
         <div style={{ textAlign: 'center' }}>
           <img 
-            src="/logo.png" 
+            src={logoUrl} 
             alt="GIIN MEET Logo" 
             style={{
-              width: '48px',
-              height: '48px',
+              width: '64px',
+              height: '64px',
               objectFit: 'contain',
               borderRadius: '8px',
               margin: '0 auto 0.75rem',
-              display: 'block'
+              display: 'block',
+              filter: 'brightness(0) invert(1)'
             }} 
           />
           <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>

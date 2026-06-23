@@ -316,7 +316,15 @@ h1, h2, h3, h4, h5, h6 {
   gap: 1.5rem;
 }
 
+.mobile-brand-container {
+  display: none;
+}
+
 @media (max-width: 768px) {
+  .mobile-brand-container {
+    display: flex !important;
+  }
+
   .grid-2 {
     grid-template-columns: 1fr !important;
     height: auto !important;
