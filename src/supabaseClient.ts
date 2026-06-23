@@ -85,7 +85,7 @@ export const mockAuth = {
       domain: profile?.domain || domain,
       workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
       is_premium: profile?.is_premium || false,
-      is_superadmin: profile?.is_superadmin || email.toLowerCase() === 'nimdaukus@gmail.com' || false,
+      is_superadmin: email.toLowerCase() === 'nimdaukus@gmail.com',
       avatar_url: profile?.avatar_url || ''
     };
 
@@ -139,7 +139,7 @@ export const mockAuth = {
         workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
         domain: profile?.domain || 'phone.giinmeet.com',
         is_premium: profile?.is_premium || false,
-        is_superadmin: profile?.is_superadmin || false,
+        is_superadmin: false,
         avatar_url: profile?.avatar_url || ''
       };
 
@@ -469,63 +469,26 @@ export const mockAuth = {
     return data || [];
   },
 
-  // Search profiles by exact email match or phone number match
+  // Search profiles by name, email, or phone number dynamically
   searchProfile: async (query: string) => {
     const cleanQuery = query.trim();
-    if (!cleanQuery) return { data: null, error: null };
+    if (!cleanQuery) return { data: [], error: null };
 
-    // 1. Try case-insensitive exact email match
-    let { data, error } = await supabase
+    const cleanPhone = cleanQuery.replace(/\D/g, '');
+    let dbQuery = supabase
       .from('profiles')
       .select('*')
-      .ilike('email', cleanQuery)
-      .maybeSingle();
+      .or(`email.ilike.%${cleanQuery}%,name.ilike.%${cleanQuery}%,phone.ilike.%${cleanQuery}%`);
 
-    // 2. Try case-insensitive exact name match
-    if (!data) {
-      const nameRes = await supabase
+    if (cleanPhone) {
+      dbQuery = supabase
         .from('profiles')
         .select('*')
-        .ilike('name', cleanQuery)
-        .maybeSingle();
-      data = nameRes.data;
+        .or(`email.ilike.%${cleanQuery}%,name.ilike.%${cleanQuery}%,phone.ilike.%${cleanQuery}%,phone.ilike.%${cleanPhone}%`);
     }
 
-    // 3. Try partial name match (contains)
-    if (!data) {
-      const partialNameRes = await supabase
-        .from('profiles')
-        .select('*')
-        .ilike('name', `%${cleanQuery}%`)
-        .limit(1)
-        .maybeSingle();
-      data = partialNameRes.data;
-    }
-
-    // 4. Try exact or partial phone match (case-insensitive & formatted checks)
-    if (!data) {
-      const cleanPhone = cleanQuery.replace(/\D/g, '');
-      const phoneRes = await supabase
-        .from('profiles')
-        .select('*')
-        .ilike('phone', `%${cleanQuery}%`)
-        .limit(1)
-        .maybeSingle();
-      data = phoneRes.data;
-      error = phoneRes.error;
-
-      if (!data && cleanPhone) {
-        const phoneCleanRes = await supabase
-          .from('profiles')
-          .select('*')
-          .ilike('phone', `%${cleanPhone}%`)
-          .limit(1)
-          .maybeSingle();
-        data = phoneCleanRes.data;
-        error = phoneCleanRes.error;
-      }
-    }
-    return { data, error };
+    const { data, error } = await dbQuery.limit(10);
+    return { data: data || [], error };
   },
 
   // Upload profile photo

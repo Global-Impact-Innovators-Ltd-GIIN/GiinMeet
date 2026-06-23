@@ -50,7 +50,7 @@ export const Chats: React.FC<ChatsProps> = ({
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [queryAdd, setQueryAdd] = useState('');
   const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle');
-  const [foundContact, setFoundContact] = useState<any | null>(null);
+  const [foundContacts, setFoundContacts] = useState<any[]>([]);
   const [toastMessage, setToastMessage] = useState('');
 
   // Dynamically load threads based on database messages
@@ -145,15 +145,16 @@ export const Chats: React.FC<ChatsProps> = ({
     setSearchStatus('searching');
     try {
       const { data } = await mockAuth.searchProfile(queryAdd);
-      if (data) {
-        setFoundContact(data);
+      if (data && data.length > 0) {
+        setFoundContacts(data);
         setSearchStatus('found');
       } else {
-        setFoundContact(null);
+        setFoundContacts([]);
         setSearchStatus('not_found');
       }
     } catch (err) {
       console.error('Error searching contact:', err);
+      setFoundContacts([]);
       setSearchStatus('not_found');
     }
   };
@@ -187,7 +188,7 @@ export const Chats: React.FC<ChatsProps> = ({
     setShowAddContactModal(false);
     setQueryAdd('');
     setSearchStatus('idle');
-    setFoundContact(null);
+    setFoundContacts([]);
     setShowConversationMobile(true);
   };
 
@@ -685,7 +686,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   setShowAddContactModal(false);
                   setQueryAdd('');
                   setSearchStatus('idle');
-                  setFoundContact(null);
+                  setFoundContacts([]);
                 }}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.5rem' }}
               >
@@ -719,49 +720,55 @@ export const Chats: React.FC<ChatsProps> = ({
               </div>
             )}
 
-            {searchStatus === 'found' && foundContact && (
-              <div style={{ 
-                padding: '1rem', 
-                borderRadius: 'var(--radius-md)', 
-                border: '1px solid var(--border-color)', 
-                backgroundColor: 'rgba(255,255,255,0.02)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '1rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <div style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '50%',
-                    backgroundColor: 'var(--color-primary)',
-                    color: 'white',
+            {searchStatus === 'found' && foundContacts.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '200px', overflowY: 'auto' }}>
+                {foundContacts.map(contact => (
+                  <div key={contact.id} style={{ 
+                    padding: '0.75rem 1rem', 
+                    borderRadius: 'var(--radius-md)', 
+                    border: '1px solid var(--border-color)', 
+                    backgroundColor: 'rgba(255,255,255,0.02)',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 700,
-                    overflow: 'hidden'
+                    justifyContent: 'space-between',
+                    gap: '1rem'
                   }}>
-                    {foundContact.avatar_url ? (
-                      <img src={foundContact.avatar_url} alt={foundContact.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    ) : (
-                      (foundContact.name || 'User').split(' ').map((n: string) => n[0]).join('').toUpperCase()
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                      <div style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '50%',
+                        backgroundColor: 'var(--color-primary)',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 700,
+                        overflow: 'hidden',
+                        flexShrink: 0
+                      }}>
+                        {contact.avatar_url ? (
+                          <img src={contact.avatar_url} alt={contact.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          (contact.name || 'User').split(' ').map((n: string) => n[0]).join('').toUpperCase()
+                        )}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{contact.name || 'Phone User'}</h4>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {contact.email || contact.phone || 'GiinMeet Member'}
+                        </span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleStartChatWithContact(contact)}
+                      className="premium-btn premium-btn-accent" 
+                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
+                    >
+                      Chat
+                    </button>
                   </div>
-                  <div>
-                    <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>{foundContact.name || 'Phone User'}</h4>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      {foundContact.email || foundContact.phone || 'GiinMeet Member'}
-                    </span>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => handleStartChatWithContact(foundContact)}
-                  className="premium-btn premium-btn-accent" 
-                  style={{ justifyContent: 'center', width: '100%' }}
-                >
-                  Start Secure Chat
-                </button>
+                ))}
               </div>
             )}
 

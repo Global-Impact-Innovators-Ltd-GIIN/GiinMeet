@@ -81,13 +81,51 @@ function App() {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
-        const { data: profile } = await mockAuth.getProfile(session.user.id);
+        let profile = null;
+        try {
+          const { data } = await mockAuth.getProfile(session.user.id);
+          profile = data;
+        } catch (err) {
+          console.warn('Failed to fetch profile in checkSession:', err);
+        }
+
         const domain = session.user.email?.split('@')[1] || 'personal';
         const isSuperAdminEmail = session.user.email?.toLowerCase() === 'nimdaukus@gmail.com';
-        const isSuperadmin = profile?.is_superadmin || isSuperAdminEmail || false;
-        
+
+        // Self-healing check: if profile is not found in database, insert it
+        if (!profile) {
+          const isPersonalDomain = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'aol.com', 'zoho.com', 'mail.com'].includes(domain.toLowerCase());
+          const workspaceName = isPersonalDomain ? 'Personal Workspace' : `${domain.split('.')[0].toUpperCase()} Enterprise Workspace`;
+          const fullName = session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User';
+
+          const newProfile = {
+            id: session.user.id,
+            name: fullName,
+            email: session.user.email || null,
+            workspace_name: workspaceName,
+            domain: domain,
+            phone: session.user.phone || null,
+            is_premium: false,
+            is_superadmin: isSuperAdminEmail
+          };
+
+          try {
+            await supabase.from('profiles').insert([newProfile]);
+            const { data } = await mockAuth.getProfile(session.user.id);
+            profile = data;
+          } catch (err) {
+            console.error('Self-healing profile creation failed:', err);
+          }
+        }
+
+        // Strictly lock superadmin to nimdaukus@gmail.com
+        const isSuperadmin = isSuperAdminEmail;
+
         if (isSuperAdminEmail && profile && !profile.is_superadmin) {
           mockAuth.updateProfileSuperadmin(session.user.id, true);
+        } else if (!isSuperAdminEmail && profile?.is_superadmin) {
+          // Reset database role if unauthorized user has superadmin flag
+          mockAuth.updateProfileSuperadmin(session.user.id, false);
         }
 
         const authenticatedUser = {
@@ -112,6 +150,12 @@ function App() {
         if (isSuperadmin) {
           setCurrentView('superadmin');
           localStorage.setItem('giin_view', 'superadmin');
+        } else {
+          // Guard routing if they previously had superadmin in localStorage view
+          if (localStorage.getItem('giin_view') === 'superadmin') {
+            setCurrentView('dashboard');
+            localStorage.setItem('giin_view', 'dashboard');
+          }
         }
       }
     };
@@ -120,13 +164,51 @@ function App() {
     // Listen to real auth session state updates
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
       if (session?.user) {
-        const { data: profile } = await mockAuth.getProfile(session.user.id);
+        let profile = null;
+        try {
+          const { data } = await mockAuth.getProfile(session.user.id);
+          profile = data;
+        } catch (err) {
+          console.warn('Failed to fetch profile in onAuthStateChange:', err);
+        }
+
         const domain = session.user.email?.split('@')[1] || 'personal';
         const isSuperAdminEmail = session.user.email?.toLowerCase() === 'nimdaukus@gmail.com';
-        const isSuperadmin = profile?.is_superadmin || isSuperAdminEmail || false;
-        
+
+        // Self-healing check: if profile is not found in database, insert it
+        if (!profile) {
+          const isPersonalDomain = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'aol.com', 'zoho.com', 'mail.com'].includes(domain.toLowerCase());
+          const workspaceName = isPersonalDomain ? 'Personal Workspace' : `${domain.split('.')[0].toUpperCase()} Enterprise Workspace`;
+          const fullName = session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User';
+
+          const newProfile = {
+            id: session.user.id,
+            name: fullName,
+            email: session.user.email || null,
+            workspace_name: workspaceName,
+            domain: domain,
+            phone: session.user.phone || null,
+            is_premium: false,
+            is_superadmin: isSuperAdminEmail
+          };
+
+          try {
+            await supabase.from('profiles').insert([newProfile]);
+            const { data } = await mockAuth.getProfile(session.user.id);
+            profile = data;
+          } catch (err) {
+            console.error('Self-healing profile creation failed:', err);
+          }
+        }
+
+        // Strictly lock superadmin to nimdaukus@gmail.com
+        const isSuperadmin = isSuperAdminEmail;
+
         if (isSuperAdminEmail && profile && !profile.is_superadmin) {
           mockAuth.updateProfileSuperadmin(session.user.id, true);
+        } else if (!isSuperAdminEmail && profile?.is_superadmin) {
+          // Reset database role if unauthorized user has superadmin flag
+          mockAuth.updateProfileSuperadmin(session.user.id, false);
         }
 
         const authenticatedUser = {
@@ -151,6 +233,12 @@ function App() {
         if (isSuperadmin) {
           setCurrentView('superadmin');
           localStorage.setItem('giin_view', 'superadmin');
+        } else {
+          // Guard routing if they previously had superadmin in localStorage view
+          if (localStorage.getItem('giin_view') === 'superadmin') {
+            setCurrentView('dashboard');
+            localStorage.setItem('giin_view', 'dashboard');
+          }
         }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
