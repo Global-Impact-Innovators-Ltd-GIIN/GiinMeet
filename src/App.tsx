@@ -63,6 +63,9 @@ function App() {
     getTransparentLogo('/logo.png').then(url => setLogoUrl(url));
   }, []);
 
+  // Guest user session state
+  const [guestUser, setGuestUser] = useState<{ id: string; name: string; email: string } | null>(null);
+
   // Hash query router listener
   useEffect(() => {
     const handleHashChange = () => {
@@ -266,7 +269,7 @@ function App() {
             const mapped: Meeting[] = data.map((m: any) => ({
               id: m.id,
               title: m.title,
-              time: new Date(m.time).toLocaleString(),
+              time: m.time || new Date().toISOString(),
               duration: m.duration || '40m limit',
               status: m.status as 'Completed' | 'In Progress' | 'Scheduled',
               host: m.host || 'You'
@@ -342,7 +345,7 @@ function App() {
           const mapped: Meeting = {
             id: saved.id,
             title: saved.title,
-            time: new Date(saved.time).toLocaleString(),
+            time: saved.time,
             duration: saved.duration || 'Active now',
             status: saved.status as 'Completed' | 'In Progress' | 'Scheduled',
             host: saved.host || 'You'
@@ -356,7 +359,7 @@ function App() {
       const newMeet: Meeting = {
         id: Math.random().toString(36).substr(2, 9),
         title: finalTitle,
-        time: new Date().toLocaleString(),
+        time: new Date().toISOString(),
         duration: 'Active now',
         status: 'In Progress',
         host: 'You'
@@ -379,7 +382,12 @@ function App() {
     setMeetingHistory(prev => 
       prev.map(m => m.status === 'In Progress' ? { ...m, status: 'Completed', duration: 'Ended call' } : m)
     );
-    setCurrentView('dashboard');
+    if (!user) {
+      setGuestUser(null);
+      setCurrentView('auth');
+    } else {
+      setCurrentView('dashboard');
+    }
   };
 
   const handleAddMeeting = async (meet: Meeting) => {
@@ -388,7 +396,7 @@ function App() {
         const newDbMeet = {
           user_id: user.id,
           title: meet.title,
-          time: new Date(meet.time).toISOString(),
+          time: meet.time,
           duration: meet.duration,
           status: 'Scheduled',
           host: user.name || 'You'
@@ -398,7 +406,7 @@ function App() {
           const mapped: Meeting = {
             id: saved.id,
             title: saved.title,
-            time: new Date(saved.time).toLocaleString(),
+            time: saved.time,
             duration: saved.duration || '40m limit',
             status: 'Scheduled',
             host: saved.host || 'You'
@@ -527,9 +535,12 @@ function App() {
         meetingId={joinMeetingData.meetingId}
         initialPasscode={joinMeetingData.passcode}
         user={user}
-        onAdmitted={(title, _participantId) => {
+        onAdmitted={(title, _participantId, displayName) => {
           setActiveCallTitle(title);
           setActiveMeetingId(joinMeetingData.meetingId);
+          if (!user) {
+            setGuestUser({ id: _participantId, name: displayName, email: 'guest@phone.giinmeet.com' });
+          }
           setCurrentView('meeting');
         }}
         onDeclined={() => {
@@ -539,6 +550,21 @@ function App() {
           setCurrentView(user ? 'dashboard' : 'auth');
         }}
       />
+    );
+  }
+
+  // Outer routing bypass: Render meeting room for unauthenticated guest users
+  if (currentView === 'meeting' && activeMeetingId && !user && guestUser) {
+    return (
+      <div style={{ width: '100vw', height: '100vh', backgroundColor: 'var(--bg-app)' }}>
+        <MeetingRoom 
+          meetingId={activeMeetingId}
+          meetingTitle={activeCallTitle || 'GIIN MEET Video Room'}
+          onEndMeeting={handleEndMeeting}
+          onSaveWorkspaceData={handleSaveWorkspaceData}
+          currentUser={guestUser}
+        />
+      </div>
     );
   }
 

@@ -41,7 +41,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const newMeeting: Meeting = {
       id: Math.random().toString(36).substr(2, 9),
       title: meetingTitle,
-      time: new Date(meetingTime).toLocaleString(),
+      time: new Date(meetingTime).toISOString(),
       duration: '40m limit',
       status: 'Scheduled',
       host: 'You',
@@ -244,7 +244,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div>
                     <h4 style={{ fontSize: '0.95rem', fontWeight: 600 }}>{meeting.title}</h4>
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {meeting.time} &bull; {meeting.duration}
+                      {(() => {
+                        try {
+                          return new Date(meeting.time).toLocaleString();
+                        } catch (e) {
+                          return meeting.time;
+                        }
+                      })()} &bull; {meeting.duration}
                     </p>
                   </div>
                 </div>

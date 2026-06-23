@@ -6,7 +6,7 @@ interface WaitroomProps {
   meetingId: string;
   initialPasscode?: string;
   user: { id: string; name: string; email: string } | null;
-  onAdmitted: (meetingTitle: string, participantId: string) => void;
+  onAdmitted: (meetingTitle: string, participantId: string, displayName: string) => void;
   onDeclined: () => void;
   onBack: () => void;
 }
@@ -71,7 +71,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
         if (status === 'Admitted') {
           setWaitingStatus('Admitted');
           clearInterval(interval);
-          onAdmitted(meetingDetails?.title || 'GIIN MEET Call', participantId);
+          onAdmitted(meetingDetails?.title || 'GIIN MEET Call', participantId, displayName);
         } else if (status === 'Declined') {
           setWaitingStatus('Declined');
           clearInterval(interval);

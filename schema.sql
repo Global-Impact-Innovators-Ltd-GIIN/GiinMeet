@@ -49,8 +49,8 @@ CREATE TABLE IF NOT EXISTS public.meetings (
 -- Enable RLS on Meetings
 ALTER TABLE public.meetings ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow individual read access to own meetings"
-  ON public.meetings FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Allow public read access to meetings"
+  ON public.meetings FOR SELECT USING (true);
 
 CREATE POLICY "Allow individual insert access to own meetings"
   ON public.meetings FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -175,3 +175,7 @@ SET is_superadmin = true
 WHERE id IN (
   SELECT id FROM auth.users WHERE email = 'nimdaukus@gmail.com'
 );
+
+-- Policy updates for existing databases
+DROP POLICY IF EXISTS "Allow individual read access to own meetings" ON public.meetings;
+CREATE POLICY "Allow public read access to meetings" ON public.meetings FOR SELECT USING (true);
