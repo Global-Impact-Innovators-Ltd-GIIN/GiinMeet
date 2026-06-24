@@ -842,6 +842,7 @@ function App() {
 
 
   const handleAddMeeting = async (meet: Meeting) => {
+    let savedMeet = null;
     if (user && user.id) {
       try {
         const newDbMeet = {
@@ -852,28 +853,29 @@ function App() {
           status: 'Scheduled',
           host: user.name || 'You'
         };
-        const saved = await mockAuth.createMeeting(newDbMeet);
-        if (saved) {
-          const mapped: Meeting = {
-            id: saved.id,
-            title: saved.title,
-            time: saved.time,
-            duration: saved.duration || '40m limit',
-            status: 'Scheduled',
-            host: saved.host || 'You'
-          };
-          setMeetingHistory(prev => [mapped, ...prev]);
-        }
+        savedMeet = await mockAuth.createMeeting(newDbMeet);
       } catch (err) {
         console.error('Failed to schedule meeting in database:', err);
       }
-    } else {
-      setMeetingHistory(prev => [meet, ...prev]);
     }
+
+    const finalMeet: Meeting = savedMeet ? {
+      id: savedMeet.id,
+      title: savedMeet.title,
+      time: savedMeet.time,
+      duration: savedMeet.duration || '40m limit',
+      status: 'Scheduled',
+      host: savedMeet.host || 'You'
+    } : {
+      ...meet,
+      host: user?.name || 'You'
+    };
+
+    setMeetingHistory(prev => [finalMeet, ...prev]);
 
     const newNotif = {
       id: Math.random().toString(36).substr(2, 9),
-      text: `Scheduled new meeting: "${meet.title}"`,
+      text: `Scheduled new meeting: "${finalMeet.title}"`,
       time: 'Just now',
       read: false
     };
