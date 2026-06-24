@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, ArrowLeft, Loader2, Sparkles, UserPlus, CheckCircle } from 'lucide-react';
-import { mockAuth } from '../supabaseClient';
+import { mockAuth, supabase } from '../supabaseClient';
 
 interface WaitroomProps {
   meetingId: string;
@@ -61,29 +61,64 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     fetchDetails();
   }, [meetingId, initialPasscode, user]);
 
-  // Polling waiting room status once registered
+  // Real-time waiting room status checking with fallback polling for resilience
   useEffect(() => {
     if (!participantId || waitingStatus !== 'Waiting') return;
 
-    const interval = setInterval(async () => {
+    const checkStatus = async () => {
       try {
         const status = await mockAuth.checkParticipantStatus(participantId);
         if (status === 'Admitted') {
           setWaitingStatus('Admitted');
-          clearInterval(interval);
           onAdmitted(meetingDetails?.title || 'GIIN MEET Call', participantId, displayName);
         } else if (status === 'Declined') {
           setWaitingStatus('Declined');
-          clearInterval(interval);
           onDeclined();
         }
       } catch (err) {
-        console.error('Waiting status poll failure:', err);
+        console.error('Waiting status check failure:', err);
       }
-    }, 3000);
+    };
 
-    return () => clearInterval(interval);
-  }, [participantId, waitingStatus, meetingDetails, onAdmitted, onDeclined]);
+    // Check status immediately
+    checkStatus();
+
+    // Subscribe to realtime status update broadcast for the current participant
+    const channel = supabase
+      .channel(`waitroom-status-${participantId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'meeting_participants',
+          filter: `id=eq.${participantId}`
+        },
+        (payload: any) => {
+          const newStatus = payload.new?.status;
+          if (newStatus === 'Admitted') {
+            setWaitingStatus('Admitted');
+            onAdmitted(meetingDetails?.title || 'GIIN MEET Call', participantId, displayName);
+          } else if (newStatus === 'Declined') {
+            setWaitingStatus('Declined');
+            onDeclined();
+          }
+        }
+      )
+      .subscribe((status, err) => {
+        if (status !== 'SUBSCRIBED') {
+          console.warn('[Waitroom Realtime] Subscription status:', status, err);
+        }
+      });
+
+    // Standby polling fallback every 4 seconds
+    const interval = setInterval(checkStatus, 4000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
+  }, [participantId, waitingStatus, meetingDetails, displayName, onAdmitted, onDeclined]);
 
   // Handle Passcode Validation
   const handleVerifyPasscode = (e: React.FormEvent) => {

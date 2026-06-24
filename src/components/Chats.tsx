@@ -52,6 +52,7 @@ export const Chats: React.FC<ChatsProps> = ({
   const [showConversationMobile, setShowConversationMobile] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Add Contact states
   const [showAddContactModal, setShowAddContactModal] = useState(false);
@@ -258,6 +259,185 @@ export const Chats: React.FC<ChatsProps> = ({
     } catch (err) {
       console.error('Failed to send user message to database:', err);
     }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !activeThreadId) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File is too large. Please select a file under 5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64Data = reader.result as string;
+      const filePayload = `[FILE:${file.name}|${file.type}|${base64Data}]`;
+
+      // Save user message to Supabase
+      try {
+        let dbText = filePayload;
+        if (activeThreadId.startsWith('dm_')) {
+          dbText = await encryptMessage(filePayload, activeThreadId);
+        }
+        
+        // Add locally first for instant feedback
+        const localId = Math.random().toString(36).substr(2, 9);
+        const newMsg: Message = {
+          id: localId,
+          sender: 'You',
+          text: filePayload,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          self: true
+        };
+
+        setThreads(prev => 
+          prev.map(t => {
+            if (t.id === activeThreadId) {
+              return { ...t, messages: [...t.messages, newMsg] };
+            }
+            return t;
+          })
+        );
+
+        await mockAuth.sendMessage({
+          thread_id: activeThreadId,
+          sender_name: user.name || 'You',
+          text: dbText,
+          user_id: user.id
+        });
+      } catch (err) {
+        console.error('Failed to send file attachment:', err);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const renderMessageContent = (text: string, self: boolean) => {
+    const fileRegex = /^\[FILE:([^|]+)\|([^|]+)\|(.+)\]$/;
+    const match = text.match(fileRegex);
+
+    if (match) {
+      const [, fileName, fileType, fileData] = match;
+
+      if (fileType.startsWith('image/')) {
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}>
+            <div style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', maxHeight: '200px', maxWidth: '300px' }}>
+              <img 
+                src={fileData} 
+                alt={fileName} 
+                style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer', transition: 'transform 0.2s' }} 
+                onClick={() => {
+                  const w = window.open();
+                  if (w) w.document.write(`<img src="${fileData}" style="max-width:100%; max-height:100vh; display:block; margin:auto;" />`);
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              />
+            </div>
+            <a 
+              href={fileData} 
+              download={fileName} 
+              style={{ fontSize: '0.75rem', color: self ? '#FABD02' : 'var(--color-primary)', textDecoration: 'underline', fontWeight: 600 }}
+            >
+              📥 Download {fileName}
+            </a>
+          </div>
+        );
+      } else if (fileType.startsWith('video/')) {
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}>
+            <video 
+              src={fileData} 
+              controls 
+              style={{ maxWidth: '300px', borderRadius: '8px', border: '1px solid var(--border-color)' }} 
+            />
+            <a 
+              href={fileData} 
+              download={fileName} 
+              style={{ fontSize: '0.75rem', color: self ? '#FABD02' : 'var(--color-primary)', textDecoration: 'underline', fontWeight: 600 }}
+            >
+              📥 Download {fileName}
+            </a>
+          </div>
+        );
+      } else if (fileType.startsWith('audio/')) {
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}>
+            <audio 
+              src={fileData} 
+              controls 
+              style={{ maxWidth: '260px' }} 
+            />
+            <a 
+              href={fileData} 
+              download={fileName} 
+              style={{ fontSize: '0.75rem', color: self ? '#FABD02' : 'var(--color-primary)', textDecoration: 'underline', fontWeight: 600 }}
+            >
+              📥 Download {fileName}
+            </a>
+          </div>
+        );
+      } else {
+        return (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.75rem', 
+            padding: '0.75rem', 
+            borderRadius: '8px', 
+            border: self ? '1px solid rgba(255,255,255,0.2)' : '1px solid var(--border-color)', 
+            backgroundColor: self ? 'rgba(255,255,255,0.1)' : 'var(--bg-card)',
+            marginTop: '0.25rem',
+            minWidth: '220px'
+          }}>
+            <div style={{ 
+              width: '40px', 
+              height: '40px', 
+              borderRadius: '6px', 
+              backgroundColor: self ? 'rgba(250,189,2,0.2)' : 'rgba(0,32,91,0.1)', 
+              color: self ? '#FABD02' : 'var(--color-primary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '1.25rem',
+              fontWeight: 700
+            }}>
+              📄
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ 
+                fontSize: '0.8rem', 
+                fontWeight: 600, 
+                color: self ? 'white' : 'var(--text-main)', 
+                margin: 0, 
+                whiteSpace: 'nowrap', 
+                overflow: 'hidden', 
+                textOverflow: 'ellipsis' 
+              }}>
+                {fileName}
+              </p>
+              <a 
+                href={fileData} 
+                download={fileName} 
+                style={{ 
+                  fontSize: '0.7rem', 
+                  color: self ? '#FABD02' : 'var(--color-secondary)', 
+                  textDecoration: 'underline',
+                  fontWeight: 600
+                }}
+              >
+                Download Document
+              </a>
+            </div>
+          </div>
+        );
+      }
+    }
+
+    return text;
   };
 
   const handleAddEmoji = (emoji: string) => {
@@ -509,7 +689,7 @@ export const Chats: React.FC<ChatsProps> = ({
                     border: m.self ? 'none' : '1px solid var(--border-color)',
                     boxShadow: 'var(--shadow-sm)'
                   }}>
-                    {m.text}
+                    {renderMessageContent(m.text, m.self)}
                   </div>
                   {m.self && (
                     <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: 'var(--color-secondary)', fontSize: '0.65rem', marginTop: '0.15rem' }}>
@@ -558,6 +738,12 @@ export const Chats: React.FC<ChatsProps> = ({
               )}
 
               <form onSubmit={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileChange} 
+                  style={{ display: 'none' }} 
+                />
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button 
                     type="button" 
@@ -568,6 +754,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   </button>
                   <button 
                     type="button" 
+                    onClick={() => fileInputRef.current?.click()}
                     style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                   >
                     <Paperclip size={22} />
