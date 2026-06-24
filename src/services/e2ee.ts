@@ -109,10 +109,22 @@ export const encryptFrame = (chunk: any, controller: any, keySeed: string) => {
     return;
   }
 
-  const keyBytes = new TextEncoder().encode(keySeed);
-  const u8 = new Uint8Array(data);
-  for (let i = offset; i < u8.length; i++) {
-    u8[i] ^= keyBytes[(i - offset) % keyBytes.length];
+  try {
+    const keyBytes = new TextEncoder().encode(keySeed);
+    const u8 = new Uint8Array(data);
+    
+    // Create a new buffer to avoid direct modification errors on read-only buffers
+    const newBuffer = new ArrayBuffer(data.byteLength);
+    const newData = new Uint8Array(newBuffer);
+    newData.set(u8);
+    
+    for (let i = offset; i < newData.length; i++) {
+      newData[i] ^= keyBytes[(i - offset) % keyBytes.length];
+    }
+    
+    chunk.data = newBuffer;
+  } catch (err) {
+    console.warn('[E2EE] encryptFrame failed, bypassing encryption for this frame:', err);
   }
   
   controller.enqueue(chunk);
@@ -120,6 +132,31 @@ export const encryptFrame = (chunk: any, controller: any, keySeed: string) => {
 
 // WebRTC Insertable Streams Frame transform decryption (XOR is symmetric)
 export const decryptFrame = (chunk: any, controller: any, keySeed: string) => {
-  encryptFrame(chunk, controller, keySeed);
+  const data = chunk.data;
+  const offset = chunk.type === 'audio' ? 4 : 10;
+  if (data.byteLength <= offset) {
+    controller.enqueue(chunk);
+    return;
+  }
+
+  try {
+    const keyBytes = new TextEncoder().encode(keySeed);
+    const u8 = new Uint8Array(data);
+    
+    // Create a new buffer to avoid direct modification errors on read-only buffers
+    const newBuffer = new ArrayBuffer(data.byteLength);
+    const newData = new Uint8Array(newBuffer);
+    newData.set(u8);
+    
+    for (let i = offset; i < newData.length; i++) {
+      newData[i] ^= keyBytes[(i - offset) % keyBytes.length];
+    }
+    
+    chunk.data = newBuffer;
+  } catch (err) {
+    console.warn('[E2EE] decryptFrame failed, bypassing decryption for this frame:', err);
+  }
+  
+  controller.enqueue(chunk);
 };
 

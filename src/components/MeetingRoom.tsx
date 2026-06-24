@@ -178,6 +178,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
   // WebRTC Peer States & Connections
   const myKey = currentUser?.id || 'guest-user-' + Math.random().toString(36).substring(2, 7);
   const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
+  const pcCandidatesRef = useRef<{ [peerKey: string]: any[] }>({});
   const [remoteStreams, setRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
   const [peerStates, setPeerStates] = useState<{ 
     [peerKey: string]: { 
@@ -197,6 +198,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
       pcsRef.current[peerKey].close();
       delete pcsRef.current[peerKey];
     }
+    if (pcCandidatesRef.current[peerKey]) {
+      delete pcCandidatesRef.current[peerKey];
+    }
     setRemoteStreams(prev => {
       const copy = { ...prev };
       delete copy[peerKey];
@@ -207,6 +211,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
       delete copy[peerKey];
       return copy;
     });
+    setParticipants(prev => prev.filter(p => p.id !== peerKey && p.userId !== peerKey));
   };
 
   // E2EE Transform stream injectors
@@ -394,7 +399,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
                 avatarBg: avatarBg
               };
             });
-          setParticipants(mapped);
+          setParticipants(prev => {
+            const merged = [...mapped];
+            prev.forEach(p => {
+              // If it's a dynamic participant (we have an active peer connection with them), keep them!
+              const isDynamic = p.id.startsWith('guest-') || p.id.startsWith('mock-') || p.id.startsWith('virtual-') || !mapped.some(m => m.id === p.id || m.userId === p.userId);
+              if (isDynamic && (pcsRef.current[p.id] || pcsRef.current[p.userId || ''])) {
+                merged.push(p);
+              }
+            });
+            return merged;
+          });
         }
       } catch (err) {
         console.error('Failed to load call participants:', err);
@@ -552,15 +567,49 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
             sdp: answer
           }
         });
+
+        // Process buffered ICE candidates
+        const candidates = pcCandidatesRef.current[senderKey] || [];
+        for (const cand of candidates) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (e) {
+            console.warn('[WebRTC] Error adding buffered ICE candidate:', e);
+          }
+        }
+        pcCandidatesRef.current[senderKey] = [];
+
       } else if (type === 'answer') {
         const pc = pcsRef.current[senderKey];
         if (pc) {
           await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+          // Process buffered ICE candidates
+          const candidates = pcCandidatesRef.current[senderKey] || [];
+          for (const cand of candidates) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(cand));
+            } catch (e) {
+              console.warn('[WebRTC] Error adding buffered ICE candidate:', e);
+            }
+          }
+          pcCandidatesRef.current[senderKey] = [];
         }
       } else if (type === 'candidate') {
         const pc = pcsRef.current[senderKey];
         if (pc) {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          if (pc.remoteDescription && pc.remoteDescription.type) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (e) {
+              console.warn('[WebRTC] Error adding ICE candidate:', e);
+            }
+          } else {
+            if (!pcCandidatesRef.current[senderKey]) {
+              pcCandidatesRef.current[senderKey] = [];
+            }
+            pcCandidatesRef.current[senderKey].push(candidate);
+          }
         }
       }
     };
@@ -583,6 +632,33 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
               isSpeaking: false
             }
           }));
+
+          // DYNAMIC RESILIENCE: If this participant is not in our list, add them virtually!
+          setParticipants(prev => {
+            const exists = prev.some(p => p.id === senderKey || p.userId === senderKey);
+            if (exists) return prev;
+            
+            const initials = data.name ? data.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
+            let hash = 0;
+            for (let i = 0; i < (data.name || '').length; i++) {
+              hash = (data.name || '').charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const hue = Math.abs(hash % 360);
+            const avatarBg = `hsl(${hue}, 60%, 40%)`;
+
+            const newVirtualParticipant: Participant = {
+              id: senderKey,
+              userId: senderKey,
+              name: data.name || 'Participant',
+              avatar: initials,
+              role: 'Participant',
+              isMuted: data.isMuted,
+              isSpeaking: false,
+              isVideoOn: data.isVideoOn,
+              avatarBg: avatarBg
+            };
+            return [...prev, newVirtualParticipant];
+          });
 
           // Lexicographical ordering resolves glare (only smaller key initiates)
           const isInitiator = myKey < senderKey;
