@@ -367,8 +367,8 @@ export const Chats: React.FC<ChatsProps> = ({
                       {lastMsg ? `${lastMsg.sender}: ${lastMsg.text}` : 'No messages'}
                     </p>
                     {t.unreadCount && t.unreadCount > 0 ? (
-                      <span style={{
-                        backgroundColor: 'var(--color-secondary)',
+                      <span className="badge-pulse-red" style={{
+                        backgroundColor: '#EF4444',
                         color: 'white',
                         fontSize: '0.7rem',
                         fontWeight: 'bold',

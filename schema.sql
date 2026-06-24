@@ -179,3 +179,11 @@ WHERE id IN (
 -- Policy updates for existing databases
 DROP POLICY IF EXISTS "Allow individual read access to own meetings" ON public.meetings;
 CREATE POLICY "Allow public read access to meetings" ON public.meetings FOR SELECT USING (true);
+
+
+-- 6. ENABLE REALTIME BROADCASTS ON CHAT AND MEETING CALLS
+-- Run these statements in your Supabase SQL Editor (https://supabase.com)
+-- to allow instant message syncing and waitroom updates without requiring manual refresh.
+ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.meeting_participants;
+

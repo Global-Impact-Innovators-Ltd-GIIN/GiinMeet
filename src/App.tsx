@@ -312,7 +312,9 @@ function App() {
           });
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        console.log(`[Realtime] Messages channel status: ${status}`, err || '');
+      });
 
     return () => {
       supabase.removeChannel(channel);
@@ -570,6 +572,42 @@ function App() {
     }
   }, [isDarkMode]);
 
+  const totalUnreadMessages = threads.reduce((acc, t) => acc + (t.unreadCount || 0), 0);
+
+  // Window focus state tracker
+  const [isWindowFocused, setIsWindowFocused] = useState(true);
+  useEffect(() => {
+    const handleFocus = () => setIsWindowFocused(true);
+    const handleBlur = () => setIsWindowFocused(false);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
+
+  // Flash browser tab title when user is idle/away and has unread messages
+  useEffect(() => {
+    let interval: any = null;
+    if (totalUnreadMessages > 0 && !isWindowFocused) {
+      let showAlert = true;
+      interval = setInterval(() => {
+        document.title = showAlert 
+          ? `💬 (${totalUnreadMessages}) New Message!` 
+          : 'GIIN MEET | Premium Video';
+        showAlert = !showAlert;
+      }, 1500);
+    } else {
+      document.title = totalUnreadMessages > 0 
+        ? `💬 (${totalUnreadMessages}) GIIN MEET | Chat` 
+        : 'GIIN MEET | Premium Video Conferencing & Virtualization';
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [totalUnreadMessages, isWindowFocused]);
+
   // Sync state changes to storage
   useEffect(() => {
     localStorage.setItem('giin_view', currentView);
@@ -586,8 +624,6 @@ function App() {
   const handleToggleTheme = () => {
     setIsDarkMode(!isDarkMode);
   };
-
-  const totalUnreadMessages = threads.reduce((acc, t) => acc + (t.unreadCount || 0), 0);
 
   const handleStartCall = async (title?: string) => {
     const finalTitle = title || 'Instant Call';
@@ -953,7 +989,7 @@ function App() {
                 <span>Chat Center</span>
               </div>
               {totalUnreadMessages > 0 && (
-                <span style={{
+                <span className="badge-pulse-red" style={{
                   backgroundColor: '#EF4444',
                   color: 'white',
                   fontSize: '0.75rem',
@@ -1598,7 +1634,7 @@ function App() {
           <div style={{ position: 'relative', display: 'inline-block' }}>
             <MessageSquare size={20} color={currentView === 'chats' ? 'var(--color-active-nav)' : 'var(--text-muted)'} style={{ color: currentView === 'chats' ? 'var(--color-active-nav)' : 'var(--text-muted)' }} />
             {totalUnreadMessages > 0 && (
-              <span style={{
+              <span className="badge-pulse-red" style={{
                 position: 'absolute',
                 top: '-5px',
                 right: '-8px',
