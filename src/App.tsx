@@ -127,8 +127,8 @@ function App() {
           const mappedThreadsPromises = Object.keys(threadGroups)
             .filter(threadId => {
               // ONLY load DM threads for Chat Center sidebar
-              if (threadId.startsWith('dm-')) {
-                const parts = threadId.split('-');
+              if (threadId.startsWith('dm_')) {
+                const parts = threadId.split('_');
                 return parts.includes(user.id);
               }
               return false; // Ignore meeting chats and other non-DM threads
@@ -149,8 +149,8 @@ function App() {
                   hash = name.charCodeAt(i) + ((hash << 5) - hash);
                 }
                 avatarBg = `hsl(${Math.abs(hash % 360)}, 60%, 40%)`;
-              } else if (threadId.startsWith('dm-')) {
-                const parts = threadId.split('-');
+              } else if (threadId.startsWith('dm_')) {
+                const parts = threadId.split('_');
                 const otherUserId = parts[1] === user.id ? parts[2] : parts[1];
                 const otherProfile = profilesMap.get(otherUserId);
                 if (otherProfile) {
@@ -170,7 +170,7 @@ function App() {
               // Asynchronously decrypt all messages in the group
               const decryptedMessages = await Promise.all(msgs.map(async (m) => {
                 let text = m.text;
-                if (threadId.startsWith('dm-')) {
+                if (threadId.startsWith('dm_')) {
                   text = await decryptMessage(m.text, threadId);
                 }
                 return {
@@ -235,13 +235,13 @@ function App() {
           if (!newMsg) return;
 
           // ONLY process DM messages involving the current user
-          if (!newMsg.thread_id.startsWith('dm-')) return;
-          const parts = newMsg.thread_id.split('-');
+          if (!newMsg.thread_id.startsWith('dm_')) return;
+          const parts = newMsg.thread_id.split('_');
           if (!parts.includes(user.id)) return;
 
           // Decrypt if it's an encrypted direct message
           let text = newMsg.text;
-          if (newMsg.thread_id.startsWith('dm-')) {
+          if (newMsg.thread_id.startsWith('dm_')) {
             text = await decryptMessage(newMsg.text, newMsg.thread_id);
           }
 
@@ -258,8 +258,8 @@ function App() {
             if (!hasThread) {
               // Load the thread dynamically if someone starts a new chat
               const loadNewThread = async () => {
-                if (newMsg.thread_id.startsWith('dm-')) {
-                  const parts = newMsg.thread_id.split('-');
+                if (newMsg.thread_id.startsWith('dm_')) {
+                  const parts = newMsg.thread_id.split('_');
                   const otherUserId = parts[1] === user.id ? parts[2] : parts[1];
                   const { data: profile } = await supabase.from('profiles').select('*').eq('id', otherUserId).maybeSingle();
                   if (profile) {

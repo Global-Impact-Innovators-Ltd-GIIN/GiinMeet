@@ -86,7 +86,7 @@ export const Chats: React.FC<ChatsProps> = ({
 
   const handleStartChatWithContact = (contact: any) => {
     if (!user) return;
-    const dmId = ['dm', user.id, contact.id].sort().join('-');
+    const dmId = 'dm_' + [user.id, contact.id].sort().join('_');
     const existingThread = threads.find(t => t.id === dmId);
     if (existingThread) {
       setActiveThreadId(existingThread.id);
@@ -132,7 +132,7 @@ export const Chats: React.FC<ChatsProps> = ({
   useEffect(() => {
     if (initialTargetContactId && user) {
       const loadRedirect = async () => {
-        const dmId = ['dm', user.id, initialTargetContactId].sort().join('-');
+        const dmId = 'dm_' + [user.id, initialTargetContactId].sort().join('_');
         const existingThread = threads.find(t => t.id === dmId);
         if (existingThread) {
           setActiveThreadId(existingThread.id);
@@ -191,7 +191,7 @@ export const Chats: React.FC<ChatsProps> = ({
         if (dbMessages && dbMessages.length > 0) {
           const decryptedMessages = await Promise.all(dbMessages.map(async (m: any) => {
             let text = m.text;
-            if (activeThreadId.startsWith('dm-')) {
+            if (activeThreadId.startsWith('dm_')) {
               text = await decryptMessage(m.text, activeThreadId);
             }
             return {
@@ -246,12 +246,12 @@ export const Chats: React.FC<ChatsProps> = ({
     // Save user message to Supabase
     try {
       let dbText = currentText;
-      if (activeThreadId.startsWith('dm-')) {
+      if (activeThreadId.startsWith('dm_')) {
         dbText = await encryptMessage(currentText, activeThreadId);
       }
       await mockAuth.sendMessage({
         thread_id: activeThreadId,
-        sender_name: 'You',
+        sender_name: user?.name || 'You',
         text: dbText,
         user_id: user?.id || undefined
       });
