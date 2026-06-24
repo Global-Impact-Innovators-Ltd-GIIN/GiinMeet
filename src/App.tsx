@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { 
   Home, MessageSquare, Users, Settings as SettingsIcon, HelpCircle, 
-  CreditCard, Bell, LogOut, Sun, Moon, CheckCircle2, ChevronDown, User, Shield
+  CreditCard, Bell, LogOut, Sun, Moon, CheckCircle2, ChevronDown, User, Shield,
+  Phone, PhoneOff
 } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
-import { MeetingRoom } from './components/MeetingRoom';
+import { MeetingRoom, startRingSound, stopRingSound } from './components/MeetingRoom';
 import { Contacts } from './components/Contacts';
 import { Chats } from './components/Chats';
 import type { ChatThread, Message } from './components/Chats';
@@ -16,7 +17,8 @@ import { PrivateSpace } from './components/PrivateSpace';
 import { Waitroom } from './components/Waitroom';
 import { Superadmin } from './components/Superadmin';
 import { mockAuth, supabase, getTransparentLogo } from './supabaseClient';
-import { decryptMessage } from './services/e2ee';
+import { encryptMessage, decryptMessage } from './services/e2ee';
+
 
 interface Meeting {
   id: string;
@@ -72,6 +74,10 @@ function App() {
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string>('');
   const [activeNotification, setActiveNotification] = useState<{ sender: string; text: string } | null>(null);
+
+  // Real-time call / signaling states
+  const [incomingCall, setIncomingCall] = useState<{ meetingId: string; passcode: string; callerName: string; callerId: string } | null>(null);
+  const [dialingState, setDialingState] = useState<{ targetUserId: string; targetUserName: string; meetingId: string; passcode: string } | null>(null);
 
   // Audio chime helper
   const triggerInAppNotification = (sender: string, text: string) => {
@@ -625,7 +631,7 @@ function App() {
     setIsDarkMode(!isDarkMode);
   };
 
-  const handleStartCall = async (title?: string) => {
+  const handleStartCall = async (title?: string, dmThreadId?: string) => {
     const finalTitle = title || 'Instant Call';
     setActiveCallTitle(finalTitle);
     
@@ -651,6 +657,47 @@ function App() {
             host: saved.host || 'You'
           };
           setMeetingHistory(prev => [mapped, ...prev]);
+
+          if (dmThreadId && dmThreadId.startsWith('dm_')) {
+            const parts = dmThreadId.split('_');
+            const targetUserId = parts[1] === user.id ? parts[2] : parts[1];
+            const targetThread = threads.find(t => t.id === dmThreadId);
+            const targetName = targetThread ? targetThread.name : 'Contact';
+
+            setDialingState({
+              targetUserId,
+              targetUserName: targetName,
+              meetingId: saved.id,
+              passcode: saved.passcode
+            });
+
+            startRingSound();
+
+            const inviteMsg = `📞 CALL_INVITE:${saved.id}:${saved.passcode}:${user.name}`;
+            const dbText = await encryptMessage(inviteMsg, dmThreadId);
+            await mockAuth.sendMessage({
+              thread_id: dmThreadId,
+              sender_name: user.name || 'You',
+              text: dbText,
+              user_id: user.id
+            });
+
+            const targetChannel = supabase.channel(`user-signals-${targetUserId}`);
+            targetChannel.subscribe((status) => {
+              if (status === 'SUBSCRIBED') {
+                targetChannel.send({
+                  type: 'broadcast',
+                  event: 'incoming-call',
+                  payload: {
+                    meetingId: saved.id,
+                    passcode: saved.passcode,
+                    callerName: user.name || 'You',
+                    callerId: user.id
+                  }
+                });
+              }
+            });
+          }
         }
       } catch (err) {
         console.error('Failed to create instant meeting in database:', err);
@@ -689,6 +736,110 @@ function App() {
       setCurrentView('dashboard');
     }
   };
+
+  const handleAcceptCall = () => {
+    if (incomingCall) {
+      const callerChannel = supabase.channel(`user-signals-${incomingCall.callerId}`);
+      callerChannel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          callerChannel.send({
+            type: 'broadcast',
+            event: 'call-accepted',
+            payload: {
+              targetId: user?.id
+            }
+          });
+          supabase.removeChannel(callerChannel);
+        }
+      });
+      stopRingSound();
+      setJoinMeetingData({ meetingId: incomingCall.meetingId, passcode: incomingCall.passcode });
+      setCurrentView('join');
+      setIncomingCall(null);
+    }
+  };
+
+  const handleDeclineCall = () => {
+    if (incomingCall) {
+      const callerChannel = supabase.channel(`user-signals-${incomingCall.callerId}`);
+      callerChannel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          callerChannel.send({
+            type: 'broadcast',
+            event: 'call-declined',
+            payload: {
+              targetId: user?.id
+            }
+          });
+          supabase.removeChannel(callerChannel);
+        }
+      });
+      stopRingSound();
+      setIncomingCall(null);
+    }
+  };
+
+  const handleCancelCall = () => {
+    if (dialingState) {
+      const targetChannel = supabase.channel(`user-signals-${dialingState.targetUserId}`);
+      targetChannel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          targetChannel.send({
+            type: 'broadcast',
+            event: 'call-cancelled',
+            payload: {
+              callerId: user?.id
+            }
+          });
+          supabase.removeChannel(targetChannel);
+        }
+      });
+      stopRingSound();
+      setDialingState(null);
+      handleEndMeeting();
+    }
+  };
+
+  // Global signaling channel subscription
+  useEffect(() => {
+    if (!user) return;
+
+    const channelId = `user-signals-${user.id}`;
+    const sigChannel = supabase.channel(channelId, {
+      config: {
+        broadcast: { self: false }
+      }
+    });
+
+    sigChannel
+      .on('broadcast', { event: 'incoming-call' }, (payload: any) => {
+        const data = payload.payload;
+        setIncomingCall(data);
+        startRingSound();
+      })
+      .on('broadcast', { event: 'call-cancelled' }, () => {
+        stopRingSound();
+        setIncomingCall(null);
+      })
+      .on('broadcast', { event: 'call-declined' }, () => {
+        stopRingSound();
+        setDialingState(null);
+        handleEndMeeting();
+      })
+      .on('broadcast', { event: 'call-accepted' }, () => {
+        stopRingSound();
+        setDialingState(null);
+      })
+      .subscribe((status) => {
+        console.log(`[Realtime] Signaling channel ${channelId} status: ${status}`);
+      });
+
+    return () => {
+      supabase.removeChannel(sigChannel);
+      stopRingSound();
+    };
+  }, [user]);
+
 
   const handleAddMeeting = async (meet: Meeting) => {
     if (user && user.id) {
@@ -1537,6 +1688,10 @@ function App() {
               initialTargetContactId={targetContactId}
               onClearTargetContact={() => setTargetContactId(null)}
               onStartMeeting={handleStartCall}
+              onJoinCall={(meetingId, passcode) => {
+                setJoinMeetingData({ meetingId, passcode });
+                setCurrentView('join');
+              }}
               user={user}
               threads={threads}
               setThreads={setThreads}
@@ -1795,6 +1950,59 @@ function App() {
           >
             &times;
           </button>
+        </div>
+      )}
+
+      {dialingState && (
+        <div className="calling-overlay-container">
+          <div className="calling-overlay-card">
+            <div className="calling-overlay-avatar" style={{ backgroundColor: 'var(--color-primary)' }}>
+              <div className="calling-avatar-ring" style={{ color: 'var(--color-secondary)' }} />
+              {dialingState.targetUserName.split(' ').map(n => n[0]).join('').toUpperCase()}
+            </div>
+            <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: 'white', fontFamily: 'var(--font-heading)' }}>
+              Calling {dialingState.targetUserName}
+            </h3>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: 0 }}>
+              Connecting end-to-end encrypted call...
+            </p>
+            <div className="calling-overlay-buttons">
+              <button onClick={handleCancelCall} className="calling-overlay-btn calling-btn-decline" style={{ margin: '0 auto', maxWidth: '200px' }}>
+                <PhoneOff size={18} />
+                <span>Cancel</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {incomingCall && (
+        <div className="calling-overlay-container">
+          <div className="calling-overlay-card">
+            <div className="calling-overlay-avatar" style={{ backgroundColor: '#10B981' }}>
+              <div className="calling-avatar-ring-incoming" style={{ color: '#10B981' }} />
+              {incomingCall.callerName.split(' ').map(n => n[0]).join('').toUpperCase()}
+            </div>
+            <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: 'white', fontFamily: 'var(--font-heading)' }}>
+              Incoming Call
+            </h3>
+            <p style={{ fontSize: '1rem', color: 'white', fontWeight: 600, margin: '0 0 0.25rem 0' }}>
+              {incomingCall.callerName}
+            </p>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+              Zero-Knowledge E2EE Meeting Room
+            </p>
+            <div className="calling-overlay-buttons">
+              <button onClick={handleDeclineCall} className="calling-overlay-btn calling-btn-decline">
+                <PhoneOff size={18} />
+                <span>Decline</span>
+              </button>
+              <button onClick={handleAcceptCall} className="calling-overlay-btn calling-btn-accept">
+                <Phone size={18} />
+                <span>Accept</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

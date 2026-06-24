@@ -412,3 +412,214 @@ h1, h2, h3, h4, h5, h6 {
   animation: pulse-red 2s infinite;
 }
 
+/* Responsive Call Control Toolbar */
+.meeting-toolbar {
+  padding: 1.25rem 2rem;
+  border-top: 1px solid #1E293B;
+  background-color: #090D16;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 10;
+  transition: all var(--transition-normal);
+}
+
+.meeting-toolbar-left,
+.meeting-toolbar-center,
+.meeting-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.meeting-toolbar-left {
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.meeting-toolbar-center {
+  justify-content: center;
+}
+
+.meeting-toolbar-right {
+  justify-content: flex-end;
+}
+
+@media (max-width: 768px) {
+  .meeting-toolbar {
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: 1rem !important;
+    padding: 1rem !important;
+  }
+
+  .meeting-toolbar-left {
+    width: 100% !important;
+    justify-content: center !important;
+    order: 3;
+    font-size: 0.75rem !important;
+  }
+
+  .meeting-toolbar-center {
+    width: 100% !important;
+    justify-content: center !important;
+    gap: 0.6rem !important;
+    order: 1;
+  }
+
+  .meeting-toolbar-center button {
+    width: 38px !important;
+    height: 38px !important;
+  }
+
+  .meeting-toolbar-right {
+    width: 100% !important;
+    justify-content: center !important;
+    gap: 0.4rem !important;
+    order: 2;
+  }
+}
+
+/* Glassmorphic Calling Overlay Container */
+.calling-overlay-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(9, 13, 22, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.calling-overlay-card {
+  width: 90%;
+  max-width: 400px;
+  background: linear-gradient(135deg, rgba(26, 36, 57, 0.85) 0%, rgba(12, 17, 31, 0.95) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  padding: 3rem 2rem;
+  box-shadow: var(--shadow-premium), 0 0 40px rgba(112, 130, 190, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: scaleUp 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+}
+
+.calling-overlay-avatar {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 2rem;
+  position: relative;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.calling-avatar-ring {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  right: -5px;
+  bottom: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--color-secondary);
+  animation: pulse-ring 2s infinite;
+}
+
+.calling-avatar-ring-incoming {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  right: -5px;
+  bottom: -5px;
+  border-radius: 50%;
+  border: 2px solid #10B981;
+  animation: pulse-ring 2s infinite;
+}
+
+.calling-overlay-buttons {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-top: 2.5rem;
+  width: 100%;
+}
+
+.calling-overlay-btn {
+  flex: 1;
+  height: 48px;
+  border-radius: 24px;
+  border: none;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all var(--transition-fast);
+}
+
+.calling-btn-decline {
+  background-color: #EF4444;
+  color: white;
+  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+}
+
+.calling-btn-decline:hover {
+  background-color: #DC2626;
+  transform: translateY(-2px);
+}
+
+.calling-btn-accept {
+  background-color: #10B981;
+  color: white;
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+}
+
+.calling-btn-accept:hover {
+  background-color: #059669;
+  transform: translateY(-2px);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleUp {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  70% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 15px rgba(255, 255, 255, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+
+

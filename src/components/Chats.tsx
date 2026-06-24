@@ -28,7 +28,8 @@ export interface ChatThread {
 interface ChatsProps {
   initialTargetContactId?: string | null;
   onClearTargetContact?: () => void;
-  onStartMeeting: (title: string) => void;
+  onStartMeeting: (title: string, dmThreadId?: string) => void;
+  onJoinCall?: (meetingId: string, passcode: string) => void;
   user: { id: string; email: string; name: string; workspaceName: string; domain: string } | null;
   threads: ChatThread[];
   setThreads: React.Dispatch<React.SetStateAction<ChatThread[]>>;
@@ -40,6 +41,7 @@ export const Chats: React.FC<ChatsProps> = ({
   initialTargetContactId, 
   onClearTargetContact,
   onStartMeeting,
+  onJoinCall,
   user,
   threads,
   setThreads,
@@ -315,6 +317,66 @@ export const Chats: React.FC<ChatsProps> = ({
   };
 
   const renderMessageContent = (text: string, self: boolean) => {
+    // Check for call invite card log
+    const callInviteRegex = /^📞 CALL_INVITE:([^:]+):([^:]+):(.+)$/;
+    const inviteMatch = text.match(callInviteRegex);
+    if (inviteMatch) {
+      const [, meetingId, passcode, callerName] = inviteMatch;
+      return (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.75rem',
+          padding: '0.5rem 0.25rem',
+          minWidth: '240px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '50%',
+              backgroundColor: self ? 'rgba(250, 189, 2, 0.2)' : 'rgba(16, 185, 129, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: self ? '#FABD02' : '#10B981',
+              fontSize: '1.25rem',
+              animation: 'pulse-ring 2s infinite'
+            }}>
+              📞
+            </div>
+            <div>
+              <h4 style={{ fontSize: '0.85rem', fontWeight: 700, margin: 0, color: self ? 'white' : 'var(--text-main)' }}>
+                {self ? 'Outgoing Video Call' : `Incoming Call from ${callerName}`}
+              </h4>
+              <span style={{ fontSize: '0.7rem', color: self ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)' }}>
+                Zero-Knowledge E2EE Call
+              </span>
+            </div>
+          </div>
+          <button 
+            onClick={() => {
+              if (onJoinCall) {
+                onJoinCall(meetingId, passcode);
+              }
+            }}
+            className="premium-btn premium-btn-accent"
+            style={{
+              padding: '0.4rem 1rem',
+              fontSize: '0.8rem',
+              width: '100%',
+              justifyContent: 'center',
+              fontWeight: 700,
+              gap: '0.4rem'
+            }}
+          >
+            <Video size={14} />
+            <span>Join Video Call</span>
+          </button>
+        </div>
+      );
+    }
+
     const fileRegex = /^\[FILE:([^|]+)\|([^|]+)\|(.+)\]$/;
     const match = text.match(fileRegex);
 
@@ -631,7 +693,7 @@ export const Chats: React.FC<ChatsProps> = ({
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <button 
-                  onClick={() => onStartMeeting(`Meeting with ${activeThread.name}`)}
+                  onClick={() => onStartMeeting(`Meeting with ${activeThread.name}`, activeThread.id)}
                   className="premium-btn premium-btn-secondary" 
                   style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
                 >

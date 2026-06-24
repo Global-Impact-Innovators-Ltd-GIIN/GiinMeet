@@ -1701,17 +1701,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
       </div>
 
       {/* Toolbar / Controls */}
-      <div style={{
-        padding: '1.25rem 2rem',
-        borderTop: '1px solid #1E293B',
-        backgroundColor: '#090D16',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        zIndex: 10
-      }}>
+      <div className="meeting-toolbar">
         {/* Left Side details */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+        <div className="meeting-toolbar-left">
           <span>ID: </span>
           <span style={{ color: 'white', fontWeight: 500 }}>{meetingId.slice(0, 8)}</span>
           <button 
@@ -1725,7 +1717,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
         </div>
 
         {/* Center Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div className="meeting-toolbar-center">
           {/* Mute Audio */}
           <button 
             onClick={toggleMute}
@@ -1845,7 +1837,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
         </div>
 
         {/* Right Side Options & Leave */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div className="meeting-toolbar-right">
           <button 
             onClick={() => setActivePanel(activePanel === 'participants' ? 'none' : 'participants')}
             style={{
