@@ -24,6 +24,16 @@ export interface MockUser {
 // Dynamic resilience flag to bypass missing database tables
 let isMeetingParticipantsTableMissing = false;
 
+// Helper to generate a deterministic passcode based on meeting ID
+export const getDeterministicPasscode = (meetingId: string): string => {
+  const safeId = meetingId || 'virtual-meeting';
+  let hash = 0;
+  for (let i = 0; i < safeId.length; i++) {
+    hash = safeId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash).toString(36).substr(0, 6).toUpperCase();
+};
+
 // Wrapper object for direct auth and database operations
 export const mockAuth = {
   // Sign up using email & password
@@ -215,8 +225,14 @@ export const mockAuth = {
 
   // Save new meeting with auto-generated passcode (handles schema differences gracefully)
   createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string }) => {
-    const passcode = Math.random().toString(36).substr(2, 6).toUpperCase();
+    // Generate UUID on the client side to avoid race conditions and mismatches
+    const meetingId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' 
+      ? crypto.randomUUID() 
+      : Math.random().toString(36).substring(2, 15) + '-' + Math.random().toString(36).substring(2, 15);
+      
+    const passcode = getDeterministicPasscode(meetingId);
     const payload: any = {
+      id: meetingId,
       ...meeting,
       passcode,
       admin_id: meeting.user_id
@@ -234,6 +250,7 @@ export const mockAuth = {
       const fallbackRes = await supabase
         .from('meetings')
         .insert([{
+          id: meetingId,
           user_id: meeting.user_id,
           title: meeting.title,
           time: meeting.time,
@@ -268,11 +285,10 @@ export const mockAuth = {
     const { data, error } = await supabase
       .from('meetings')
       .update(updatePayload)
-      .eq('id', meetingId);
-    if (error) {
-      console.warn('[Supabase Client] Failed to update meeting notes.', error.message);
-    }
-    return data;
+      .eq('id', meetingId)
+      .select()
+      .maybeSingle();
+    return { data, error };
   },
 
   // Fetch chat messages
@@ -338,11 +354,7 @@ export const mockAuth = {
 
       if (error || !data) {
         // Fallback: Generate virtual meeting details so guests can still connect even if the table doesn't exist, has restrictive RLS, or uses a virtual ID
-        let hash = 0;
-        for (let i = 0; i < safeId.length; i++) {
-          hash = safeId.charCodeAt(i) + ((hash << 5) - hash);
-        }
-        const passcode = Math.abs(hash).toString(36).substr(0, 6).toUpperCase();
+        const passcode = getDeterministicPasscode(safeId);
 
         return {
           data: {
@@ -359,11 +371,7 @@ export const mockAuth = {
       if (data) {
         // Deterministically generate a virtual passcode if database columns aren't created yet
         if (!data.passcode) {
-          let hash = 0;
-          for (let i = 0; i < safeId.length; i++) {
-            hash = safeId.charCodeAt(i) + ((hash << 5) - hash);
-          }
-          data.passcode = Math.abs(hash).toString(36).substr(0, 6).toUpperCase();
+          data.passcode = getDeterministicPasscode(safeId);
         }
         if (!data.admin_id) {
           data.admin_id = data.user_id; // Default host is the creator
@@ -373,11 +381,7 @@ export const mockAuth = {
     } catch (err: any) {
       console.warn('[Supabase Client] Exception in getMeetingDetails, falling back to virtual session.', err.message);
       const safeId = meetingId || 'virtual-meeting';
-      let hash = 0;
-      for (let i = 0; i < safeId.length; i++) {
-        hash = safeId.charCodeAt(i) + ((hash << 5) - hash);
-      }
-      const passcode = Math.abs(hash).toString(36).substr(0, 6).toUpperCase();
+      const passcode = getDeterministicPasscode(safeId);
       return {
         data: {
           id: safeId,
