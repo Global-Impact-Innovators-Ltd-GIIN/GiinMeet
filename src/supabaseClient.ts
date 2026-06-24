@@ -21,6 +21,9 @@ export interface MockUser {
   avatar_url?: string;
 }
 
+// Dynamic resilience flag to bypass missing database tables
+let isMeetingParticipantsTableMissing = false;
+
 // Wrapper object for direct auth and database operations
 export const mockAuth = {
   // Sign up using email & password
@@ -326,6 +329,16 @@ export const mockAuth = {
 
   // Add participant to Waiting Room (with virtual backup if table is missing)
   joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant') => {
+    if (isMeetingParticipantsTableMissing) {
+      return {
+        id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
+        meeting_id: meetingId,
+        user_id: userId || null,
+        name: name,
+        status: role === 'Admin' ? 'Admitted' : 'Waiting',
+        role: role
+      };
+    }
     const { data, error } = await supabase
       .from('meeting_participants')
       .insert([{
@@ -339,6 +352,9 @@ export const mockAuth = {
       .maybeSingle();
     
     if (error) {
+      if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
+        isMeetingParticipantsTableMissing = true;
+      }
       console.warn('[Supabase Client] Failed to join waitroom (meeting_participants table might not exist). Falling back to virtual session.', error.message);
       // Return a virtual participant object so the UI doesn't crash and host auto-admits them
       return {
@@ -355,15 +371,24 @@ export const mockAuth = {
 
   // Check waiting status for participant (resilient to missing database tables)
   checkParticipantStatus: async (participantId: string) => {
+    if (isMeetingParticipantsTableMissing) {
+      return 'Admitted';
+    }
     try {
       if (participantId.startsWith('virtual-participant-')) {
         return 'Admitted'; // Virtual bypass for local testing
       }
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('meeting_participants')
         .select('status')
         .eq('id', participantId)
         .maybeSingle();
+      if (error) {
+        if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
+          isMeetingParticipantsTableMissing = true;
+        }
+        return 'Admitted';
+      }
       return data?.status || 'Waiting';
     } catch (err: any) {
       console.warn('[Supabase Client] Error checking participant status:', err.message);
@@ -373,13 +398,22 @@ export const mockAuth = {
 
   // Get waiting participants for Host approval (resilient to missing database tables)
   getWaitingParticipants: async (meetingId: string) => {
+    if (isMeetingParticipantsTableMissing) {
+      return [];
+    }
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('meeting_participants')
         .select('*')
         .eq('meeting_id', meetingId)
         .eq('status', 'Waiting')
         .order('updated_at', { ascending: true });
+      if (error) {
+        if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
+          isMeetingParticipantsTableMissing = true;
+        }
+        return [];
+      }
       return data || [];
     } catch (err: any) {
       console.warn('[Supabase Client] Error getting waiting list:', err.message);
@@ -389,21 +423,38 @@ export const mockAuth = {
 
   // Update participant status (Admit/Decline)
   updateParticipantStatus: async (participantId: string, status: 'Admitted' | 'Declined') => {
+    if (isMeetingParticipantsTableMissing) {
+      return { data: null, error: null };
+    }
     const { data, error } = await supabase
       .from('meeting_participants')
       .update({ status, updated_at: new Date() })
       .eq('id', participantId);
+    if (error) {
+      if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
+        isMeetingParticipantsTableMissing = true;
+      }
+    }
     return { data, error };
   },
 
   // Get active admitted participants in the call room (resilient to missing database tables)
   getAdmittedParticipants: async (meetingId: string) => {
+    if (isMeetingParticipantsTableMissing) {
+      return [];
+    }
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('meeting_participants')
         .select('*')
         .eq('meeting_id', meetingId)
         .eq('status', 'Admitted');
+      if (error) {
+        if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
+          isMeetingParticipantsTableMissing = true;
+        }
+        return [];
+      }
       return data || [];
     } catch (err: any) {
       console.warn('[Supabase Client] Error getting admitted list:', err.message);
