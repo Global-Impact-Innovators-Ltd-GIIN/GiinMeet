@@ -1204,7 +1204,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
               {isScreenSharing ? (
                 <video
                   ref={el => {
-                    if (el && screenStream) {
+                    if (el && screenStream && el.srcObject !== screenStream) {
                       el.srcObject = screenStream;
                     }
                   }}
@@ -1221,7 +1221,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
                   return screenStreamObj ? (
                     <video
                       ref={el => {
-                        if (el) el.srcObject = screenStreamObj;
+                        if (el && screenStreamObj && el.srcObject !== screenStreamObj) {
+                          el.srcObject = screenStreamObj;
+                        }
                       }}
                       autoPlay
                       playsInline
@@ -1286,7 +1288,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
               {isVideoOn && stream ? (
                 <video 
                   ref={el => {
-                    if (el && stream) el.srcObject = stream;
+                    if (el && stream && el.srcObject !== stream) {
+                      el.srcObject = stream;
+                    }
                   }}
                   autoPlay 
                   playsInline 
@@ -1411,7 +1415,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
                   {hasConnection && peerStreamObj && pState.isVideoOn ? (
                     <video
                       ref={el => {
-                        if (el && peerStreamObj) el.srcObject = peerStreamObj;
+                        if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
+                          el.srcObject = peerStreamObj;
+                        }
                       }}
                       autoPlay
                       playsInline
