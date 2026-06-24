@@ -648,6 +648,8 @@ function App() {
         const saved = await mockAuth.createMeeting(newDbMeet);
         if (saved) {
           setActiveMeetingId(saved.id);
+          // Register the host in the meeting participants list as Admitted
+          await mockAuth.joinMeetingRoom(saved.id, user.name, user.id, 'Admin', 'Admitted');
           const mapped: Meeting = {
             id: saved.id,
             title: saved.title,
@@ -737,7 +739,7 @@ function App() {
     }
   };
 
-  const handleAcceptCall = () => {
+  const handleAcceptCall = async () => {
     if (incomingCall) {
       const callerChannel = supabase.channel(`user-signals-${incomingCall.callerId}`);
       callerChannel.subscribe((status) => {
@@ -753,8 +755,15 @@ function App() {
         }
       });
       stopRingSound();
-      setJoinMeetingData({ meetingId: incomingCall.meetingId, passcode: incomingCall.passcode });
-      setCurrentView('join');
+      
+      // Auto-join meeting room as Admitted for the receiver, bypassing the waitroom!
+      if (user) {
+        await mockAuth.joinMeetingRoom(incomingCall.meetingId, user.name, user.id, 'Participant', 'Admitted');
+      }
+
+      setActiveCallTitle(`Call with ${incomingCall.callerName}`);
+      setActiveMeetingId(incomingCall.meetingId);
+      setCurrentView('meeting');
       setIncomingCall(null);
     }
   };
@@ -1681,7 +1690,14 @@ function App() {
               userDomain={user?.domain}
               userWorkspaceName={user?.workspaceName}
               onNavigateToChat={handleNavigateToChat}
-              onStartCall={handleStartCall}
+              onStartCall={(title, targetId) => {
+                if (user && targetId) {
+                  const dmThreadId = 'dm_' + [user.id, targetId].sort().join('_');
+                  handleStartCall(title, dmThreadId);
+                } else {
+                  handleStartCall(title);
+                }
+              }}
             />
           )}
 

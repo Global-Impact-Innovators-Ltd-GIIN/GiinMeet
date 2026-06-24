@@ -318,9 +318,10 @@ export const mockAuth = {
   // Fetch meeting details (passcode verification with virtual fallback for older databases)
   getMeetingDetails: async (meetingId: string) => {
     try {
+      const safeId = meetingId || 'virtual-meeting';
       // Validate UUID format before running database query (prevents syntax error 22P02)
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      const isValidUuid = uuidRegex.test(meetingId);
+      const isValidUuid = meetingId ? uuidRegex.test(meetingId) : false;
 
       let data = null;
       let error = null;
@@ -335,17 +336,17 @@ export const mockAuth = {
         error = res.error;
       }
 
-      if (!data) {
+      if (error || !data) {
         // Fallback: Generate virtual meeting details so guests can still connect even if the table doesn't exist, has restrictive RLS, or uses a virtual ID
         let hash = 0;
-        for (let i = 0; i < meetingId.length; i++) {
-          hash = meetingId.charCodeAt(i) + ((hash << 5) - hash);
+        for (let i = 0; i < safeId.length; i++) {
+          hash = safeId.charCodeAt(i) + ((hash << 5) - hash);
         }
         const passcode = Math.abs(hash).toString(36).substr(0, 6).toUpperCase();
 
         return {
           data: {
-            id: meetingId,
+            id: safeId,
             title: 'Secure Video Meeting',
             passcode,
             admin_id: null,
@@ -355,12 +356,12 @@ export const mockAuth = {
         };
       }
 
-      if (data && !error) {
+      if (data) {
         // Deterministically generate a virtual passcode if database columns aren't created yet
         if (!data.passcode) {
           let hash = 0;
-          for (let i = 0; i < meetingId.length; i++) {
-            hash = meetingId.charCodeAt(i) + ((hash << 5) - hash);
+          for (let i = 0; i < safeId.length; i++) {
+            hash = safeId.charCodeAt(i) + ((hash << 5) - hash);
           }
           data.passcode = Math.abs(hash).toString(36).substr(0, 6).toUpperCase();
         }
@@ -368,17 +369,18 @@ export const mockAuth = {
           data.admin_id = data.user_id; // Default host is the creator
         }
       }
-      return { data, error };
+      return { data, error: null };
     } catch (err: any) {
       console.warn('[Supabase Client] Exception in getMeetingDetails, falling back to virtual session.', err.message);
+      const safeId = meetingId || 'virtual-meeting';
       let hash = 0;
-      for (let i = 0; i < meetingId.length; i++) {
-        hash = meetingId.charCodeAt(i) + ((hash << 5) - hash);
+      for (let i = 0; i < safeId.length; i++) {
+        hash = safeId.charCodeAt(i) + ((hash << 5) - hash);
       }
       const passcode = Math.abs(hash).toString(36).substr(0, 6).toUpperCase();
       return {
         data: {
-          id: meetingId,
+          id: safeId,
           title: 'Secure Video Meeting',
           passcode,
           admin_id: null,
@@ -390,14 +392,15 @@ export const mockAuth = {
   },
 
   // Add participant to Waiting Room (with virtual backup if table is missing)
-  joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant') => {
+  joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant', status?: 'Waiting' | 'Admitted' | 'Declined') => {
+    const finalStatus = status || (role === 'Admin' ? 'Admitted' : 'Waiting');
     if (isMeetingParticipantsTableMissing) {
       return {
         id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
         meeting_id: meetingId,
         user_id: userId || null,
         name: name,
-        status: role === 'Admin' ? 'Admitted' : 'Waiting',
+        status: finalStatus,
         role: role
       };
     }
@@ -407,7 +410,7 @@ export const mockAuth = {
         meeting_id: meetingId,
         user_id: userId || null,
         name: name,
-        status: role === 'Admin' ? 'Admitted' : 'Waiting',
+        status: finalStatus,
         role: role
       }])
       .select()
@@ -424,7 +427,7 @@ export const mockAuth = {
         meeting_id: meetingId,
         user_id: userId || null,
         name: name,
-        status: role === 'Admin' ? 'Admitted' : 'Waiting',
+        status: finalStatus,
         role: role
       };
     }

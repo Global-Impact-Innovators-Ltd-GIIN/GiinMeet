@@ -19,7 +19,7 @@ interface ContactsProps {
   userDomain?: string;
   userWorkspaceName?: string;
   onNavigateToChat: (contactName: string) => void;
-  onStartCall: (title: string) => void;
+  onStartCall: (title: string, targetContactId?: string) => void;
 }
 
 export const Contacts: React.FC<ContactsProps> = ({ 
@@ -321,7 +321,8 @@ export const Contacts: React.FC<ContactsProps> = ({
               justifyContent: 'center',
               fontSize: '2rem',
               fontWeight: 800,
-              overflow: 'hidden'
+              overflow: 'hidden',
+              flexShrink: 0
             }}>
               {selectedContact.avatar && (selectedContact.avatar.startsWith('http') || selectedContact.avatar.startsWith('data:image')) ? (
                 <img src={selectedContact.avatar} alt={selectedContact.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -366,7 +367,7 @@ export const Contacts: React.FC<ContactsProps> = ({
             </button>
 
             <button 
-              onClick={() => onStartCall(`Call with ${selectedContact.name}`)}
+              onClick={() => onStartCall(`Call with ${selectedContact.name}`, selectedContact.id)}
               className="premium-btn premium-btn-accent" 
               style={{ justifyContent: 'center', height: '46px' }}
             >

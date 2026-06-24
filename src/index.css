@@ -3,6 +3,7 @@
   /* Colors (Light Theme / Nuvem Mode) */
   --color-primary: #00205B;      /* Azul Brant */
   --color-primary-rgb: 0, 32, 91;
+  --color-primary-hover: #00153D;
   --color-secondary: #7082BE;    /* Horizonte Claro */
   --color-secondary-rgb: 112, 130, 190;
   --color-accent: #FABD02;       /* Sol de Minas */
@@ -46,9 +47,13 @@
   --bg-card: #121826;
   --border-color: #1E293B;
   
+  --color-primary: #3B82F6;      /* Bright, visible blue in dark mode */
+  --color-primary-rgb: 59, 130, 246;
+  --color-primary-hover: #2563EB;
+  
   --text-main: #F1F5F9;
   --text-muted: #94A3B8;
-  --text-inverse: #0B0F19;
+  --text-inverse: #FFFFFF;       /* White text for contrast on bright blue buttons */
   
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
@@ -213,9 +218,9 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .premium-btn-primary:hover {
-  background-color: #0b2e75;
+  background-color: var(--color-primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 32, 91, 0.2);
+  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.25);
 }
 
 .premium-btn-accent {

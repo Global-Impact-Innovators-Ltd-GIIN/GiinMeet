@@ -579,7 +579,8 @@ export const Chats: React.FC<ChatsProps> = ({
                   fontWeight: 600,
                   fontSize: '0.9rem',
                   marginRight: '0.75rem',
-                  overflow: 'hidden'
+                  overflow: 'hidden',
+                  flexShrink: 0
                 }}>
                   {t.avatar && (t.avatar.startsWith('http') || t.avatar.startsWith('data:image')) ? (
                     <img src={t.avatar} alt={t.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -674,7 +675,8 @@ export const Chats: React.FC<ChatsProps> = ({
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontWeight: 700,
-                  overflow: 'hidden'
+                  overflow: 'hidden',
+                  flexShrink: 0
                 }}>
                   {activeThread.avatar && (activeThread.avatar.startsWith('http') || activeThread.avatar.startsWith('data:image')) ? (
                     <img src={activeThread.avatar} alt={activeThread.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
