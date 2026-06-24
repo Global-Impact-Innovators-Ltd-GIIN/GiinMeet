@@ -96,3 +96,30 @@ export const decryptMessage = async (encryptedText: string, channelSeed: string)
     return '[Decryption Error: Secure handshake mismatch]';
   }
 };
+
+// WebRTC Insertable Streams Frame transform encryption
+export const encryptFrame = (chunk: any, controller: any, keySeed: string) => {
+  const data = chunk.data;
+  // Payload header offsets to avoid corrupting RTP/codec headers:
+  // - Video: offset by 10 bytes (leaves VP8 keyframe/metadata untouched)
+  // - Audio: offset by 4 bytes (leaves Opus packet config untouched)
+  const offset = chunk.type === 'audio' ? 4 : 10;
+  if (data.byteLength <= offset) {
+    controller.enqueue(chunk);
+    return;
+  }
+
+  const keyBytes = new TextEncoder().encode(keySeed);
+  const u8 = new Uint8Array(data);
+  for (let i = offset; i < u8.length; i++) {
+    u8[i] ^= keyBytes[(i - offset) % keyBytes.length];
+  }
+  
+  controller.enqueue(chunk);
+};
+
+// WebRTC Insertable Streams Frame transform decryption (XOR is symmetric)
+export const decryptFrame = (chunk: any, controller: any, keySeed: string) => {
+  encryptFrame(chunk, controller, keySeed);
+};
+
