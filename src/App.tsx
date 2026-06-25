@@ -31,7 +31,20 @@ interface Meeting {
 
 function App() {
   // Authentication & Directory Discovery
-  const [user, setUser] = useState<{ id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean; avatar_url?: string } | null>(() => {
+  const [user, setUser] = useState<{ 
+    id: string; 
+    email: string; 
+    name: string; 
+    workspaceName: string; 
+    domain: string; 
+    is_superadmin?: boolean; 
+    avatar_url?: string;
+    phone?: string;
+    role?: string;
+    timezone?: string;
+    location?: string;
+    skills?: string[];
+  } | null>(() => {
     const saved = localStorage.getItem('giin_user');
     return saved ? JSON.parse(saved) : null;
   });
@@ -414,7 +427,12 @@ function App() {
           workspaceName: profile?.workspace_name || session.user.user_metadata?.workspace_name || 'Personal Workspace',
           domain: profile?.domain || domain,
           is_superadmin: isSuperadmin,
-          avatar_url: profile?.avatar_url || ''
+          avatar_url: profile?.avatar_url || '',
+          phone: profile?.phone || '',
+          role: profile?.role || 'Member',
+          timezone: profile?.timezone || 'UTC',
+          location: profile?.location || 'Remote',
+          skills: profile?.skills || []
         };
         setUser(authenticatedUser);
         setUserName(authenticatedUser.name);
@@ -497,7 +515,12 @@ function App() {
           workspaceName: profile?.workspace_name || session.user.user_metadata?.workspace_name || 'Personal Workspace',
           domain: profile?.domain || domain,
           is_superadmin: isSuperadmin,
-          avatar_url: profile?.avatar_url || ''
+          avatar_url: profile?.avatar_url || '',
+          phone: profile?.phone || '',
+          role: profile?.role || 'Member',
+          timezone: profile?.timezone || 'UTC',
+          location: profile?.location || 'Remote',
+          skills: profile?.skills || []
         };
         setUser(authenticatedUser);
         setUserName(authenticatedUser.name);
@@ -942,7 +965,16 @@ function App() {
     setCurrentView('chats');
   };
 
-  const handleUpdateProfile = async (name: string, email: string, avatarUrl?: string) => {
+  const handleUpdateProfile = async (
+    name: string, 
+    email: string, 
+    avatarUrl?: string,
+    role?: string,
+    timezone?: string,
+    location?: string,
+    skills?: string[],
+    phone?: string
+  ) => {
     setUserName(name);
     setUserEmail(email);
     localStorage.setItem('giin_name', name);
@@ -950,12 +982,17 @@ function App() {
 
     if (user && user.id) {
       try {
-        await mockAuth.updateProfile(user.id, name, email, avatarUrl);
+        await mockAuth.updateProfile(user.id, name, email, avatarUrl, role, timezone, location, skills, phone);
         const updatedUser = {
           ...user,
           name,
           email,
-          avatar_url: avatarUrl !== undefined ? avatarUrl : user.avatar_url
+          avatar_url: avatarUrl !== undefined ? avatarUrl : user.avatar_url,
+          role: role !== undefined ? role : user.role,
+          timezone: timezone !== undefined ? timezone : user.timezone,
+          location: location !== undefined ? location : user.location,
+          skills: skills !== undefined ? skills : user.skills,
+          phone: phone !== undefined ? phone : user.phone
         };
         setUser(updatedUser);
         localStorage.setItem('giin_user', JSON.stringify(updatedUser));
@@ -1725,6 +1762,11 @@ function App() {
               userName={userName}
               userEmail={userEmail}
               userAvatarUrl={user?.avatar_url || ''}
+              userPhone={user?.phone || ''}
+              userRole={user?.role || ''}
+              userTimezone={user?.timezone || 'UTC'}
+              userLocation={user?.location || ''}
+              userSkills={user?.skills || []}
               onUpdateProfile={handleUpdateProfile}
             />
           )}

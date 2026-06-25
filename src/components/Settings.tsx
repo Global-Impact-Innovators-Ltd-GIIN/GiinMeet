@@ -7,7 +7,21 @@ interface SettingsProps {
   userName: string;
   userEmail: string;
   userAvatarUrl?: string;
-  onUpdateProfile: (name: string, email: string, avatarUrl?: string) => void;
+  userPhone?: string;
+  userRole?: string;
+  userTimezone?: string;
+  userLocation?: string;
+  userSkills?: string[];
+  onUpdateProfile: (
+    name: string, 
+    email: string, 
+    avatarUrl?: string,
+    role?: string,
+    timezone?: string,
+    location?: string,
+    skills?: string[],
+    phone?: string
+  ) => void;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
@@ -16,6 +30,11 @@ export const Settings: React.FC<SettingsProps> = ({
   userName,
   userEmail,
   userAvatarUrl,
+  userPhone = '',
+  userRole = '',
+  userTimezone = 'UTC',
+  userLocation = '',
+  userSkills = [],
   onUpdateProfile,
 }) => {
   const [activeCategory, setActiveCategory] = useState<'profile' | 'notifications' | 'meetings' | 'security' | 'language'>('profile');
@@ -24,6 +43,11 @@ export const Settings: React.FC<SettingsProps> = ({
   const [name, setName] = useState(userName);
   const [email, setEmail] = useState(userEmail);
   const [avatarUrl, setAvatarUrl] = useState(userAvatarUrl || '');
+  const [phone, setPhone] = useState(userPhone);
+  const [role, setRole] = useState(userRole);
+  const [timezone, setTimezone] = useState(userTimezone);
+  const [location, setLocation] = useState(userLocation);
+  const [skillsText, setSkillsText] = useState((userSkills || []).join(', '));
   const [showSavedToast, setShowSavedToast] = useState(false);
 
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -33,6 +57,16 @@ export const Settings: React.FC<SettingsProps> = ({
       setAvatarUrl(userAvatarUrl);
     }
   }, [userAvatarUrl]);
+
+  React.useEffect(() => {
+    setName(userName);
+    setEmail(userEmail);
+    setPhone(userPhone || '');
+    setRole(userRole || '');
+    setTimezone(userTimezone || 'UTC');
+    setLocation(userLocation || '');
+    setSkillsText((userSkills || []).join(', '));
+  }, [userName, userEmail, userPhone, userRole, userTimezone, userLocation, userSkills]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -90,7 +124,11 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleProfileSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateProfile(name, email, avatarUrl);
+    const skillsArray = skillsText
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    onUpdateProfile(name, email, avatarUrl, role, timezone, location, skillsArray, phone);
     setShowSavedToast(true);
     setTimeout(() => setShowSavedToast(false), 3000);
   };
@@ -233,6 +271,69 @@ export const Settings: React.FC<SettingsProps> = ({
                   onChange={(e) => setEmail(e.target.value)}
                   className="premium-input"
                   required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Phone Number</label>
+                <input 
+                  type="text" 
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="e.g. +1 (555) 019-2834"
+                  className="premium-input"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Job Title & Role</label>
+                <input 
+                  type="text" 
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  placeholder="e.g. Senior UX Designer"
+                  className="premium-input"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Office Location</label>
+                <input 
+                  type="text" 
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="e.g. San Francisco, CA"
+                  className="premium-input"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Primary Timezone</label>
+                <select 
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  className="premium-input"
+                >
+                  <option value="America/New_York">Eastern Time (New York)</option>
+                  <option value="America/Chicago">Central Time (Chicago)</option>
+                  <option value="America/Denver">Mountain Time (Denver)</option>
+                  <option value="America/Los_Angeles">Pacific Time (Los Angeles)</option>
+                  <option value="Europe/London">Greenwich Mean Time (London)</option>
+                  <option value="Europe/Berlin">Central European Time (Berlin)</option>
+                  <option value="Asia/Singapore">Singapore Standard Time (Singapore)</option>
+                  <option value="Asia/Tokyo">Japan Standard Time (Tokyo)</option>
+                  <option value="UTC">UTC / Coordinated Universal Time</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Skills (comma-separated)</label>
+                <input 
+                  type="text" 
+                  value={skillsText}
+                  onChange={(e) => setSkillsText(e.target.value)}
+                  placeholder="e.g. React, TypeScript, WebRTC"
+                  className="premium-input"
                 />
               </div>
 

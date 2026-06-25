@@ -185,7 +185,17 @@ export const mockAuth = {
   },
 
   // Update profile details
-  updateProfile: async (userId: string, name: string, email: string, avatarUrl?: string) => {
+  updateProfile: async (
+    userId: string, 
+    name: string, 
+    email: string, 
+    avatarUrl?: string,
+    role?: string,
+    timezone?: string,
+    location?: string,
+    skills?: string[],
+    phone?: string
+  ) => {
     const payload: any = { name, email, updated_at: new Date() };
     if (avatarUrl) {
       if (avatarUrl.startsWith('data:image')) {
@@ -195,6 +205,12 @@ export const mockAuth = {
         payload.avatar_url = avatarUrl;
       }
     }
+    if (role !== undefined) payload.role = role;
+    if (timezone !== undefined) payload.timezone = timezone;
+    if (location !== undefined) payload.location = location;
+    if (skills !== undefined) payload.skills = skills;
+    if (phone !== undefined) payload.phone = phone;
+
     const { data, error } = await supabase
       .from('profiles')
       .update(payload)

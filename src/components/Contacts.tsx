@@ -60,6 +60,9 @@ export const Contacts: React.FC<ContactsProps> = ({
   const [contactSkills, setContactSkills] = useState<string[]>([]);
   const [newSkillTag, setNewSkillTag] = useState('');
 
+  // Interaction History State
+  const [interactionHistory, setInteractionHistory] = useState<{ type: string; date: string; duration?: string }[]>([]);
+
   // E2EE Drop Box drag-over state
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -79,56 +82,7 @@ export const Contacts: React.FC<ContactsProps> = ({
     }
   }, []);
 
-  // Timezone and Location mapping helper
-  const getContactMetadata = (id: string) => {
-    const locations = [
-      { location: 'New York, USA', timezone: 'America/New_York' },
-      { location: 'London, UK', timezone: 'Europe/London' },
-      { location: 'Berlin, Germany', timezone: 'Europe/Berlin' },
-      { location: 'Tokyo, Japan', timezone: 'Asia/Tokyo' },
-      { location: 'San Francisco, USA', timezone: 'America/Los_Angeles' },
-      { location: 'Singapore', timezone: 'Asia/Singapore' }
-    ];
-    let hash = 0;
-    for (let i = 0; i < id.length; i++) {
-      hash = id.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    return locations[Math.abs(hash) % locations.length];
-  };
 
-  const getContactRole = (name: string, email: string) => {
-    const n = name.toLowerCase();
-    if (n.includes('sofia') || n.includes('brant')) return 'UI/UX Lead Designer';
-    if (n.includes('esther') || n.includes('howard')) return 'Director of Engineering';
-    if (n.includes('amara') || n.includes('okafor')) return 'Senior Frontend Engineer';
-    if (n.includes('yuki') || n.includes('tanaka')) return 'Product Manager';
-    if (n.includes('li') || n.includes('wei')) return 'Cloud Architect & DevOps';
-    if (n.includes('nimda') || email.includes('admin')) return 'Workspace Administrator';
-    return 'Systems Engineer';
-  };
-
-  const getContactHistory = (id: string) => {
-    const histories = [
-      [
-        { type: 'Incoming Video Call', date: 'Yesterday, 4:15 PM', duration: '14 mins' },
-        { type: 'Secure E2EE File Received', date: '3 days ago' },
-        { type: 'Outgoing Video Call', date: 'Last Tuesday', duration: '28 mins' }
-      ],
-      [
-        { type: 'Video Meeting', date: 'Monday, 10:30 AM', duration: '45 mins' },
-        { type: 'Outgoing Voice Call', date: 'Last Thursday', duration: '8 mins' }
-      ],
-      [
-        { type: 'E2EE File Vault Drop', date: 'Yesterday, 11:02 AM' },
-        { type: 'Incoming Call', date: 'Last Friday', duration: '19 mins' }
-      ]
-    ];
-    let hash = 0;
-    for (let i = 0; i < id.length; i++) {
-      hash = id.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    return histories[Math.abs(hash) % histories.length];
-  };
 
   useEffect(() => {
     const loadWorkspaceContacts = async () => {
@@ -148,23 +102,20 @@ export const Contacts: React.FC<ContactsProps> = ({
             const hue = Math.abs(hash % 360);
             const avatarBg = `hsl(${hue}, 60%, 40%)`;
 
-            const meta = getContactMetadata(p.id);
-            const role = getContactRole(p.name || 'User', p.email || '');
-            const history = getContactHistory(p.id);
-
             return {
               id: p.id,
               name: p.name || 'Phone User',
-              role: role,
+              role: p.role || 'Member',
               email: p.email || `${(p.name || 'user').toLowerCase().replace(/\s+/g, '')}@${userDomain}`,
               phone: p.phone || 'N/A',
               avatar: avatar,
               avatarBg: avatarBg,
               isStarred: false,
               status: 'Online',
-              history: history,
-              timezone: meta.timezone,
-              location: meta.location
+              history: [],
+              timezone: p.timezone || 'UTC',
+              location: p.location || 'Remote',
+              skills: p.skills || []
             };
           });
           setContacts(mapped);
@@ -224,14 +175,6 @@ export const Contacts: React.FC<ContactsProps> = ({
     if (onlinePresences[c.id]) {
       return onlinePresences[c.id] as 'Online' | 'Offline' | 'In a Meeting';
     }
-    // Fallback status based on hashing id
-    let hash = 0;
-    for (let i = 0; i < c.id.length; i++) {
-      hash = c.id.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const val = Math.abs(hash) % 100;
-    if (val < 40) return 'Online';
-    if (val < 65) return 'In a Meeting';
     return 'Offline';
   };
 
@@ -286,26 +229,50 @@ export const Contacts: React.FC<ContactsProps> = ({
     }
   };
 
-  // Load and fallback skills tags
-  const getFallbackSkills = (role: string) => {
-    const r = role.toLowerCase();
-    if (r.includes('design') || r.includes('ui') || r.includes('ux')) return ['Figma', 'UI/UX Design', 'CSS Grid', 'Typography'];
-    if (r.includes('engineer') || r.includes('qa') || r.includes('lead') || r.includes('developer')) return ['React', 'TypeScript', 'WebRTC', 'Supabase Realtime'];
-    if (r.includes('product')) return ['Agile', 'Product Spec', 'Analytics', 'A/B Testing'];
-    if (r.includes('marketing') || r.includes('growth')) return ['SEO', 'Google Analytics', 'Lead Gen', 'Content'];
-    return ['Workspace Core', 'General Support'];
-  };
-
   useEffect(() => {
     if (!selectedContactId) return;
     const saved = localStorage.getItem(`giin_contact_skills_${selectedContactId}`);
     if (saved) {
       setContactSkills(JSON.parse(saved));
     } else {
-      const defaultSkills = getFallbackSkills(selectedContact?.role || 'General Workspace');
-      setContactSkills(defaultSkills);
+      setContactSkills(selectedContact?.skills || []);
     }
   }, [selectedContactId, selectedContact]);
+
+  // Load interaction history dynamically from meetings table
+  useEffect(() => {
+    const loadHistory = async () => {
+      if (!selectedContactId) return;
+      try {
+        const { data: meetings, error } = await supabase
+          .from('meetings')
+          .select('*')
+          .eq('user_id', selectedContactId)
+          .order('time', { ascending: false });
+
+        if (meetings && !error) {
+          const mapped = meetings.map((m: any) => ({
+            type: `Video Meeting: ${m.title}`,
+            date: new Date(m.time).toLocaleDateString([], { 
+              month: 'short', 
+              day: 'numeric', 
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            }),
+            duration: m.duration || 'N/A'
+          }));
+          setInteractionHistory(mapped);
+        } else {
+          setInteractionHistory([]);
+        }
+      } catch (err) {
+        console.error('Failed to load meeting interaction history:', err);
+        setInteractionHistory([]);
+      }
+    };
+    loadHistory();
+  }, [selectedContactId]);
 
   const handleAddSkill = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1012,7 +979,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                 <h3 style={{ fontSize: '1.1rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>Interaction History</h3>
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '180px', overflowY: 'auto' }}>
-                  {selectedContact.history.map((hist, idx) => (
+                  {interactionHistory.map((hist, idx) => (
                     <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
                       <div style={{
                         marginTop: '0.2rem',
@@ -1029,6 +996,9 @@ export const Contacts: React.FC<ContactsProps> = ({
                       </div>
                     </div>
                   ))}
+                  {interactionHistory.length === 0 && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No recent meeting history.</span>
+                  )}
                 </div>
               </div>
 

@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   is_premium BOOLEAN DEFAULT false,
   is_superadmin BOOLEAN DEFAULT false,
   avatar_url TEXT,
+  role TEXT DEFAULT 'Member',
+  timezone TEXT DEFAULT 'UTC',
+  location TEXT DEFAULT 'Remote',
+  skills TEXT[] DEFAULT '{}'::text[],
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
@@ -169,6 +173,10 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS passcode TEXT;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS admin_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'Member';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'UTC';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS location TEXT DEFAULT 'Remote';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS skills TEXT[] DEFAULT '{}'::text[];
 
 UPDATE public.profiles 
 SET is_superadmin = true 
