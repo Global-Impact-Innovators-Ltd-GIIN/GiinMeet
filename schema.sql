@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   timezone TEXT DEFAULT 'UTC',
   location TEXT DEFAULT 'Remote',
   skills TEXT[] DEFAULT '{}'::text[],
+  social_handles JSONB DEFAULT '{}'::jsonb,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 

@@ -196,7 +196,8 @@ export const mockAuth = {
     skills?: string[],
     phone?: string,
     workspaceName?: string,
-    domain?: string
+    domain?: string,
+    socialHandles?: any
   ) => {
     const payload: any = { name, email, updated_at: new Date() };
     if (avatarUrl) {
@@ -214,6 +215,7 @@ export const mockAuth = {
     if (phone !== undefined) payload.phone = phone;
     if (workspaceName !== undefined) payload.workspace_name = workspaceName;
     if (domain !== undefined) payload.domain = domain;
+    if (socialHandles !== undefined) payload.social_handles = socialHandles;
 
     const { data, error } = await supabase
       .from('profiles')

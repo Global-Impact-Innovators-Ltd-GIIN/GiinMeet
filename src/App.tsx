@@ -46,6 +46,7 @@ function App() {
     timezone?: string;
     location?: string;
     skills?: string[];
+    social_handles?: any;
   } | null>(() => {
     const saved = localStorage.getItem('giin_user');
     return saved ? JSON.parse(saved) : null;
@@ -559,7 +560,8 @@ function App() {
           role: profile?.role || 'Member',
           timezone: profile?.timezone || 'UTC',
           location: profile?.location || 'Remote',
-          skills: profile?.skills || []
+          skills: profile?.skills || [],
+          social_handles: profile?.social_handles || {}
         };
         setUser(authenticatedUser);
         setUserName(authenticatedUser.name);
@@ -647,7 +649,8 @@ function App() {
           role: profile?.role || 'Member',
           timezone: profile?.timezone || 'UTC',
           location: profile?.location || 'Remote',
-          skills: profile?.skills || []
+          skills: profile?.skills || [],
+          social_handles: profile?.social_handles || {}
         };
         setUser(authenticatedUser);
         setUserName(authenticatedUser.name);
@@ -1211,7 +1214,8 @@ function App() {
     skills?: string[],
     phone?: string,
     workspaceName?: string,
-    domain?: string
+    domain?: string,
+    socialHandles?: any
   ) => {
     setUserName(name);
     setUserEmail(email);
@@ -1220,7 +1224,7 @@ function App() {
 
     if (user && user.id) {
       try {
-        await mockAuth.updateProfile(user.id, name, email, avatarUrl, role, timezone, location, skills, phone, workspaceName, domain);
+        await mockAuth.updateProfile(user.id, name, email, avatarUrl, role, timezone, location, skills, phone, workspaceName, domain, socialHandles);
         const updatedUser = {
           ...user,
           name,
@@ -1232,7 +1236,8 @@ function App() {
           skills: skills !== undefined ? skills : user.skills,
           phone: phone !== undefined ? phone : user.phone,
           workspaceName: workspaceName !== undefined ? workspaceName : user.workspaceName,
-          domain: domain !== undefined ? domain : user.domain
+          domain: domain !== undefined ? domain : user.domain,
+          social_handles: socialHandles !== undefined ? socialHandles : user.social_handles
         };
         setUser(updatedUser);
         localStorage.setItem('giin_user', JSON.stringify(updatedUser));
@@ -2034,6 +2039,7 @@ function App() {
               userSkills={user?.skills || []}
               userWorkspaceName={user?.workspaceName || 'Personal Workspace'}
               userDomain={user?.domain || 'personal'}
+              userSocialHandles={user?.social_handles || {}}
               onUpdateProfile={handleUpdateProfile}
             />
           )}

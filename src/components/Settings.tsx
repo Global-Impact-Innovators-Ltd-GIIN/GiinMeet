@@ -20,6 +20,14 @@ interface SettingsProps {
   userWorkspaceName?: string;
   userDomain?: string;
   userSkills?: string[];
+  userSocialHandles?: {
+    linkedin?: string;
+    instagram?: string;
+    facebook?: string;
+    twitter?: string;
+    tiktok?: string;
+    github?: string;
+  };
   onUpdateProfile: (
     name: string, 
     email: string, 
@@ -30,7 +38,8 @@ interface SettingsProps {
     skills?: string[],
     phone?: string,
     workspaceName?: string,
-    domain?: string
+    domain?: string,
+    socialHandles?: any
   ) => void;
 }
 
@@ -47,6 +56,7 @@ export const Settings: React.FC<SettingsProps> = ({
   userWorkspaceName = 'Personal Workspace',
   userDomain = 'personal',
   userSkills = [],
+  userSocialHandles = {},
   onUpdateProfile,
 }) => {
   const [activeCategory, setActiveCategory] = useState<'profile' | 'branding' | 'workspace' | 'devices' | 'shortcuts' | 'security' | 'diagnostics' | 'notifications' | 'meetings'>('profile');
@@ -60,6 +70,14 @@ export const Settings: React.FC<SettingsProps> = ({
   const [timezone, setTimezone] = useState(userTimezone);
   const [location, setLocation] = useState(userLocation);
   const [skillsText, setSkillsText] = useState((userSkills || []).join(', '));
+  
+  // Social media handles state
+  const [linkedin, setLinkedin] = useState(userSocialHandles.linkedin || '');
+  const [instagram, setInstagram] = useState(userSocialHandles.instagram || '');
+  const [facebook, setFacebook] = useState(userSocialHandles.facebook || '');
+  const [twitter, setTwitter] = useState(userSocialHandles.twitter || '');
+  const [tiktok, setTiktok] = useState(userSocialHandles.tiktok || '');
+  const [github, setGithub] = useState(userSocialHandles.github || '');
   
   // Workspace settings state
   const [workspaceName, setWorkspaceName] = useState(userWorkspaceName);
@@ -133,7 +151,13 @@ export const Settings: React.FC<SettingsProps> = ({
     setSkillsText((userSkills || []).join(', '));
     setWorkspaceName(userWorkspaceName);
     setDomain(userDomain);
-  }, [userName, userEmail, userPhone, userRole, userTimezone, userLocation, userSkills, userWorkspaceName, userDomain]);
+    setLinkedin(userSocialHandles.linkedin || '');
+    setInstagram(userSocialHandles.instagram || '');
+    setFacebook(userSocialHandles.facebook || '');
+    setTwitter(userSocialHandles.twitter || '');
+    setTiktok(userSocialHandles.tiktok || '');
+    setGithub(userSocialHandles.github || '');
+  }, [userName, userEmail, userPhone, userRole, userTimezone, userLocation, userSkills, userWorkspaceName, userDomain, userSocialHandles]);
 
   // Generate E2EE Keys
   useEffect(() => {
@@ -285,13 +309,20 @@ export const Settings: React.FC<SettingsProps> = ({
       .map(s => s.trim())
       .filter(s => s.length > 0);
     
-    onUpdateProfile(name, email, avatarUrl, role, timezone, location, skillsArray, phone, workspaceName, domain);
+    onUpdateProfile(name, email, avatarUrl, role, timezone, location, skillsArray, phone, workspaceName, domain, {
+      linkedin,
+      instagram,
+      facebook,
+      twitter,
+      tiktok,
+      github
+    });
     triggerToast('Profile settings saved successfully!');
   };
 
   const handleWorkspaceSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateProfile(name, email, avatarUrl, role, timezone, location, userSkills, phone, workspaceName, domain);
+    onUpdateProfile(name, email, avatarUrl, role, timezone, location, userSkills, phone, workspaceName, domain, userSocialHandles);
     triggerToast('Workspace configuration applied successfully!');
   };
 
@@ -766,6 +797,44 @@ export const Settings: React.FC<SettingsProps> = ({
                   className="premium-input" 
                   placeholder="e.g. React, WebRTC, Devops" 
                 />
+              </div>
+
+              {/* Social Media Handles */}
+              <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '1.5rem', marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, fontFamily: 'var(--font-heading)' }}>Social Directory Handles</h4>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>LinkedIn Profile URL</label>
+                    <input type="url" placeholder="https://linkedin.com/in/username" value={linkedin} onChange={(e) => setLinkedin(e.target.value)} className="premium-input" />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>GitHub Profile URL</label>
+                    <input type="url" placeholder="https://github.com/username" value={github} onChange={(e) => setGithub(e.target.value)} className="premium-input" />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>X (Twitter) Profile URL</label>
+                    <input type="url" placeholder="https://x.com/username" value={twitter} onChange={(e) => setTwitter(e.target.value)} className="premium-input" />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Instagram Profile URL</label>
+                    <input type="url" placeholder="https://instagram.com/username" value={instagram} onChange={(e) => setInstagram(e.target.value)} className="premium-input" />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Facebook Profile URL</label>
+                    <input type="url" placeholder="https://facebook.com/username" value={facebook} onChange={(e) => setFacebook(e.target.value)} className="premium-input" />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>TikTok Profile URL</label>
+                    <input type="url" placeholder="https://tiktok.com/@username" value={tiktok} onChange={(e) => setTiktok(e.target.value)} className="premium-input" />
+                  </div>
+                </div>
               </div>
 
               <button type="submit" className="premium-btn premium-btn-accent" style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem', marginTop: '0.25rem' }}>
