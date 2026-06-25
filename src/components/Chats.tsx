@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Smile, Paperclip, Search, PlusCircle, MoreVertical, 
   Video, CheckCheck, ArrowLeft, MessageSquare, Globe, Languages, Copy, Check, Sparkles,
-  Volume2, VolumeX, BarChart2, FolderOpen, Info, FileText, Image, File
+  Volume2, VolumeX, BarChart2, FolderOpen, Info, FileText, Image, File,
+  ExternalLink, Minimize2, Paintbrush
 } from 'lucide-react';
-import { mockAuth } from '../supabaseClient';
+import { mockAuth, supabase } from '../supabaseClient';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
 
 export interface MessageReaction {
@@ -172,6 +173,205 @@ const parseMarkdownText = (text: string) => {
   });
 };
 
+const DoodleSketchpad: React.FC<{ channelId: string; self: boolean }> = ({ channelId, self }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isDrawingRef = useRef(false);
+  const lastPosRef = useRef({ x: 0, y: 0 });
+  const channelRef = useRef<any>(null);
+  const [brushColor, setBrushColor] = useState(self ? '#FABD02' : '#3B82F6');
+
+  useEffect(() => {
+    const channel = supabase.channel(`doodle-${channelId}`, {
+      config: { broadcast: { self: false } }
+    });
+
+    channel
+      .on('broadcast', { event: 'stroke' }, (payload: any) => {
+        const { x0, y0, x1, y1, color } = payload.payload;
+        drawStroke(x0, y0, x1, y1, color, false);
+      })
+      .on('broadcast', { event: 'clear' }, () => {
+        clearLocalCanvas();
+      })
+      .subscribe();
+
+    channelRef.current = channel;
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [channelId]);
+
+  useEffect(() => {
+    if (canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = brushColor;
+        ctx.lineWidth = 3;
+      }
+    }
+  }, [brushColor]);
+
+  const drawStroke = (x0: number, y0: number, x1: number, y1: number, color: string, broadcast = true) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    ctx.closePath();
+
+    if (broadcast && channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'stroke',
+        payload: { x0, y0, x1, y1, color }
+      });
+    }
+  };
+
+  const clearLocalCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const handleClear = () => {
+    clearLocalCanvas();
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'clear'
+      });
+    }
+  };
+
+  const getCoords = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    let clientX, clientY;
+    if ('touches' in e) {
+      if (e.touches.length === 0) return lastPosRef.current;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
+  };
+
+  const startDraw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const pos = getCoords(e);
+    lastPosRef.current = pos;
+    isDrawingRef.current = true;
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current) return;
+    e.preventDefault();
+    const pos = getCoords(e);
+    drawStroke(lastPosRef.current.x, lastPosRef.current.y, pos.x, pos.y, brushColor, true);
+    lastPosRef.current = pos;
+  };
+
+  const stopDraw = () => {
+    isDrawingRef.current = false;
+  };
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '0.4rem',
+      width: '240px',
+      textAlign: 'left'
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: self ? 'white' : 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span>🎨</span>
+          <span>COLLABORATIVE DOODLE</span>
+        </span>
+        <button
+          type="button"
+          onClick={handleClear}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: '#EF4444',
+            fontSize: '0.7rem',
+            cursor: 'pointer',
+            fontWeight: 700
+          }}
+        >
+          Clear
+        </button>
+      </div>
+
+      <div style={{
+        backgroundColor: '#0F172A',
+        border: '1px solid var(--border-color)',
+        borderRadius: '6px',
+        overflow: 'hidden',
+        height: '140px',
+        position: 'relative'
+      }}>
+        <canvas
+          ref={canvasRef}
+          width={240}
+          height={140}
+          onMouseDown={startDraw}
+          onMouseMove={draw}
+          onMouseUp={stopDraw}
+          onMouseLeave={stopDraw}
+          onTouchStart={startDraw}
+          onTouchMove={draw}
+          onTouchEnd={stopDraw}
+          style={{
+            width: '100%',
+            height: '100%',
+            cursor: 'crosshair',
+            touchAction: 'none'
+          }}
+        />
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+        {['#FABD02', '#EF4444', '#3B82F6', '#10B981', '#FFFFFF'].map(c => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setBrushColor(c)}
+            style={{
+              width: '14px',
+              height: '14px',
+              borderRadius: '50%',
+              backgroundColor: c,
+              border: brushColor === c ? '2.5px solid #E2E8F0' : '1px solid rgba(255,255,255,0.2)',
+              cursor: 'pointer'
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export interface ChatThread {
   id: string;
   name: string;
@@ -258,6 +458,10 @@ export const Chats: React.FC<ChatsProps> = ({
   const [showRightPanel, setShowRightPanel] = useState(false);
   const [showCreatePollModal, setShowCreatePollModal] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+
+  const [isPoppedOut, setIsPoppedOut] = useState(false);
+  const [hudPosition, setHudPosition] = useState({ x: 100, y: 100 });
+  const [isHudMinimized, setIsHudMinimized] = useState(false);
 
   const handleAddReaction = (messageId: string, emoji: string) => {
     setThreads(prev => 
@@ -399,6 +603,54 @@ export const Chats: React.FC<ChatsProps> = ({
     };
   }, []);
 
+  const dragStartOffsetRef = useRef({ x: 0, y: 0 });
+
+  const handleHudDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    let clientX, clientY;
+    if ('touches' in e) {
+      if (e.touches.length === 0) return;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    dragStartOffsetRef.current = {
+      x: clientX - hudPosition.x,
+      y: clientY - hudPosition.y
+    };
+
+    const handleDrag = (moveEvent: MouseEvent | TouchEvent) => {
+      let currentX, currentY;
+      if ('touches' in moveEvent) {
+        if (moveEvent.touches.length === 0) return;
+        currentX = moveEvent.touches[0].clientX;
+        currentY = moveEvent.touches[0].clientY;
+      } else {
+        currentX = moveEvent.clientX;
+        currentY = moveEvent.clientY;
+      }
+
+      setHudPosition({
+        x: Math.max(10, Math.min(window.innerWidth - 380, currentX - dragStartOffsetRef.current.x)),
+        y: Math.max(10, Math.min(window.innerHeight - 520, currentY - dragStartOffsetRef.current.y))
+      });
+    };
+
+    const handleDragEnd = () => {
+      document.removeEventListener('mousemove', handleDrag);
+      document.removeEventListener('mouseup', handleDragEnd);
+      document.removeEventListener('touchmove', handleDrag);
+      document.removeEventListener('touchend', handleDragEnd);
+    };
+
+    document.addEventListener('mousemove', handleDrag);
+    document.addEventListener('mouseup', handleDragEnd);
+    document.addEventListener('touchmove', handleDrag, { passive: false });
+    document.addEventListener('touchend', handleDragEnd);
+  };
+
   const handleVotePoll = async (messageId: string, optionIndex: number) => {
     setThreads(prev => 
       prev.map(t => {
@@ -494,6 +746,46 @@ export const Chats: React.FC<ChatsProps> = ({
       });
     } catch (err) {
       console.error('Failed to send poll message:', err);
+    }
+  };
+
+  const handleLaunchDoodle = async () => {
+    if (!activeThreadId) return;
+
+    const doodleId = `doodle_${Math.random().toString(36).substr(2, 9)}`;
+    const doodlePayload = `[DOODLE:${doodleId}]`;
+
+    try {
+      const localId = Math.random().toString(36).substr(2, 9);
+      const newMsg: Message = {
+        id: localId,
+        sender: 'You',
+        text: doodlePayload,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        self: true
+      };
+
+      setThreads(prev => 
+        prev.map(t => {
+          if (t.id === activeThreadId) {
+            return { ...t, messages: [...t.messages, newMsg] };
+          }
+          return t;
+        })
+      );
+
+      let dbText = doodlePayload;
+      if (activeThreadId.startsWith('dm_')) {
+        dbText = await encryptMessage(doodlePayload, activeThreadId);
+      }
+      await mockAuth.sendMessage({
+        thread_id: activeThreadId,
+        sender_name: user?.name || 'You',
+        text: dbText,
+        user_id: user?.id
+      });
+    } catch (err) {
+      console.error('Failed to send doodle message:', err);
     }
   };
 
@@ -754,6 +1046,14 @@ export const Chats: React.FC<ChatsProps> = ({
     // Check for call invite card log
     const callInviteRegex = /^📞 CALL_INVITE:([^:]+):([^:]+):(.+)$/;
     const inviteMatch = text.match(callInviteRegex);
+    
+    // Check for inline sketch doodle card
+    const doodleRegex = /^\[DOODLE:([^\]]+)\]$/;
+    const doodleMatch = text.match(doodleRegex);
+    if (doodleMatch) {
+      const [, channelId] = doodleMatch;
+      return <DoodleSketchpad channelId={channelId} self={self} />;
+    }
     
     // Check for interactive poll card
     const pollRegex = /^\[POLL:([^|]+)\|(.+)\]$/;
@@ -1031,7 +1331,7 @@ export const Chats: React.FC<ChatsProps> = ({
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: showRightPanel && activeThread ? '320px 1fr 280px' : '320px 1fr',
+      gridTemplateColumns: showRightPanel && activeThread && !isPoppedOut ? '320px 1fr 280px' : isPoppedOut ? '320px' : '320px 1fr',
       gap: '1.5rem',
       height: 'calc(100vh - 120px)',
       animation: 'slide-in var(--transition-normal)',
@@ -1155,7 +1455,8 @@ export const Chats: React.FC<ChatsProps> = ({
       </div>
 
       {/* Main Conversation Window */}
-      <div className={`glass-panel ${!showConversationMobile ? 'mobile-hidden' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {!isPoppedOut && (
+        <div className={`glass-panel ${!showConversationMobile ? 'mobile-hidden' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         {activeThread ? (
           <>
             {/* Chat Room Header */}
@@ -1219,6 +1520,21 @@ export const Chats: React.FC<ChatsProps> = ({
                 >
                   <Video size={16} />
                   <span>Call Video</span>
+                </button>
+                <button 
+                  onClick={() => setIsPoppedOut(!isPoppedOut)}
+                  title={isPoppedOut ? "Dock Conversation" : "Pop Out Floating HUD"}
+                  style={{ 
+                    background: 'none', 
+                    border: 'none', 
+                    color: isPoppedOut ? 'var(--color-accent)' : 'var(--text-muted)', 
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  {isPoppedOut ? <Minimize2 size={18} /> : <ExternalLink size={18} />}
                 </button>
                 <button 
                   onClick={() => setShowRightPanel(!showRightPanel)}
@@ -1584,6 +1900,14 @@ export const Chats: React.FC<ChatsProps> = ({
                   >
                     <BarChart2 size={22} />
                   </button>
+                  <button 
+                    type="button" 
+                    onClick={handleLaunchDoodle}
+                    title="Collaborative Doodle"
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                  >
+                    <Paintbrush size={22} />
+                  </button>
                 </div>
 
                 <input 
@@ -1636,9 +1960,10 @@ export const Chats: React.FC<ChatsProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {/* Slide-out Details Side Drawer */}
-      {showRightPanel && activeThread && (
+      {!isPoppedOut && showRightPanel && activeThread && (
         <div className="glass-panel" style={{
           padding: '1.5rem',
           display: 'flex',
@@ -2079,6 +2404,318 @@ export const Chats: React.FC<ChatsProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Floating HUD Chat Window overlay */}
+      {isPoppedOut && activeThread && (
+        <>
+          {isHudMinimized ? (
+            /* Pulsing Chat Head Bubble */
+            <div 
+              onClick={() => setIsHudMinimized(false)}
+              title={`Expand Chat with ${activeThread.name}`}
+              style={{
+                position: 'fixed',
+                left: `${hudPosition.x + 300}px`,
+                top: `${hudPosition.y}px`,
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                backgroundColor: activeThread.avatarBg,
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: 'var(--shadow-premium)',
+                zIndex: 99999,
+                fontWeight: 700,
+                fontSize: '1.2rem',
+                border: '3px solid var(--color-primary)',
+                animation: 'pulse-ring 2s infinite, float 3s ease-in-out infinite',
+                overflow: 'hidden'
+              }}
+            >
+              {activeThread.avatar && (activeThread.avatar.startsWith('http') || activeThread.avatar.startsWith('data:image')) ? (
+                <img src={activeThread.avatar} alt={activeThread.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                activeThread.avatar
+              )}
+              <span style={{
+                position: 'absolute',
+                top: '2px',
+                right: '2px',
+                width: '12px',
+                height: '12px',
+                borderRadius: '50%',
+                backgroundColor: '#EF4444',
+                border: '2px solid white'
+              }} />
+            </div>
+          ) : (
+            /* Full Floating Draggable HUD Card */
+            <div 
+              style={{
+                position: 'fixed',
+                left: `${hudPosition.x}px`,
+                top: `${hudPosition.y}px`,
+                width: '360px',
+                height: '520px',
+                backgroundColor: 'var(--bg-card)',
+                border: '2.5px solid var(--color-primary)',
+                borderRadius: 'var(--radius-lg)',
+                boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5), var(--shadow-premium)',
+                display: 'flex',
+                flexDirection: 'column',
+                zIndex: 99998,
+                overflow: 'hidden',
+                animation: 'pop-in 0.2s ease-out'
+              }}
+            >
+              {/* Draggable HUD Header */}
+              <div 
+                onMouseDown={handleHudDragStart}
+                onTouchStart={handleHudDragStart}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderBottom: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--color-primary)',
+                  color: 'white',
+                  cursor: 'grab',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  userSelect: 'none',
+                  flexShrink: 0
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    backgroundColor: activeThread.avatarBg,
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700,
+                    fontSize: '0.75rem',
+                    border: '1.5px solid white',
+                    overflow: 'hidden'
+                  }}>
+                    {activeThread.avatar && (activeThread.avatar.startsWith('http') || activeThread.avatar.startsWith('data:image')) ? (
+                      <img src={activeThread.avatar} alt={activeThread.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      activeThread.avatar
+                    )}
+                  </div>
+                  <div>
+                    <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white', margin: 0 }}>{activeThread.name}</h4>
+                    <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.75)', display: 'block', lineHeight: 1 }}>Floating HUD</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <button 
+                    onClick={() => setIsHudMinimized(true)}
+                    title="Minimize to Chat Head"
+                    style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1rem', fontWeight: 'bold', padding: '0.15rem' }}
+                  >
+                    &ndash;
+                  </button>
+                  <button 
+                    onClick={() => setIsPoppedOut(false)}
+                    title="Dock Chat back to layout"
+                    style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center' }}
+                  >
+                    <Minimize2 size={12} />
+                  </button>
+                  <button 
+                    onClick={() => setIsPoppedOut(false)}
+                    style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1.1rem', padding: '0.15rem', display: 'flex', alignItems: 'center' }}
+                  >
+                    &times;
+                  </button>
+                </div>
+              </div>
+
+              {/* HUD Chat Content Area */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  
+                  <div style={{ textAlign: 'center', margin: '0.25rem 0' }}>
+                    <span style={{ 
+                      fontSize: '0.7rem', 
+                      color: 'var(--text-muted)', 
+                      backgroundColor: 'rgba(var(--color-secondary-rgb), 0.08)', 
+                      padding: '0.2rem 0.5rem',
+                      borderRadius: '9999px',
+                      border: '1px solid var(--border-color)'
+                    }}>
+                      Messages are end-to-end encrypted
+                    </span>
+                  </div>
+
+                  {activeThread.messages.map((m) => (
+                    <div 
+                      key={m.id}
+                      onMouseEnter={() => setHoveredMessageId(m.id)}
+                      onMouseLeave={() => setHoveredMessageId(null)}
+                      style={{
+                        alignSelf: m.self ? 'flex-end' : 'flex-start',
+                        maxWidth: '75%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: m.self ? 'flex-end' : 'flex-start',
+                        position: 'relative',
+                        padding: '0.2rem 0'
+                      }}
+                    >
+                      {hoveredMessageId === m.id && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '-15px',
+                          left: m.self ? 'auto' : '10px',
+                          right: m.self ? '10px' : 'auto',
+                          display: 'flex',
+                          gap: '0.3rem',
+                          backgroundColor: 'var(--bg-card)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '9999px',
+                          padding: '0.15rem 0.4rem',
+                          boxShadow: 'var(--shadow-md)',
+                          zIndex: 20,
+                          animation: 'pop-in 0.1s ease',
+                          alignItems: 'center'
+                        }}>
+                          {['👍', '❤️', '😂', '🎉', '😮', '💡'].map(emoji => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => handleAddReaction(m.id, emoji)}
+                              style={{ background: 'none', border: 'none', fontSize: '0.8rem', cursor: 'pointer', padding: '0.05rem' }}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                          <div style={{ width: '1px', height: '12px', backgroundColor: 'var(--border-color)', margin: '0 0.1rem' }} />
+                          <button
+                            type="button"
+                            onClick={() => handleTranslateMessage(m.id, m.text)}
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                          >
+                            <Globe size={10} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSpeechMessage(m.id, m.text)}
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                          >
+                            <Volume2 size={10} />
+                          </button>
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.1rem' }}>
+                        <span style={{ fontSize: '0.7rem', fontWeight: 600 }}>{m.sender}</span>
+                        <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{m.time}</span>
+                      </div>
+
+                      <div style={{
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: m.self ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                        backgroundColor: m.self ? 'var(--color-primary)' : 'var(--bg-app)',
+                        color: m.self ? 'white' : 'var(--text-main)',
+                        fontSize: '0.85rem',
+                        lineHeight: 1.4,
+                        border: m.self ? 'none' : '1px solid var(--border-color)'
+                      }}>
+                        {renderMessageContent(m.text, m.self, m.id)}
+
+                        {translatingMessageId === m.id && (
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Translating...</div>
+                        )}
+                        {m.translation && (
+                          <div style={{ fontSize: '0.7rem', color: 'var(--color-accent)', marginTop: '0.25rem', borderTop: '1px solid var(--border-color)' }}>
+                            {m.translation}
+                          </div>
+                        )}
+                      </div>
+
+                      {m.reactions && m.reactions.length > 0 && (
+                        <div style={{ display: 'flex', gap: '0.2rem', marginTop: '0.2rem' }}>
+                          {m.reactions.map((r, rIdx) => (
+                            <span key={rIdx} style={{ fontSize: '0.65rem', padding: '0.05rem 0.25rem', backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: '99px' }}>
+                              {r.emoji} {r.count}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  
+                  <div ref={messagesEndRef} />
+                </div>
+
+                <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'rgba(0,0,0,0.01)' }}>
+                  {activeThread.messages.length > 0 && !activeThread.messages[activeThread.messages.length - 1].self && (
+                    <div style={{ display: 'flex', gap: '0.35rem', marginBottom: '0.4rem', flexWrap: 'wrap' }}>
+                      {getSmartReplies(activeThread.messages[activeThread.messages.length - 1].text).map((suggestion, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setChatInput(suggestion)}
+                          style={{
+                            padding: '0.15rem 0.5rem',
+                            fontSize: '0.7rem',
+                            borderRadius: '999px',
+                            border: '1px solid var(--border-color)',
+                            backgroundColor: 'rgba(var(--color-secondary-rgb), 0.05)',
+                            color: 'var(--text-main)',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                      <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                        <Smile size={18} />
+                      </button>
+                      <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                        <Paperclip size={18} />
+                      </button>
+                      <button type="button" onClick={() => setShowCreatePollModal(true)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                        <BarChart2 size={18} />
+                      </button>
+                      <button type="button" onClick={handleLaunchDoodle} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                        <Paintbrush size={18} />
+                      </button>
+                    </div>
+
+                    <input 
+                      type="text" 
+                      placeholder="Write message..."
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      className="premium-input"
+                      style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.8rem', borderRadius: '9999px' }}
+                    />
+
+                    <button type="submit" className="premium-btn premium-btn-primary" style={{ borderRadius: '50%', width: '32px', height: '32px', padding: 0, justifyContent: 'center' }}>
+                      <Send size={12} />
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Floating success toast */}
