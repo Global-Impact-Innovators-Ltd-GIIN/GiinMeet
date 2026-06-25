@@ -90,15 +90,52 @@ const CodeBlock: React.FC<{ code: string; language: string }> = ({ code, languag
   );
 };
 
+const renderTextWithLinks = (text: string, baseKey: string) => {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  if (parts.length === 1) {
+    return text;
+  }
+  return (
+    <span key={baseKey}>
+      {parts.map((part, idx) => {
+        if (part.match(urlRegex)) {
+          return (
+            <a 
+              key={idx} 
+              href={part} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              style={{ 
+                color: 'inherit', 
+                textDecoration: 'underline', 
+                fontWeight: 600,
+                wordBreak: 'break-all'
+              }}
+            >
+              {part}
+            </a>
+          );
+        }
+        return part;
+      })}
+    </span>
+  );
+};
+
 const renderItalicOnly = (text: string, baseKey: string) => {
   const italicParts = text.split(/(\*[^*]+\*)/g);
   return (
     <span key={baseKey}>
       {italicParts.map((italicPart, idx) => {
         if (italicPart.startsWith('*') && italicPart.endsWith('*')) {
-          return <em key={idx}>{italicPart.slice(1, -1)}</em>;
+          return (
+            <em key={idx}>
+              {renderTextWithLinks(italicPart.slice(1, -1), `${baseKey}-${idx}-em`)}
+            </em>
+          );
         } else {
-          return italicPart;
+          return renderTextWithLinks(italicPart, `${baseKey}-${idx}-txt`);
         }
       })}
     </span>
