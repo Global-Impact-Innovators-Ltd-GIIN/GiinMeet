@@ -601,6 +601,42 @@ function App() {
     }
   }, [isDarkMode]);
 
+  // Effect to apply custom accent colors & glassmorphism settings dynamically
+  useEffect(() => {
+    const savedAccent = localStorage.getItem('giin_accent_color');
+    const savedHover = localStorage.getItem('giin_accent_hover');
+    if (savedAccent && savedHover) {
+      document.documentElement.style.setProperty('--color-primary', savedAccent);
+      document.documentElement.style.setProperty('--color-primary-hover', savedHover);
+      const hex = savedAccent.replace('#', '');
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+        document.documentElement.style.setProperty('--color-primary-rgb', `${r}, ${g}, ${b}`);
+      }
+    } else {
+      document.documentElement.style.removeProperty('--color-primary');
+      document.documentElement.style.removeProperty('--color-primary-hover');
+      document.documentElement.style.removeProperty('--color-primary-rgb');
+    }
+
+    const savedGlass = localStorage.getItem('giin_glass_opacity');
+    if (savedGlass === 'none') {
+      document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
+      document.documentElement.style.setProperty('--glass-border', 'var(--border-color)');
+      document.documentElement.style.setProperty('--glass-blur', '0px');
+    } else if (savedGlass === 'ultra-clear') {
+      document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.15)');
+      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.04)');
+      document.documentElement.style.setProperty('--glass-blur', '8px');
+    } else {
+      document.documentElement.style.removeProperty('--glass-bg');
+      document.documentElement.style.removeProperty('--glass-border');
+      document.documentElement.style.removeProperty('--glass-blur');
+    }
+  }, [user]);
+
   const totalUnreadMessages = threads.reduce((acc, t) => acc + (t.unreadCount || 0), 0);
 
   // Window focus state tracker
@@ -973,7 +1009,9 @@ function App() {
     timezone?: string,
     location?: string,
     skills?: string[],
-    phone?: string
+    phone?: string,
+    workspaceName?: string,
+    domain?: string
   ) => {
     setUserName(name);
     setUserEmail(email);
@@ -982,7 +1020,7 @@ function App() {
 
     if (user && user.id) {
       try {
-        await mockAuth.updateProfile(user.id, name, email, avatarUrl, role, timezone, location, skills, phone);
+        await mockAuth.updateProfile(user.id, name, email, avatarUrl, role, timezone, location, skills, phone, workspaceName, domain);
         const updatedUser = {
           ...user,
           name,
@@ -992,7 +1030,9 @@ function App() {
           timezone: timezone !== undefined ? timezone : user.timezone,
           location: location !== undefined ? location : user.location,
           skills: skills !== undefined ? skills : user.skills,
-          phone: phone !== undefined ? phone : user.phone
+          phone: phone !== undefined ? phone : user.phone,
+          workspaceName: workspaceName !== undefined ? workspaceName : user.workspaceName,
+          domain: domain !== undefined ? domain : user.domain
         };
         setUser(updatedUser);
         localStorage.setItem('giin_user', JSON.stringify(updatedUser));
@@ -1767,6 +1807,8 @@ function App() {
               userTimezone={user?.timezone || 'UTC'}
               userLocation={user?.location || ''}
               userSkills={user?.skills || []}
+              userWorkspaceName={user?.workspaceName || 'Personal Workspace'}
+              userDomain={user?.domain || 'personal'}
               onUpdateProfile={handleUpdateProfile}
             />
           )}
