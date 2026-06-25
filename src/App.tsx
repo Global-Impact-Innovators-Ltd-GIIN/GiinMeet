@@ -16,6 +16,7 @@ import { Auth } from './components/Auth';
 import { PrivateSpace } from './components/PrivateSpace';
 import { Waitroom } from './components/Waitroom';
 import { Superadmin } from './components/Superadmin';
+import { MeetingLobby } from './components/MeetingLobby';
 import { mockAuth, supabase, getTransparentLogo } from './supabaseClient';
 import { encryptMessage, decryptMessage } from './services/e2ee';
 
@@ -27,6 +28,7 @@ interface Meeting {
   duration: string;
   status: 'Completed' | 'In Progress' | 'Scheduled';
   host: string;
+  passcode?: string;
 }
 
 function App() {
@@ -73,6 +75,13 @@ function App() {
   // Meeting History State
   const [meetingHistory, setMeetingHistory] = useState<Meeting[]>([]);
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+  const [lobbyMeetingData, setLobbyMeetingData] = useState<{
+    id: string;
+    title: string;
+    passcode: string;
+    host: string;
+    isVideoOn?: boolean;
+  } | null>(null);
 
   // Transparent logo loading state
   const [logoUrl, setLogoUrl] = useState(() => localStorage.getItem('giin_custom_logo') || '/logo.png');
@@ -682,7 +691,8 @@ function App() {
               time: m.time || new Date().toISOString(),
               duration: m.duration || '40m limit',
               status: m.status as 'Completed' | 'In Progress' | 'Scheduled',
-              host: m.host || 'You'
+              host: m.host || 'You',
+              passcode: m.passcode
             }));
             setMeetingHistory(mapped);
           } else {
@@ -808,35 +818,62 @@ function App() {
     setIsDarkMode(!isDarkMode);
   };
 
-  const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true) => {
+  const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true, existingMeetingId?: string) => {
     const finalTitle = title || 'Instant Call';
     setActiveCallTitle(finalTitle);
     setActiveCallVideoState(isVideo);
     
+    // Check if this is a professional meeting (no direct DM ringing)
+    const isMeeting = !dmThreadId;
+
     if (user && user.id) {
       try {
-        const newDbMeet = {
-          user_id: user.id,
-          title: finalTitle,
-          time: new Date().toISOString(),
-          duration: 'Active now',
-          status: 'In Progress',
-          host: user.name || 'You'
-        };
-        const saved = await mockAuth.createMeeting(newDbMeet);
+        let saved = null;
+        if (existingMeetingId) {
+          // Fetch existing meeting details
+          const { data } = await mockAuth.getMeetingDetails(existingMeetingId);
+          if (data) {
+            saved = {
+              id: existingMeetingId,
+              title: data.title || finalTitle,
+              time: new Date().toISOString(),
+              duration: 'Active now',
+              status: 'In Progress',
+              host: data.host || user.name || 'You',
+              passcode: data.passcode
+            };
+          }
+        }
+
+        if (!saved) {
+          const newDbMeet = {
+            user_id: user.id,
+            title: finalTitle,
+            time: new Date().toISOString(),
+            duration: 'Active now',
+            status: 'In Progress',
+            host: user.name || 'You'
+          };
+          saved = await mockAuth.createMeeting(newDbMeet);
+        }
+
         if (saved) {
           setActiveMeetingId(saved.id);
           // Register the host in the meeting participants list as Admitted
           await mockAuth.joinMeetingRoom(saved.id, user.name, user.id, 'Admin', 'Admitted');
+          
           const mapped: Meeting = {
             id: saved.id,
             title: saved.title,
             time: saved.time,
             duration: saved.duration || 'Active now',
-            status: saved.status as 'Completed' | 'In Progress' | 'Scheduled',
-            host: saved.host || 'You'
+            status: 'In Progress',
+            host: saved.host || 'You',
+            passcode: saved.passcode
           };
-          setMeetingHistory(prev => [mapped, ...prev]);
+
+          // Update meeting status in history to In Progress
+          setMeetingHistory(prev => [mapped, ...prev.filter(m => m.id !== saved.id)]);
 
           if (dmThreadId) {
             const inviteMsg = `📞 CALL_INVITE:${saved.id}:${saved.passcode}:${user.name}`;
@@ -883,21 +920,49 @@ function App() {
               });
             }
           }
+
+          if (isMeeting) {
+            setLobbyMeetingData({
+              id: saved.id,
+              title: saved.title,
+              passcode: saved.passcode,
+              host: saved.host || user.name || 'You',
+              isVideoOn: isVideo
+            });
+            setCurrentView('lobby');
+            return;
+          }
         }
       } catch (err) {
-        console.error('Failed to create instant meeting in database:', err);
+        console.error('Failed to start meeting/call:', err);
       }
     } else {
+      const generatedId = existingMeetingId || Math.random().toString(36).substr(2, 9);
       const newMeet: Meeting = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: generatedId,
         title: finalTitle,
         time: new Date().toISOString(),
         duration: 'Active now',
         status: 'In Progress',
-        host: 'You'
+        host: 'You',
+        passcode: 'ABCD'
       };
-      setMeetingHistory(prev => [newMeet, ...prev]);
+      setMeetingHistory(prev => [newMeet, ...prev.filter(m => m.id !== generatedId)]);
+      setActiveMeetingId(generatedId);
+      
+      if (isMeeting) {
+        setLobbyMeetingData({
+          id: generatedId,
+          title: finalTitle,
+          passcode: 'ABCD',
+          host: 'You',
+          isVideoOn: isVideo
+        });
+        setCurrentView('lobby');
+        return;
+      }
     }
+
     setCurrentView('meeting');
   };
 
@@ -1033,7 +1098,7 @@ function App() {
   }, [user]);
 
 
-  const handleAddMeeting = async (meet: Meeting) => {
+  const handleAddMeeting = async (meet: { title: string; time: string; duration: string }) => {
     let savedMeet = null;
     if (user && user.id) {
       try {
@@ -1057,10 +1122,16 @@ function App() {
       time: savedMeet.time,
       duration: savedMeet.duration || '40m limit',
       status: 'Scheduled',
-      host: savedMeet.host || 'You'
+      host: savedMeet.host || 'You',
+      passcode: savedMeet.passcode
     } : {
-      ...meet,
-      host: user?.name || 'You'
+      id: Math.random().toString(36).substr(2, 9),
+      title: meet.title,
+      time: meet.time,
+      duration: meet.duration,
+      status: 'Scheduled',
+      host: user?.name || 'You',
+      passcode: 'ABCD'
     };
 
     setMeetingHistory(prev => [finalMeet, ...prev]);
@@ -1072,6 +1143,8 @@ function App() {
       read: false
     };
     setNotifications(prev => [newNotif, ...prev]);
+
+    return finalMeet;
   };
 
   const handleAuthSuccess = (authenticatedUser: { id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean; avatar_url?: string }) => {
@@ -1864,6 +1937,27 @@ function App() {
               meetingHistory={meetingHistory}
               onAddMeeting={handleAddMeeting}
               userName={user?.name || userName}
+            />
+          )}
+
+          {currentView === 'lobby' && lobbyMeetingData && (
+            <MeetingLobby
+              meetingId={lobbyMeetingData.id}
+              meetingTitle={lobbyMeetingData.title}
+              passcode={lobbyMeetingData.passcode}
+              hostName={lobbyMeetingData.host}
+              currentUser={user}
+              onJoin={(videoOn, _audioOn) => {
+                setActiveCallTitle(lobbyMeetingData.title);
+                setActiveMeetingId(lobbyMeetingData.id);
+                setActiveCallVideoState(videoOn);
+                setCurrentView('meeting');
+                setLobbyMeetingData(null);
+              }}
+              onCancel={() => {
+                setLobbyMeetingData(null);
+                setCurrentView('dashboard');
+              }}
             />
           )}
 

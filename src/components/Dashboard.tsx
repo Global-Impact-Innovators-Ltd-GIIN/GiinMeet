@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle } from 'lucide-react';
+import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check } from 'lucide-react';
 
 interface Meeting {
   id: string;
@@ -8,14 +8,15 @@ interface Meeting {
   duration: string;
   status: 'Completed' | 'In Progress' | 'Scheduled';
   host: string;
+  passcode?: string;
 }
 
 interface DashboardProps {
   isPremium: boolean;
   onNavigate: (view: string) => void;
-  onStartMeeting: (title?: string) => void;
+  onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string) => void;
   meetingHistory: Meeting[];
-  onAddMeeting: (meeting: Meeting) => void;
+  onAddMeeting: (meeting: { title: string; time: string; duration: string }) => Promise<Meeting | null>;
   userName: string;
 }
 
@@ -29,28 +30,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [scheduledMeetingDetails, setScheduledMeetingDetails] = useState<Meeting | null>(null);
+  const [copiedSuccessId, setCopiedSuccessId] = useState<'link' | 'details' | null>(null);
+  
+  // Track copying in history list
+  const [copiedHistoryId, setCopiedHistoryId] = useState<string | null>(null);
+
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingTime, setMeetingTime] = useState('');
   const [meetingCode, setMeetingCode] = useState('');
   const [joinError, setJoinError] = useState('');
 
-  const handleScheduleSubmit = (e: React.FormEvent) => {
+  const handleScheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!meetingTitle || !meetingTime) return;
 
-    const newMeeting: Meeting = {
-      id: Math.random().toString(36).substr(2, 9),
+    const saved = await onAddMeeting({
       title: meetingTitle,
       time: new Date(meetingTime).toISOString(),
-      duration: '40m limit',
-      status: 'Scheduled',
-      host: 'You',
-    };
+      duration: '40m limit'
+    });
 
-    onAddMeeting(newMeeting);
-    setMeetingTitle('');
-    setMeetingTime('');
-    setShowScheduleModal(false);
+    if (saved) {
+      setScheduledMeetingDetails(saved);
+      setMeetingTitle('');
+      setMeetingTime('');
+      setShowScheduleModal(false);
+      setShowSuccessModal(true);
+    }
   };
 
   const handleJoinSubmit = (e: React.FormEvent) => {
@@ -218,7 +226,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'between',
+                  justifyContent: 'space-between',
                   padding: '1rem',
                   border: '1px solid var(--border-color)',
                   borderRadius: 'var(--radius-md)',
@@ -255,7 +263,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <span className={`badge ${
                     meeting.status === 'Completed' ? 'badge-success' :
                     meeting.status === 'In Progress' ? 'badge-premium' : 'badge-info'
@@ -265,20 +273,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   
                   {meeting.status === 'In Progress' ? (
                     <button 
-                      onClick={() => onStartMeeting(meeting.title)}
+                      onClick={() => onStartMeeting(meeting.title, undefined, true, meeting.id)}
                       className="premium-btn premium-btn-accent" 
                       style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', borderRadius: '4px' }}
                     >
                       Join Now
                     </button>
                   ) : meeting.status === 'Scheduled' ? (
-                    <button 
-                      onClick={() => onStartMeeting(meeting.title)}
-                      className="premium-btn premium-btn-primary" 
-                      style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', borderRadius: '4px' }}
-                    >
-                      Start Call
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button 
+                        onClick={() => {
+                          const shareableLink = `${window.location.origin}/#/join?id=${meeting.id}&passcode=${meeting.passcode || 'ABCD'}`;
+                          navigator.clipboard.writeText(shareableLink);
+                          setCopiedHistoryId(meeting.id);
+                          setTimeout(() => setCopiedHistoryId(null), 2000);
+                        }}
+                        className={`premium-btn ${copiedHistoryId === meeting.id ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        title="Copy Join Link"
+                      >
+                        {copiedHistoryId === meeting.id ? <Check size={14} /> : <Copy size={14} />}
+                        <span>{copiedHistoryId === meeting.id ? 'Copied' : 'Copy Link'}</span>
+                      </button>
+                      <button 
+                        onClick={() => onStartMeeting(meeting.title, undefined, true, meeting.id)}
+                        className="premium-btn premium-btn-primary" 
+                        style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', borderRadius: '4px' }}
+                      >
+                        Start Call
+                      </button>
+                    </div>
                   ) : (
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                       Host: {meeting.host}
@@ -524,6 +548,166 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Success Modal */}
+      {showSuccessModal && scheduledMeetingDetails && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div className="glass-panel" style={{
+            width: '500px',
+            backgroundColor: 'var(--bg-card)',
+            padding: '2rem',
+            animation: 'pop-in var(--transition-normal)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem'
+          }}>
+            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <CheckCircle2 size={32} color="#10B981" />
+              </div>
+              <h3 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', margin: 0 }}>
+                Meeting Scheduled Successfully
+              </h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
+                Your professional GIIN Meet room is ready.
+              </p>
+            </div>
+
+            <div style={{
+              backgroundColor: 'var(--bg-app)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-md)',
+              padding: '1.25rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem'
+            }}>
+              <div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Topic</span>
+                <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)' }}>{scheduledMeetingDetails.title}</div>
+              </div>
+
+              <div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Time</span>
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                  {(() => {
+                    try {
+                      return new Date(scheduledMeetingDetails.time).toLocaleString();
+                    } catch (e) {
+                      return scheduledMeetingDetails.time;
+                    }
+                  })()}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Meeting ID</span>
+                  <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-secondary)' }}>
+                    {scheduledMeetingDetails.id}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Passcode</span>
+                  <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-accent)' }}>
+                    {scheduledMeetingDetails.passcode || 'ABCD'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Sharing Link Section */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Meeting Join Link</label>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input 
+                  type="text" 
+                  readOnly 
+                  className="premium-input"
+                  style={{ fontSize: '0.8rem', backgroundColor: 'rgba(0,0,0,0.1)', flex: 1 }}
+                  value={`${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || 'ABCD'}`}
+                />
+                <button
+                  onClick={() => {
+                    const link = `${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || 'ABCD'}`;
+                    navigator.clipboard.writeText(link);
+                    setCopiedSuccessId('link');
+                    setTimeout(() => setCopiedSuccessId(null), 2000);
+                  }}
+                  className={`premium-btn ${copiedSuccessId === 'link' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
+                  style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
+                >
+                  {copiedSuccessId === 'link' ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copiedSuccessId === 'link' ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Copy Invitation Details Button */}
+            <button
+              onClick={() => {
+                const link = `${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || 'ABCD'}`;
+                const timeStr = (() => {
+                  try {
+                    return new Date(scheduledMeetingDetails.time).toLocaleString();
+                  } catch (e) {
+                    return scheduledMeetingDetails.time;
+                  }
+                })();
+                const invitation = `Please join my GIIN Meet video conference:
+Topic: ${scheduledMeetingDetails.title}
+Time: ${timeStr}
+
+Join Meeting Link: ${link}
+
+Meeting ID: ${scheduledMeetingDetails.id}
+Passcode: ${scheduledMeetingDetails.passcode || 'ABCD'}
+
+Securely encrypted under Fintech AES-256 standard.`;
+                navigator.clipboard.writeText(invitation);
+                setCopiedSuccessId('details');
+                setTimeout(() => setCopiedSuccessId(null), 2000);
+              }}
+              className={`premium-btn ${copiedSuccessId === 'details' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
+              style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem' }}
+            >
+              {copiedSuccessId === 'details' ? <Check size={16} /> : <Copy size={16} />}
+              <span>{copiedSuccessId === 'details' ? 'Invitation Details Copied' : 'Copy Invitation Email'}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setShowSuccessModal(false);
+                setScheduledMeetingDetails(null);
+              }}
+              className="premium-btn premium-btn-primary"
+              style={{ width: '100%', justifyContent: 'center', padding: '0.75rem', marginTop: '0.5rem' }}
+            >
+              Close
+            </button>
           </div>
         </div>
       )}
