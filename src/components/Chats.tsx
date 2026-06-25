@@ -3,7 +3,7 @@ import {
   Send, Smile, Paperclip, Search, PlusCircle, MoreVertical, 
   Video, CheckCheck, ArrowLeft, MessageSquare, Globe, Languages, Copy, Check, Sparkles,
   Volume2, VolumeX, BarChart2, FolderOpen, Info, FileText, Image, File,
-  ExternalLink, Minimize2, Paintbrush
+  ExternalLink, Minimize2, Paintbrush, Calendar
 } from 'lucide-react';
 import { mockAuth, supabase } from '../supabaseClient';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
@@ -1046,6 +1046,83 @@ export const Chats: React.FC<ChatsProps> = ({
     // Check for call invite card log
     const callInviteRegex = /^📞 CALL_INVITE:([^:]+):([^:]+):(.+)$/;
     const inviteMatch = text.match(callInviteRegex);
+    
+    // Check for inline calendar meeting invite card
+    const meetInviteRegex = /^\[MEET_INVITE:([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\]$/;
+    const meetInviteMatch = text.match(meetInviteRegex);
+    if (meetInviteMatch) {
+      const [, agenda, date, time, meetingId, passcode] = meetInviteMatch;
+      return (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.75rem',
+          padding: '0.5rem 0.25rem',
+          minWidth: '260px',
+          color: self ? 'white' : 'var(--text-main)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '10px',
+              backgroundColor: self ? 'rgba(255,255,255,0.15)' : 'rgba(var(--color-primary-rgb), 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: self ? 'white' : 'var(--color-primary)'
+            }}>
+              <Calendar size={20} />
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <span style={{ fontSize: '0.65rem', fontWeight: 700, color: self ? 'rgba(255,255,255,0.75)' : 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Calendar Invitation
+              </span>
+              <h4 style={{ fontSize: '0.85rem', fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={agenda}>
+                {agenda}
+              </h4>
+            </div>
+          </div>
+
+          <div style={{
+            fontSize: '0.75rem',
+            padding: '0.5rem',
+            borderRadius: '6px',
+            backgroundColor: self ? 'rgba(255,255,255,0.08)' : 'rgba(0, 0, 0, 0.03)',
+            border: '1px solid var(--border-color)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.25rem'
+          }}>
+            <div><strong>Date:</strong> {date}</div>
+            <div><strong>Time:</strong> {time}</div>
+            <div style={{ fontSize: '0.65rem', color: self ? 'rgba(255,255,255,0.6)' : 'var(--text-muted)' }}>
+              E2EE Secure Meeting ID: {meetingId.substring(0, 8)}...
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onJoinCall?.(meetingId, passcode)}
+            className="premium-btn premium-btn-primary"
+            style={{
+              width: '100%',
+              height: '32px',
+              justifyContent: 'center',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              backgroundColor: self ? 'white' : 'var(--color-primary)',
+              color: self ? 'var(--color-primary)' : 'white',
+              border: 'none',
+              borderRadius: '999px',
+              cursor: 'pointer'
+            }}
+          >
+            Join Video Call
+          </button>
+        </div>
+      );
+    }
     
     // Check for inline sketch doodle card
     const doodleRegex = /^\[DOODLE:([^\]]+)\]$/;
