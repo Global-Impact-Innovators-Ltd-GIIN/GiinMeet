@@ -75,9 +75,21 @@ function App() {
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
 
   // Transparent logo loading state
-  const [logoUrl, setLogoUrl] = useState('/logo.png');
+  const [logoUrl, setLogoUrl] = useState(() => localStorage.getItem('giin_custom_logo') || '/logo.png');
   useEffect(() => {
-    getTransparentLogo('/logo.png').then(url => setLogoUrl(url));
+    const handleLogoUpdate = () => {
+      const customLogo = localStorage.getItem('giin_custom_logo');
+      if (customLogo) {
+        setLogoUrl(customLogo);
+      } else {
+        getTransparentLogo('/logo.png').then(url => setLogoUrl(url));
+      }
+    };
+    window.addEventListener('giin_logo_changed', handleLogoUpdate);
+    handleLogoUpdate();
+    return () => {
+      window.removeEventListener('giin_logo_changed', handleLogoUpdate);
+    };
   }, []);
 
   // Guest user session state

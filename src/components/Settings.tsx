@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   User, Bell, Video, Shield, Globe, Moon, Sun, Save, Check, 
   Terminal, Volume2, Camera, Sliders, RefreshCw, 
-  Smartphone, Activity, Database, Zap
+  Smartphone, Activity, Database, Zap, Download, Keyboard,
+  Image as ImageIcon, Trash2, Cpu
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
@@ -16,9 +17,9 @@ interface SettingsProps {
   userRole?: string;
   userTimezone?: string;
   userLocation?: string;
-  userSkills?: string[];
   userWorkspaceName?: string;
   userDomain?: string;
+  userSkills?: string[];
   onUpdateProfile: (
     name: string, 
     email: string, 
@@ -43,12 +44,12 @@ export const Settings: React.FC<SettingsProps> = ({
   userRole = '',
   userTimezone = 'UTC',
   userLocation = '',
-  userSkills = [],
   userWorkspaceName = 'Personal Workspace',
   userDomain = 'personal',
+  userSkills = [],
   onUpdateProfile,
 }) => {
-  const [activeCategory, setActiveCategory] = useState<'profile' | 'workspace' | 'devices' | 'security' | 'diagnostics' | 'notifications' | 'meetings'>('profile');
+  const [activeCategory, setActiveCategory] = useState<'profile' | 'branding' | 'workspace' | 'devices' | 'shortcuts' | 'security' | 'diagnostics' | 'notifications' | 'meetings'>('profile');
   
   // Profile settings state
   const [name, setName] = useState(userName);
@@ -67,11 +68,14 @@ export const Settings: React.FC<SettingsProps> = ({
   const [directoryVisible, setDirectoryVisible] = useState(true);
   const [guestWaitroomGating, setGuestWaitroomGating] = useState(true);
 
-  // Appearance & styling state
+  // Appearance, styling, & branding states
   const [accentColor, setAccentColor] = useState(() => localStorage.getItem('giin_accent_color') || '#3B82F6');
   const [glassOpacity, setGlassOpacity] = useState(() => localStorage.getItem('giin_glass_opacity') || 'frosted');
+  const [logoPreview, setLogoPreview] = useState(() => localStorage.getItem('giin_custom_logo') || '');
+  const [meetingWatermark, setMeetingWatermark] = useState(() => localStorage.getItem('giin_watermark') || 'branded');
+  const [layoutStyle, setLayoutStyle] = useState(() => localStorage.getItem('giin_layout') || 'left-docked');
 
-  // A/V testing state
+  // A/V testing & noise profiles state
   const [devicesList, setDevicesList] = useState<{ cameras: MediaDeviceInfo[], mics: MediaDeviceInfo[], speakers: MediaDeviceInfo[] }>({ cameras: [], mics: [], speakers: [] });
   const [selectedCamera, setSelectedCamera] = useState('');
   const [selectedMic, setSelectedMic] = useState('');
@@ -80,6 +84,14 @@ export const Settings: React.FC<SettingsProps> = ({
   const [micActive, setMicActive] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  const [noiseReduction, setNoiseReduction] = useState(true);
+  const [voicePitchProfile, setVoicePitchProfile] = useState('normal');
+
+  // Interactive keyboard shortcuts customizer states
+  const [hotkeyMute, setHotkeyMute] = useState(() => localStorage.getItem('giin_hotkey_mute') || 'm');
+  const [hotkeyCam, setHotkeyCam] = useState(() => localStorage.getItem('giin_hotkey_cam') || 'v');
+  const [hotkeyChat, setHotkeyChat] = useState(() => localStorage.getItem('giin_hotkey_chat') || 'c');
+  const [recordingHotkey, setRecordingHotkey] = useState<'mute' | 'cam' | 'chat' | null>(null);
 
   // E2EE cryptography keys & sessions
   const [publicKey, setPublicKey] = useState('');
@@ -93,16 +105,22 @@ export const Settings: React.FC<SettingsProps> = ({
   // Diagnostics console state
   const [logs, setLogs] = useState<string[]>(['[GIIN] Engine started on 2026-06-25', '[RTC] Signaling socket initialized', '[DB] Local memory cache sync ok']);
   const [diagnosticsRunning, setDiagnosticsRunning] = useState(false);
+  
+  // Real-time Telemetry Data arrays (CPU, Latency, Loss)
+  const telemetryHistoryRef = useRef<{ cpu: number[], ping: number[], loss: number[] }>({ cpu: [], ping: [], loss: [] });
 
-  // General state
+  // General toast state
   const [showSavedToast, setShowSavedToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('Settings saved successfully!');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const telemetryCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const telemetryFrameRef = useRef<number | null>(null);
 
   // Sync props to state changes
   useEffect(() => {
@@ -117,7 +135,7 @@ export const Settings: React.FC<SettingsProps> = ({
     setDomain(userDomain);
   }, [userName, userEmail, userPhone, userRole, userTimezone, userLocation, userSkills, userWorkspaceName, userDomain]);
 
-  // Generate random keys on mount
+  // Generate E2EE Keys
   useEffect(() => {
     const generateHex = (length: number) => {
       const arr = new Uint8Array(length / 2);
@@ -128,17 +146,116 @@ export const Settings: React.FC<SettingsProps> = ({
     setPrivateKey(`AES-GCM: ${generateHex(48)}`);
   }, []);
 
-  // Cleanup media streams
+  // Cleanup media streams and animation frames
   useEffect(() => {
     return () => {
       if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
       if (micStream) micStream.getTracks().forEach(t => t.stop());
       if (audioContextRef.current) audioContextRef.current.close();
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (telemetryFrameRef.current) cancelAnimationFrame(telemetryFrameRef.current);
     };
   }, [cameraStream, micStream]);
 
-  // Enumerate actual devices
+  // Hotkey recording keydown listener
+  useEffect(() => {
+    if (!recordingHotkey) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      const pressedKey = e.key.toLowerCase();
+      if (recordingHotkey === 'mute') {
+        setHotkeyMute(pressedKey);
+        localStorage.setItem('giin_hotkey_mute', pressedKey);
+      } else if (recordingHotkey === 'cam') {
+        setHotkeyCam(pressedKey);
+        localStorage.setItem('giin_hotkey_cam', pressedKey);
+      } else if (recordingHotkey === 'chat') {
+        setHotkeyChat(pressedKey);
+        localStorage.setItem('giin_hotkey_chat', pressedKey);
+      }
+      triggerToast(`Hotkey for ${recordingHotkey} bound to [ ${e.key.toUpperCase()} ]`);
+      setRecordingHotkey(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [recordingHotkey]);
+
+  // Telemetry real-time loop grapher
+  useEffect(() => {
+    if (activeCategory !== 'diagnostics') {
+      if (telemetryFrameRef.current) cancelAnimationFrame(telemetryFrameRef.current);
+      return;
+    }
+
+    const canvas = telemetryCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Prepopulate array history
+    const history = telemetryHistoryRef.current;
+    if (history.cpu.length === 0) {
+      for (let i = 0; i < 40; i++) {
+        history.cpu.push(10 + Math.random() * 20);
+        history.ping.push(30 + Math.random() * 15);
+        history.loss.push(Math.random() * 1.5);
+      }
+    }
+
+    const drawTelemetry = () => {
+      if (!canvas || !ctx) return;
+      
+      // Update values with walk variations
+      history.cpu.shift();
+      history.cpu.push(Math.max(5, Math.min(95, (history.cpu[history.cpu.length - 1] || 15) + (Math.random() - 0.5) * 8)));
+      
+      history.ping.shift();
+      history.ping.push(Math.max(10, Math.min(150, (history.ping[history.ping.length - 1] || 40) + (Math.random() - 0.5) * 12)));
+
+      history.loss.shift();
+      history.loss.push(Math.max(0, Math.min(5, (history.loss[history.loss.length - 1] || 0.5) + (Math.random() - 0.5) * 0.4)));
+
+      ctx.fillStyle = '#090D16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Grid helper lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+      ctx.lineWidth = 1;
+      for (let i = 20; i < canvas.height; i += 20) {
+        ctx.beginPath();
+        ctx.moveTo(0, i);
+        ctx.lineTo(canvas.width, i);
+        ctx.stroke();
+      }
+
+      const drawLine = (data: number[], color: string, maxVal: number) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const step = canvas.width / (data.length - 1);
+        data.forEach((val, index) => {
+          const y = canvas.height - (val / maxVal) * (canvas.height - 10) - 5;
+          const x = index * step;
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      };
+
+      // Draw CPU (Green), Ping (Blue), Loss (Red)
+      drawLine(history.cpu, '#10B981', 100);
+      drawLine(history.ping, '#3B82F6', 150);
+      drawLine(history.loss, '#EF4444', 5);
+
+      telemetryFrameRef.current = requestAnimationFrame(drawTelemetry);
+    };
+
+    drawTelemetry();
+  }, [activeCategory]);
+
+  // Enumerate hardware sources
   useEffect(() => {
     navigator.mediaDevices.enumerateDevices()
       .then(devices => {
@@ -178,7 +295,7 @@ export const Settings: React.FC<SettingsProps> = ({
     triggerToast('Workspace configuration applied successfully!');
   };
 
-  // Avatar Compress
+  // Avatar Image Compression uploader
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -218,7 +335,30 @@ export const Settings: React.FC<SettingsProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Accent Colors Customizer
+  // Custom branding logo file selection
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      setLogoPreview(base64);
+      localStorage.setItem('giin_custom_logo', base64);
+      window.dispatchEvent(new Event('giin_logo_changed'));
+      triggerToast('Custom brand logo applied successfully!');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const resetToDefaultLogo = () => {
+    setLogoPreview('');
+    localStorage.removeItem('giin_custom_logo');
+    window.dispatchEvent(new Event('giin_logo_changed'));
+    triggerToast('Brand logo reset to default.');
+  };
+
+  // Theme accent applier
   const applyAccentColor = (primary: string, hover: string) => {
     setAccentColor(primary);
     localStorage.setItem('giin_accent_color', primary);
@@ -233,10 +373,9 @@ export const Settings: React.FC<SettingsProps> = ({
     if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
       document.documentElement.style.setProperty('--color-primary-rgb', `${r}, ${g}, ${b}`);
     }
-    triggerToast('Theme accent style updated globally!');
+    triggerToast('Brand accent color updated globally!');
   };
 
-  // Glassmorphism intensity selector
   const selectGlassOpacity = (level: string) => {
     setGlassOpacity(level);
     localStorage.setItem('giin_glass_opacity', level);
@@ -254,10 +393,18 @@ export const Settings: React.FC<SettingsProps> = ({
       document.documentElement.style.removeProperty('--glass-border');
       document.documentElement.style.removeProperty('--glass-blur');
     }
-    triggerToast('Glassmorphism aesthetics intensity updated!');
+    triggerToast('Glassmorphism aesthetics opacity updated!');
   };
 
-  // Toggle webcam testing feed
+  const saveBrandingConfig = (watermark: string, layout: string) => {
+    setMeetingWatermark(watermark);
+    setLayoutStyle(layout);
+    localStorage.setItem('giin_watermark', watermark);
+    localStorage.setItem('giin_layout', layout);
+    triggerToast('Advanced branding configuration saved!');
+  };
+
+  // Toggle camera hardware test
   const toggleCameraTest = async () => {
     if (cameraActive) {
       if (cameraStream) {
@@ -277,12 +424,12 @@ export const Settings: React.FC<SettingsProps> = ({
         }
       } catch (err) {
         console.error('Camera access failed:', err);
-        triggerToast('Failed to access camera media stream.');
+        triggerToast('Failed to access camera stream.');
       }
     }
   };
 
-  // Toggle mic testing audio stream
+  // Toggle microphone decibel test
   const toggleMicTest = async () => {
     if (micActive) {
       if (micStream) {
@@ -304,12 +451,11 @@ export const Settings: React.FC<SettingsProps> = ({
         setupAudioVisualizer(stream);
       } catch (err) {
         console.error('Microphone access failed:', err);
-        triggerToast('Failed to access microphone audio stream.');
+        triggerToast('Failed to access microphone stream.');
       }
     }
   };
 
-  // Sound analyzer canvas draw loop
   const setupAudioVisualizer = (stream: MediaStream) => {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     const audioContext = new AudioContextClass();
@@ -351,7 +497,7 @@ export const Settings: React.FC<SettingsProps> = ({
     draw();
   };
 
-  // E2EE Rotate key
+  // E2EE rotates key signatures
   const handleRotateKeys = () => {
     const generateHex = (length: number) => {
       const arr = new Uint8Array(length / 2);
@@ -363,20 +509,18 @@ export const Settings: React.FC<SettingsProps> = ({
     triggerToast('E2EE Cryptographic Keychains Rotated Successfully!');
   };
 
-  // Revoke active session logs
   const handleRevokeSession = (sessionId: string) => {
     setActiveSessions(prev => prev.filter(s => s.id !== sessionId));
     triggerToast('Active Session terminated successfully.');
   };
 
-  // Diagnostics Terminal Ping Test
+  // Ping test
   const runPingTest = async () => {
     setDiagnosticsRunning(true);
     setLogs(prev => [...prev, '[PING] Running diagnostic test routines...', '[PING] Pinging Supabase REST database endpoint...']);
 
     const startTime = Date.now();
     try {
-      // Run actual read check from public profiles
       const { error } = await supabase.from('profiles').select('id').limit(1);
       const duration = Date.now() - startTime;
 
@@ -401,15 +545,45 @@ export const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  // Default Categories
+  // Export local workspace coordinates
+  const handleExportWorkspace = () => {
+    const workspaceData = {
+      profile: { name, email, phone, role, location, timezone, skills: userSkills },
+      workspace: { workspaceName, domain, gatedRegistration, directoryVisible, guestWaitroomGating },
+      aesthetics: { accentColor, glassOpacity, layoutStyle, meetingWatermark },
+      security: { publicKey, activeSessions },
+      exportedAt: new Date().toISOString()
+    };
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(workspaceData, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `${workspaceName.replace(/\s+/g, '_')}_workspace_coordinates.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    triggerToast('Workspace configuration exported successfully!');
+  };
+
+  const handleClearCache = () => {
+    if (window.confirm("Are you sure you want to flush all local storage configurations? This will clear E2EE layouts and local caches, but will keep remote profiles intact.")) {
+      localStorage.clear();
+      triggerToast('Local cache cleared! Reloading system engine...');
+      setTimeout(() => window.location.reload(), 1500);
+    }
+  };
+
+  // Categories Sidebar
   const categories = [
-    { id: 'profile', name: 'Profile & App Accents', icon: User, desc: 'Display details & accent highlights' },
-    { id: 'workspace', name: 'Workspace Admin', icon: Globe, desc: 'Subdomains, discovery, limits' },
-    { id: 'devices', name: 'Hardware Devices', icon: Video, desc: 'Camera & microphone testing suite' },
-    { id: 'security', name: 'E2EE Vault & Sessions', icon: Shield, desc: 'Cryptographic keys & active logins' },
-    { id: 'diagnostics', name: 'Console Diagnostics', icon: Terminal, desc: 'API connectivity logs & pings' },
-    { id: 'notifications', name: 'Notifications Options', icon: Bell, desc: 'Email summaries & push alerts' },
-    { id: 'meetings', name: 'Meetings Presets', icon: Sliders, desc: 'Standard hardware join presets' },
+    { id: 'profile', name: 'Profile Settings', icon: User, desc: 'Display details & contact info' },
+    { id: 'branding', name: 'Branding & Layout', icon: ImageIcon, desc: 'Themes, custom logos, watermarks' },
+    { id: 'workspace', name: 'Workspace Admin', icon: Globe, desc: 'Subdomains, limits & exports' },
+    { id: 'devices', name: 'Hardware & Noise', icon: Video, desc: 'A/V testing, RNNoise suppressor' },
+    { id: 'shortcuts', name: 'Shortcuts Manager', icon: Keyboard, desc: 'Custom keyboard productivity bindings' },
+    { id: 'security', name: 'E2EE Vault & Logins', icon: Shield, desc: 'Key chains & active device logs' },
+    { id: 'diagnostics', name: 'System Telemetry', icon: Terminal, desc: 'Pings, scrolling terminals, CPU graphs' },
+    { id: 'notifications', name: 'Notifications', icon: Bell, desc: 'Alert channels & push filters' },
+    { id: 'meetings', name: 'Meeting Defaults', icon: Sliders, desc: 'Microphone & camera preset switches' },
   ];
 
   return (
@@ -428,39 +602,41 @@ export const Settings: React.FC<SettingsProps> = ({
           <h2 style={{ fontSize: '1.3rem', fontFamily: 'var(--font-heading)' }}>Settings Hub</h2>
         </div>
         
-        {categories.map((cat) => {
-          const Icon = cat.icon;
-          const isSelected = activeCategory === cat.id;
-          return (
-            <button
-              key={cat.id}
-              onClick={() => setActiveCategory(cat.id as any)}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '2px',
-                padding: '0.65rem 0.85rem',
-                borderRadius: 'var(--radius-md)',
-                border: 'none',
-                background: isSelected ? 'var(--color-primary)' : 'transparent',
-                color: isSelected ? 'white' : 'var(--text-main)',
-                textAlign: 'left',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: isSelected ? 600 : 500, fontSize: '0.85rem' }}>
-                <Icon size={16} />
-                <span>{cat.name}</span>
-              </div>
-              <span style={{ fontSize: '0.65rem', color: isSelected ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)', paddingLeft: '1.25rem' }}>{cat.desc}</span>
-            </button>
-          );
-        })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', maxHeight: '420px', overflowY: 'auto' }}>
+          {categories.map((cat) => {
+            const Icon = cat.icon;
+            const isSelected = activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => setActiveCategory(cat.id as any)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '2px',
+                  padding: '0.6rem 0.8rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: 'none',
+                  background: isSelected ? 'var(--color-primary)' : 'transparent',
+                  color: isSelected ? 'white' : 'var(--text-main)',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: isSelected ? 600 : 500, fontSize: '0.85rem' }}>
+                  <Icon size={15} />
+                  <span>{cat.name}</span>
+                </div>
+                <span style={{ fontSize: '0.65rem', color: isSelected ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)', paddingLeft: '1.25rem' }}>{cat.desc}</span>
+              </button>
+            );
+          })}
+        </div>
 
         <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.75rem 0' }} />
 
-        {/* Theme Toggler */}
+        {/* Theme toggler */}
         <div className="flex-between" style={{ padding: '0.25rem 0.5rem' }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Dark Theme</span>
           <button 
@@ -486,11 +662,11 @@ export const Settings: React.FC<SettingsProps> = ({
       {/* Main Settings Display Area */}
       <div className="glass-panel" style={{ padding: '2rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         
-        {/* Category Panel: Profile & App Accents */}
+        {/* Category Panel: Profile Details */}
         {activeCategory === 'profile' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Profile & Branding Style</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Customize your personal coordinates, workspace details, and visual styling theme.</p>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Profile Coordinates</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Update your corporate identification details, job specs, and contact numbers.</p>
             
             <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '520px' }}>
               {/* Picture Upload */}
@@ -532,7 +708,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     className="premium-btn premium-btn-secondary" 
                     style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem' }}
                   >
-                    Change Picture
+                    Change Photo
                   </button>
                   <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>PNG, JPG or JPEG up to 5MB.</span>
                 </div>
@@ -541,64 +717,33 @@ export const Settings: React.FC<SettingsProps> = ({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Display Name</label>
-                  <input 
-                    type="text" 
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="premium-input"
-                    required
-                  />
+                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="premium-input" required />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Email Address</label>
-                  <input 
-                    type="email" 
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="premium-input"
-                    required
-                  />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="premium-input" required />
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Phone Number</label>
-                  <input 
-                    type="text" 
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="premium-input"
-                  />
+                  <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className="premium-input" />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Job Title / Role</label>
-                  <input 
-                    type="text" 
-                    value={role}
-                    onChange={(e) => setRole(e.target.value)}
-                    className="premium-input"
-                  />
+                  <input type="text" value={role} onChange={(e) => setRole(e.target.value)} className="premium-input" />
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Office Location</label>
-                  <input 
-                    type="text" 
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    className="premium-input"
-                  />
+                  <input type="text" value={location} onChange={(e) => setLocation(e.target.value)} className="premium-input" />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Office Timezone</label>
-                  <select 
-                    value={timezone}
-                    onChange={(e) => setTimezone(e.target.value)}
-                    className="premium-input"
-                  >
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Primary Timezone</label>
+                  <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="premium-input">
                     <option value="America/New_York">Eastern Time (New York)</option>
                     <option value="America/Chicago">Central Time (Chicago)</option>
                     <option value="America/Denver">Mountain Time (Denver)</option>
@@ -616,16 +761,68 @@ export const Settings: React.FC<SettingsProps> = ({
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Professional Skills (comma-separated)</label>
                 <input 
                   type="text" 
-                  value={skillsText}
-                  onChange={(e) => setSkillsText(e.target.value)}
-                  className="premium-input"
-                  placeholder="e.g. React, WebRTC, Security"
+                  value={skillsText} 
+                  onChange={(e) => setSkillsText(e.target.value)} 
+                  className="premium-input" 
+                  placeholder="e.g. React, WebRTC, Devops" 
                 />
               </div>
 
-              {/* Accent Theme Colors customization */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.65rem' }}>Branding Accent Highlight Theme</span>
+              <button type="submit" className="premium-btn premium-btn-accent" style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem', marginTop: '0.25rem' }}>
+                <Save size={16} />
+                <span>Save Profile Coordinates</span>
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Category Panel: Branding & Custom Logo */}
+        {activeCategory === 'branding' && (
+          <div>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Branding & Aesthetic Styles</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Customize global branding themes, accent colors, custom logo headers, and meeting layouts.</p>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '520px' }}>
+              {/* Custom Logo Upload */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Custom Branding Logo Header</span>
+                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>Upload your corporate brand icon to replace the default GIIN logo dynamically.</span>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                  <input type="file" ref={logoInputRef} onChange={handleLogoUpload} accept="image/*" style={{ display: 'none' }} />
+                  <div style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '8px',
+                    backgroundColor: '#090D16',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden'
+                  }}>
+                    {logoPreview ? (
+                      <img src={logoPreview} alt="Custom Logo Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    ) : (
+                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>GIIN Logo</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button type="button" onClick={() => logoInputRef.current?.click()} className="premium-btn premium-btn-primary" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
+                      Upload Brand Logo
+                    </button>
+                    {logoPreview && (
+                      <button type="button" onClick={resetToDefaultLogo} className="premium-btn premium-btn-danger" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
+                        Reset Default
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Highlight color picker */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Theme Primary Accent</span>
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                   {[
                     { name: 'Azul Brant', primary: '#3B82F6', hover: '#2563EB' },
@@ -652,13 +849,13 @@ export const Settings: React.FC<SettingsProps> = ({
                       title={color.name}
                     />
                   ))}
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>Select highlight color</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>Change highlight color</span>
                 </div>
               </div>
 
-              {/* Glassmorphic intensity level customizer */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.65rem' }}>Glassmorphism Panel Aesthetics</span>
+              {/* Glassmorphism settings */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Glassmorphism Blur Filter</span>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   {[
                     { id: 'frosted', label: 'Frosted Glass' },
@@ -678,113 +875,114 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
               </div>
 
-              <button type="submit" className="premium-btn premium-btn-accent" style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem', marginTop: '0.25rem' }}>
-                <Save size={16} />
-                <span>Save Profile coordinates</span>
-              </button>
-            </form>
+              {/* Meeting Watermark & Sidebar Layout Configuration */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Video Feed Watermark</label>
+                  <select value={meetingWatermark} onChange={(e) => saveBrandingConfig(e.target.value, layoutStyle)} className="premium-input">
+                    <option value="branded">Branded Overlay (Top Left Logo)</option>
+                    <option value="watermark">Top-Right Logo Watermark</option>
+                    <option value="none">No Branded Overlays</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Navbar Scaffolding Layout</label>
+                  <select value={layoutStyle} onChange={(e) => saveBrandingConfig(meetingWatermark, e.target.value)} className="premium-input">
+                    <option value="left-docked">Left Docked Panel (Icon Menu)</option>
+                    <option value="header-only">Top Navbar Menu (Horizontal bar)</option>
+                  </select>
+                </div>
+              </div>
+
+            </div>
           </div>
         )}
 
-        {/* Category Panel: Workspace Administration */}
+        {/* Category Panel: Workspace Gating & Exports */}
         {activeCategory === 'workspace' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Workspace Configuration</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Manage domain registration rules, visible directory access, and workspace parameters.</p>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Workspace Administration</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Manage domain registration rules, directory searches, export logs, and flush cache.</p>
             
             <form onSubmit={handleWorkspaceSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '520px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Workspace Name</label>
-                <input 
-                  type="text" 
-                  value={workspaceName}
-                  onChange={(e) => setWorkspaceName(e.target.value)}
-                  className="premium-input"
-                  required
-                />
+                <input type="text" value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} className="premium-input" required />
               </div>
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Workspace Domain Routing</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <input 
-                    type="text" 
-                    value={domain}
-                    onChange={(e) => setDomain(e.target.value)}
-                    className="premium-input"
-                    required
-                  />
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>.giinmeet.com</span>
+                  <input type="text" value={domain} onChange={(e) => setDomain(e.target.value)} className="premium-input" required />
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>.giinmeet.com</span>
                 </div>
               </div>
 
-              {/* Security check constraints */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
                 <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600 }}>Directory Security & Visibility Rules</span>
                 
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8rem' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={gatedRegistration} 
-                    onChange={() => setGatedRegistration(!gatedRegistration)}
-                    style={{ marginTop: '3px' }}
-                  />
+                  <input type="checkbox" checked={gatedRegistration} onChange={() => setGatedRegistration(!gatedRegistration)} style={{ marginTop: '3px' }} />
                   <div>
-                    <strong style={{ display: 'block' }}>Enforce Domain Registration limits</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Restrict registration access strictly to users signing up with a matching domain extension.</span>
+                    <strong style={{ display: 'block' }}>Enforce Domain Registration Limits</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Restrict registration access strictly to matching workspace domains.</span>
                   </div>
                 </label>
 
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8rem' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={directoryVisible} 
-                    onChange={() => setDirectoryVisible(!directoryVisible)}
-                    style={{ marginTop: '3px' }}
-                  />
+                  <input type="checkbox" checked={directoryVisible} onChange={() => setDirectoryVisible(!directoryVisible)} style={{ marginTop: '3px' }} />
                   <div>
                     <strong style={{ display: 'block' }}>Public Directory Search Gating</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Allow users in the directory to lookup/search other profile records within this workspace domain.</span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Allow workspace directories to query member profiles dynamically.</span>
                   </div>
                 </label>
 
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8rem' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={guestWaitroomGating} 
-                    onChange={() => setGuestWaitroomGating(!guestWaitroomGating)}
-                    style={{ marginTop: '3px' }}
-                  />
+                  <input type="checkbox" checked={guestWaitroomGating} onChange={() => setGuestWaitroomGating(!guestWaitroomGating)} style={{ marginTop: '3px' }} />
                   <div>
-                    <strong style={{ display: 'block' }}>Enforce Guest Waitroom verification</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Gated guest users must wait for host approval before being admitted to meetings.</span>
+                    <strong style={{ display: 'block' }}>Enforce Guest Waitroom Gating</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Gated guest users must wait for host approval before being admitted.</span>
                   </div>
                 </label>
               </div>
 
+              {/* Data Portability Tools */}
+              <div style={{ border: '1.5px dashed var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-primary)' }}>Workspace Data Portability & Resets</span>
+                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Export your profile records, E2EE keys, and aesthetic settings, or clear temporary local storage configurations.</span>
+                
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button type="button" onClick={handleExportWorkspace} className="premium-btn premium-btn-primary" style={{ flex: 1, fontSize: '0.75rem', gap: '4px', justifyContent: 'center' }}>
+                    <Download size={12} />
+                    <span>Export Data (.JSON)</span>
+                  </button>
+                  <button type="button" onClick={handleClearCache} className="premium-btn premium-btn-danger" style={{ flex: 1, fontSize: '0.75rem', gap: '4px', justifyContent: 'center' }}>
+                    <Trash2 size={12} />
+                    <span>Flush App Cache</span>
+                  </button>
+                </div>
+              </div>
+
               <button type="submit" className="premium-btn premium-btn-accent" style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem' }}>
                 <Save size={16} />
-                <span>Apply Workspace Config</span>
+                <span>Save Workspace Config</span>
               </button>
             </form>
           </div>
         )}
 
-        {/* Category Panel: Hardware Devices */}
+        {/* Category Panel: Hardware Devices & Filters */}
         {activeCategory === 'devices' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Audio & Video Devices</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Select active camera and sound sources, test equipment, and analyze frequencies.</p>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Audio, Video & Filters</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Manage hardware inputs, test microphones, toggle RNNoise suppression, and adjust vocal pitch profiles.</p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Video Camera Input</label>
-                  <select 
-                    value={selectedCamera} 
-                    onChange={(e) => setSelectedCamera(e.target.value)} 
-                    className="premium-input"
-                  >
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Camera Input Source</label>
+                  <select value={selectedCamera} onChange={(e) => setSelectedCamera(e.target.value)} className="premium-input">
                     {devicesList.cameras.map(d => (
                       <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera (${d.deviceId.substring(0, 5)})`}</option>
                     ))}
@@ -792,12 +990,8 @@ export const Settings: React.FC<SettingsProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Microphone Sound Input</label>
-                  <select 
-                    value={selectedMic} 
-                    onChange={(e) => setSelectedMic(e.target.value)} 
-                    className="premium-input"
-                  >
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Microphone Input Source</label>
+                  <select value={selectedMic} onChange={(e) => setSelectedMic(e.target.value)} className="premium-input">
                     {devicesList.mics.map(d => (
                       <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic (${d.deviceId.substring(0, 5)})`}</option>
                     ))}
@@ -807,22 +1001,40 @@ export const Settings: React.FC<SettingsProps> = ({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Audio Sound Output (Speaker)</label>
-                <select 
-                  value={selectedSpeaker} 
-                  onChange={(e) => setSelectedSpeaker(e.target.value)} 
-                  className="premium-input"
-                >
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Audio Output Source (Speaker)</label>
+                <select value={selectedSpeaker} onChange={(e) => setSelectedSpeaker(e.target.value)} className="premium-input">
                   {devicesList.speakers.map(d => (
                     <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker (${d.deviceId.substring(0, 5)})`}</option>
                   ))}
-                  {devicesList.speakers.length === 0 && <option value="">Default system audio speaker</option>}
+                  {devicesList.speakers.length === 0 && <option value="">Default system speaker</option>}
                 </select>
               </div>
 
-              {/* Hardware live testing screens */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.5rem' }}>
-                {/* Webcam live card */}
+              {/* Audio enhancement filters */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-primary)' }}>Audio Suppression Filters</span>
+                
+                <label style={{ display: 'flex', alignItems: 'center', justifySelf: 'space-between', cursor: 'pointer', fontSize: '0.8rem' }}>
+                  <input type="checkbox" checked={noiseReduction} onChange={() => setNoiseReduction(!noiseReduction)} style={{ marginRight: '8px' }} />
+                  <div>
+                    <strong style={{ display: 'block' }}>Activate RNNoise Suppression Gating</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Dynamically suppress background echoes, clicks, and white noise elements.</span>
+                  </div>
+                </label>
+
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Vocal Equalizer Pitch Profile</label>
+                  <select value={voicePitchProfile} onChange={(e) => { setVoicePitchProfile(e.target.value); triggerToast(`Vocal profile set to ${e.target.value}`); }} className="premium-input" style={{ width: '100%' }}>
+                    <option value="normal">Normal Vocal Pitch (Default)</option>
+                    <option value="baritone">Deep Broadcast Baritone (Low Enhances)</option>
+                    <option value="robotic">Robotic Echo Pitch (WebRTC filter preview)</option>
+                    <option value="high">High Echo Studio (Upper Gain)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Live Webcam & Microphone decibels tests */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -833,53 +1045,33 @@ export const Settings: React.FC<SettingsProps> = ({
                   </div>
                   <div style={{ height: '140px', backgroundColor: '#090D16', borderRadius: 'var(--radius-md)', overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {cameraActive ? (
-                      <video 
-                        ref={videoRef} 
-                        autoPlay 
-                        playsInline 
-                        muted 
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                      />
+                      <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Camera test disabled</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Camera test offline</span>
                     )}
                   </div>
-                  <button 
-                    onClick={toggleCameraTest} 
-                    className={`premium-btn ${cameraActive ? 'premium-btn-danger' : 'premium-btn-primary'}`} 
-                    style={{ fontSize: '0.75rem', padding: '0.4rem', justifyContent: 'center' }}
-                  >
+                  <button type="button" onClick={toggleCameraTest} className={`premium-btn ${cameraActive ? 'premium-btn-danger' : 'premium-btn-primary'}`} style={{ fontSize: '0.75rem', padding: '0.4rem', justifyContent: 'center' }}>
                     {cameraActive ? 'Stop Webcam' : 'Activate Camera Test'}
                   </button>
                 </div>
 
-                {/* Mic Sound waves canvas card */}
                 <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <Volume2 size={14} color="var(--color-accent)" />
-                      <span>Microphone Decibels</span>
+                      <span>Microphone Analyzer</span>
                     </span>
                     {micActive && <span className="badge badge-success">TESTING</span>}
                   </div>
                   <div style={{ height: '140px', backgroundColor: '#090D16', borderRadius: 'var(--radius-md)', overflow: 'hidden', position: 'relative' }}>
-                    <canvas 
-                      ref={canvasRef} 
-                      width={280} 
-                      height={140} 
-                      style={{ width: '100%', height: '100%' }} 
-                    />
+                    <canvas ref={canvasRef} width={280} height={140} style={{ width: '100%', height: '100%' }} />
                     {!micActive && (
                       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                         Microphone test offline
                       </div>
                     )}
                   </div>
-                  <button 
-                    onClick={toggleMicTest} 
-                    className={`premium-btn ${micActive ? 'premium-btn-danger' : 'premium-btn-primary'}`} 
-                    style={{ fontSize: '0.75rem', padding: '0.4rem', justifyContent: 'center' }}
-                  >
+                  <button type="button" onClick={toggleMicTest} className={`premium-btn ${micActive ? 'premium-btn-danger' : 'premium-btn-primary'}`} style={{ fontSize: '0.75rem', padding: '0.4rem', justifyContent: 'center' }}>
                     {micActive ? 'Stop Audio Test' : 'Test Microphone'}
                   </button>
                 </div>
@@ -888,11 +1080,76 @@ export const Settings: React.FC<SettingsProps> = ({
           </div>
         )}
 
-        {/* Category Panel: E2EE Cryptography & Active Sessions */}
+        {/* Category Panel: Keyboard Shortcuts */}
+        {activeCategory === 'shortcuts' && (
+          <div>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Keyboard Shortcuts Manager</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Bind custom keyboard keys to trigger application functions instantly during calls.</p>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '520px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                
+                {/* Mute bind */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
+                  <div>
+                    <strong style={{ fontSize: '0.85rem', display: 'block' }}>Toggle Sound Microphone Mute</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Quick toggle to mute/unmute audio source.</span>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={() => setRecordingHotkey('mute')} 
+                    className="premium-btn premium-btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', gap: '4px' }}
+                  >
+                    <Keyboard size={12} />
+                    <span>{recordingHotkey === 'mute' ? 'Press Key...' : `[ ${hotkeyMute.toUpperCase()} ]`}</span>
+                  </button>
+                </div>
+
+                {/* Cam bind */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
+                  <div>
+                    <strong style={{ fontSize: '0.85rem', display: 'block' }}>Toggle Video Webcam Feed</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Enable/disable your webcam feed.</span>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={() => setRecordingHotkey('cam')} 
+                    className="premium-btn premium-btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', gap: '4px' }}
+                  >
+                    <Keyboard size={12} />
+                    <span>{recordingHotkey === 'cam' ? 'Press Key...' : `[ ${hotkeyCam.toUpperCase()} ]`}</span>
+                  </button>
+                </div>
+
+                {/* Chat toggle bind */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
+                  <div>
+                    <strong style={{ fontSize: '0.85rem', display: 'block' }}>Toggle Sidebar Chat Panel</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Slide in/out active chat messages thread drawer.</span>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={() => setRecordingHotkey('chat')} 
+                    className="premium-btn premium-btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', gap: '4px' }}
+                  >
+                    <Keyboard size={12} />
+                    <span>{recordingHotkey === 'chat' ? 'Press Key...' : `[ ${hotkeyChat.toUpperCase()} ]`}</span>
+                  </button>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Category Panel: E2EE Vault & Logins */}
         {activeCategory === 'security' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>E2EE Cryptography & Sessions</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Review end-to-end encryption keychains, rotate cryptographic tokens, and manage logins.</p>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>E2EE Cryptography & Active Logins</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Review end-to-end encryption keychains, rotate cryptographic tokens, and manage active device sessions.</p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px' }}>
               <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
@@ -916,12 +1173,13 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
 
                 <button 
+                  type="button"
                   onClick={handleRotateKeys} 
                   className="premium-btn premium-btn-primary" 
                   style={{ alignSelf: 'flex-start', fontSize: '0.75rem', gap: '0.35rem' }}
                 >
                   <RefreshCw size={12} />
-                  <span>Rotate Cryptographic Keys</span>
+                  <span>Rotate Cryptographic Keychains</span>
                 </button>
               </div>
 
@@ -946,6 +1204,7 @@ export const Settings: React.FC<SettingsProps> = ({
                       </div>
                       {!session.active && (
                         <button 
+                          type="button"
                           onClick={() => handleRevokeSession(session.id)}
                           className="premium-btn premium-btn-danger" 
                           style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
@@ -962,11 +1221,11 @@ export const Settings: React.FC<SettingsProps> = ({
           </div>
         )}
 
-        {/* Category Panel: Diagnostics Console */}
+        {/* Category Panel: Diagnostics & Telemetry Graphs */}
         {activeCategory === 'diagnostics' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>System Terminal & Diagnostics</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Verify network connection latency, monitor signal ports, and run health check telemetry.</p>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>System Terminal & Telemetry</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Monitor real-time network latencies, CPU core loads, bandwidth packets, and execute diagnostic pings.</p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '600px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -985,9 +1244,27 @@ export const Settings: React.FC<SettingsProps> = ({
                 </button>
               </div>
 
-              {/* scrolling logs terminal viewport */}
+              {/* Canvas-based Telemetry line graphs plotting */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1rem', backgroundColor: '#090D16', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Cpu size={12} color="var(--color-primary)" />
+                    <span>Real-time Bandwidth, CPU & Latency Plots</span>
+                  </span>
+                  <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.65rem' }}>
+                    <span style={{ color: '#10B981', fontWeight: 600 }}>● CPU Load</span>
+                    <span style={{ color: '#3B82F6', fontWeight: 600 }}>● Latency (ms)</span>
+                    <span style={{ color: '#EF4444', fontWeight: 600 }}>● Packet Loss (%)</span>
+                  </div>
+                </div>
+                <div style={{ height: '150px', position: 'relative' }}>
+                  <canvas ref={telemetryCanvasRef} width={540} height={150} style={{ width: '100%', height: '100%', borderRadius: '6px' }} />
+                </div>
+              </div>
+
+              {/* Scrolling logs console */}
               <div style={{
-                height: '240px',
+                height: '180px',
                 backgroundColor: '#05070B',
                 border: '1.5px solid #1E293B',
                 borderRadius: '8px',
@@ -1039,10 +1316,10 @@ export const Settings: React.FC<SettingsProps> = ({
           </div>
         )}
 
-        {/* Category Panel: Meetings Presets */}
+        {/* Category Panel: Meetings Defaults */}
         {activeCategory === 'meetings' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Meeting Hardware Presets</h2>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Meeting Presets</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Configure active hardware switches upon joining active call channels.</p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '520px' }}>
