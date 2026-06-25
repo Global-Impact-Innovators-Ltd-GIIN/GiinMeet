@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Smile, Paperclip, Search, PlusCircle, MoreVertical, 
-  Video, CheckCheck, ArrowLeft, MessageSquare, Globe, Languages, Copy, Check, Sparkles
+  Video, CheckCheck, ArrowLeft, MessageSquare, Globe, Languages, Copy, Check, Sparkles,
+  Volume2, VolumeX, BarChart2, FolderOpen, Info, FileText, Image, File
 } from 'lucide-react';
 import { mockAuth } from '../supabaseClient';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
@@ -253,6 +254,10 @@ export const Chats: React.FC<ChatsProps> = ({
 
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const [translatingMessageId, setTranslatingMessageId] = useState<string | null>(null);
+  
+  const [showRightPanel, setShowRightPanel] = useState(false);
+  const [showCreatePollModal, setShowCreatePollModal] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
 
   const handleAddReaction = (messageId: string, emoji: string) => {
     setThreads(prev => 
@@ -349,6 +354,147 @@ export const Chats: React.FC<ChatsProps> = ({
       );
       setTranslatingMessageId(null);
     }, 600);
+  };
+
+  const handleSpeechMessage = (messageId: string, text: string) => {
+    if (!('speechSynthesis' in window)) {
+      alert("Text-to-speech is not supported in this browser.");
+      return;
+    }
+
+    if (speakingMessageId === messageId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMessageId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    
+    const cleanedText = text
+      .replace(/\[FILE:[^|]+\|[^|]+\|[^\]]+\]/g, "File shared.")
+      .replace(/📞 CALL_INVITE:[^:]+:[^:]+:(.+)/g, "Video call invitation from $1")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/\*([^*]+)\*/g, "$1")
+      .replace(/`([^`]+)`/g, "$1");
+
+    const utterance = new SpeechSynthesisUtterance(cleanedText);
+    
+    utterance.onend = () => {
+      setSpeakingMessageId(null);
+    };
+
+    utterance.onerror = () => {
+      setSpeakingMessageId(null);
+    };
+
+    setSpeakingMessageId(messageId);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  useEffect(() => {
+    return () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const handleVotePoll = async (messageId: string, optionIndex: number) => {
+    setThreads(prev => 
+      prev.map(t => {
+        if (t.id === activeThreadId) {
+          return {
+            ...t,
+            messages: t.messages.map(m => {
+              if (m.id === messageId) {
+                const match = m.text.match(/^\[POLL:([^|]+)\|(.+)\]$/);
+                if (match) {
+                  const [, question, optionsRaw] = match;
+                  const opts = optionsRaw.split('|').map((opt, idx) => {
+                    const [name, countStr] = opt.split(',');
+                    let count = parseInt(countStr, 10) || 0;
+                    if (idx === optionIndex) {
+                      count += 1;
+                    }
+                    return `${name},${count}`;
+                  });
+                  const updatedText = `[POLL:${question}|${opts.join('|')}]`;
+                  
+                  mockAuth.sendMessage({
+                    thread_id: activeThreadId,
+                    sender_name: m.sender,
+                    text: updatedText,
+                    user_id: user?.id
+                  }).catch(err => console.error("Error updating poll database:", err));
+                  
+                  return { ...m, text: updatedText };
+                }
+              }
+              return m;
+            })
+          };
+        }
+        return t;
+      })
+    );
+  };
+
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOption1, setPollOption1] = useState('');
+  const [pollOption2, setPollOption2] = useState('');
+  const [pollOption3, setPollOption3] = useState('');
+  const [pollOption4, setPollOption4] = useState('');
+
+  const handleCreatePoll = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pollQuestion.trim() || !pollOption1.trim() || !pollOption2.trim() || !activeThreadId) return;
+
+    const options = [pollOption1.trim(), pollOption2.trim()];
+    if (pollOption3.trim()) options.push(pollOption3.trim());
+    if (pollOption4.trim()) options.push(pollOption4.trim());
+
+    const optionsPayload = options.map(opt => `${opt},0`).join('|');
+    const pollPayload = `[POLL:${pollQuestion.trim()}|${optionsPayload}]`;
+
+    setPollQuestion('');
+    setPollOption1('');
+    setPollOption2('');
+    setPollOption3('');
+    setPollOption4('');
+    setShowCreatePollModal(false);
+
+    try {
+      const localId = Math.random().toString(36).substr(2, 9);
+      const newMsg: Message = {
+        id: localId,
+        sender: 'You',
+        text: pollPayload,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        self: true
+      };
+
+      setThreads(prev => 
+        prev.map(t => {
+          if (t.id === activeThreadId) {
+            return { ...t, messages: [...t.messages, newMsg] };
+          }
+          return t;
+        })
+      );
+
+      let dbText = pollPayload;
+      if (activeThreadId.startsWith('dm_')) {
+        dbText = await encryptMessage(pollPayload, activeThreadId);
+      }
+      await mockAuth.sendMessage({
+        thread_id: activeThreadId,
+        sender_name: user?.name || 'You',
+        text: dbText,
+        user_id: user?.id
+      });
+    } catch (err) {
+      console.error('Failed to send poll message:', err);
+    }
   };
 
 
@@ -604,10 +750,93 @@ export const Chats: React.FC<ChatsProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const renderMessageContent = (text: string, self: boolean) => {
+  const renderMessageContent = (text: string, self: boolean, mId: string) => {
     // Check for call invite card log
     const callInviteRegex = /^📞 CALL_INVITE:([^:]+):([^:]+):(.+)$/;
     const inviteMatch = text.match(callInviteRegex);
+    
+    // Check for interactive poll card
+    const pollRegex = /^\[POLL:([^|]+)\|(.+)\]$/;
+    const pollMatch = text.match(pollRegex);
+    if (pollMatch) {
+      const [, question, optionsRaw] = pollMatch;
+      const options = optionsRaw.split('|').map((opt, idx) => {
+        const [name, countStr] = opt.split(',');
+        return { name, count: parseInt(countStr, 10) || 0, index: idx };
+      });
+      const totalVotes = options.reduce((sum, o) => sum + o.count, 0);
+
+      return (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.75rem',
+          padding: '0.5rem 0.25rem',
+          minWidth: '260px',
+          textAlign: 'left'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '1.25rem' }}>📊</span>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, color: self ? 'white' : 'var(--text-main)' }}>
+              {question}
+            </h4>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {options.map((opt) => {
+              const pct = totalVotes > 0 ? Math.round((opt.count / totalVotes) * 100) : 0;
+              return (
+                <button
+                  key={opt.index}
+                  type="button"
+                  onClick={() => handleVotePoll(mId, opt.index)}
+                  style={{
+                    position: 'relative',
+                    width: '100%',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                    background: self ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)',
+                    color: self ? 'white' : 'var(--text-main)',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    fontSize: '0.8rem',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--color-primary)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--border-color)';
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    bottom: 0,
+                    width: `${pct}%`,
+                    backgroundColor: self ? 'rgba(255, 255, 255, 0.12)' : 'rgba(var(--color-secondary-rgb), 0.12)',
+                    transition: 'width 0.3s ease',
+                    zIndex: 0
+                  }} />
+                  <span style={{ zIndex: 1, fontWeight: 600 }}>{opt.name}</span>
+                  <span style={{ zIndex: 1, color: self ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)', fontSize: '0.75rem' }}>
+                    {opt.count} votes ({pct}%)
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <span style={{ fontSize: '0.7rem', color: self ? 'rgba(255,255,255,0.75)' : 'var(--text-muted)', textAlign: 'right' }}>
+            Total votes: {totalVotes}
+          </span>
+        </div>
+      );
+    }
     if (inviteMatch) {
       const [, meetingId, passcode, callerName] = inviteMatch;
       return (
@@ -802,10 +1031,11 @@ export const Chats: React.FC<ChatsProps> = ({
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '320px 1fr',
+      gridTemplateColumns: showRightPanel && activeThread ? '320px 1fr 280px' : '320px 1fr',
       gap: '1.5rem',
       height: 'calc(100vh - 120px)',
-      animation: 'slide-in var(--transition-normal)'
+      animation: 'slide-in var(--transition-normal)',
+      transition: 'grid-template-columns var(--transition-normal)'
     }} className="grid-2">
       
       {/* Sidebar List */}
@@ -990,7 +1220,19 @@ export const Chats: React.FC<ChatsProps> = ({
                   <Video size={16} />
                   <span>Call Video</span>
                 </button>
-                <button style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                <button 
+                  onClick={() => setShowRightPanel(!showRightPanel)}
+                  title="Conversation Details & Shared Files"
+                  style={{ 
+                    background: 'none', 
+                    border: 'none', 
+                    color: showRightPanel ? 'var(--color-primary)' : 'var(--text-muted)', 
+                    cursor: 'pointer',
+                    transition: 'color 0.2s',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
                   <MoreVertical size={20} />
                 </button>
               </div>
@@ -1086,6 +1328,26 @@ export const Chats: React.FC<ChatsProps> = ({
                       >
                         <Globe size={11} />
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSpeechMessage(m.id, m.text)}
+                        title={speakingMessageId === m.id ? "Stop Reading" : "Read Aloud"}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: speakingMessageId === m.id ? '#10B981' : 'var(--text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0.15rem',
+                          transition: 'transform 0.1s ease'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.2)'}
+                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                      >
+                        {speakingMessageId === m.id ? <VolumeX size={11} /> : <Volume2 size={11} />}
+                      </button>
                     </div>
                   )}
 
@@ -1108,7 +1370,7 @@ export const Chats: React.FC<ChatsProps> = ({
                     border: m.self ? 'none' : '1px solid var(--border-color)',
                     boxShadow: 'var(--shadow-sm)'
                   }}>
-                    {renderMessageContent(m.text, m.self)}
+                    {renderMessageContent(m.text, m.self, m.id)}
 
                     {/* Translating loader status */}
                     {translatingMessageId === m.id && (
@@ -1301,6 +1563,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   <button 
                     type="button" 
                     onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    title="Emojis"
                     style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                   >
                     <Smile size={22} />
@@ -1308,9 +1571,18 @@ export const Chats: React.FC<ChatsProps> = ({
                   <button 
                     type="button" 
                     onClick={() => fileInputRef.current?.click()}
+                    title="Attachment"
                     style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                   >
                     <Paperclip size={22} />
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowCreatePollModal(true)}
+                    title="Create Quick Poll"
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                  >
+                    <BarChart2 size={22} />
                   </button>
                 </div>
 
@@ -1364,6 +1636,176 @@ export const Chats: React.FC<ChatsProps> = ({
           </div>
         )}
       </div>
+
+      {/* Slide-out Details Side Drawer */}
+      {showRightPanel && activeThread && (
+        <div className="glass-panel" style={{
+          padding: '1.5rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.25rem',
+          height: '100%',
+          overflowY: 'auto',
+          borderLeft: '1px solid var(--border-color)',
+          animation: 'slide-in var(--transition-normal)'
+        }}>
+          <div className="flex-between">
+            <h3 style={{ fontSize: '1.1rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Info size={16} />
+              <span>Conversation Info</span>
+            </h3>
+            <button 
+              onClick={() => setShowRightPanel(false)}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.2rem' }}
+            >
+              &times;
+            </button>
+          </div>
+
+          {/* User profile detail card */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            padding: '1rem',
+            borderRadius: 'var(--radius-md)',
+            backgroundColor: 'rgba(var(--color-secondary-rgb), 0.04)',
+            border: '1px solid var(--border-color)',
+            gap: '0.5rem'
+          }}>
+            <div style={{
+              width: '60px',
+              height: '60px',
+              borderRadius: '50%',
+              backgroundColor: activeThread.avatarBg,
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 700,
+              fontSize: '1.4rem',
+              overflow: 'hidden'
+            }}>
+              {activeThread.avatar && (activeThread.avatar.startsWith('http') || activeThread.avatar.startsWith('data:image')) ? (
+                <img src={activeThread.avatar} alt={activeThread.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                activeThread.avatar
+              )}
+            </div>
+            <div>
+              <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.1rem' }}>{activeThread.name}</h4>
+              <span style={{ fontSize: '0.75rem', color: '#10B981', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10B981' }} />
+                <span>{activeThread.isGroup ? 'Group Member' : 'Online'}</span>
+              </span>
+            </div>
+            
+            <button 
+              onClick={() => onStartMeeting(`Meeting with ${activeThread.name}`, activeThread.id)}
+              className="premium-btn premium-btn-secondary"
+              style={{ width: '100%', padding: '0.35rem 0.75rem', fontSize: '0.75rem', marginTop: '0.25rem', justifyContent: 'center' }}
+            >
+              <Video size={12} />
+              <span>Start Meet</span>
+            </button>
+          </div>
+
+          {/* Shared Files List */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
+            <h4 style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <FolderOpen size={13} />
+              <span>Shared Workspace Files</span>
+            </h4>
+            
+            {(() => {
+              const fileMessages = activeThread.messages.filter(m => m.text.includes('[FILE:'));
+              if (fileMessages.length === 0) {
+                return (
+                  <div style={{
+                    padding: '1.5rem 1rem',
+                    textAlign: 'center',
+                    border: '1px dashed var(--border-color)',
+                    borderRadius: 'var(--radius-md)',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.75rem'
+                  }}>
+                    No documents or media shared yet.
+                  </div>
+                );
+              }
+              
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', overflowY: 'auto', maxHeight: '320px', paddingRight: '2px' }}>
+                  {fileMessages.map((m) => {
+                    const match = m.text.match(/^\[FILE:([^|]+)\|([^|]+)\|(.+)\]$/);
+                    if (!match) return null;
+                    const [, fileName, fileType, fileData] = match;
+                    
+                    let FileIcon = File;
+                    if (fileType.startsWith('image/')) FileIcon = Image;
+                    else if (fileType.startsWith('text/')) FileIcon = FileText;
+                    else if (fileType.startsWith('audio/')) FileIcon = Volume2;
+                    else if (fileType.startsWith('video/')) FileIcon = Video;
+                    
+                    return (
+                      <div key={m.id} style={{
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'rgba(255,255,255,0.01)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '0.5rem',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(var(--color-secondary-rgb), 0.04)'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.01)'}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flex: 1 }}>
+                          <div style={{ color: 'var(--color-primary)', display: 'flex', alignItems: 'center' }}>
+                            <FileIcon size={16} />
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <p style={{
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              margin: 0,
+                              color: 'var(--text-main)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }} title={fileName}>
+                              {fileName}
+                            </p>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{m.time}</span>
+                          </div>
+                        </div>
+                        <a 
+                          href={fileData} 
+                          download={fileName}
+                          title="Download"
+                          style={{
+                            fontSize: '0.65rem',
+                            color: 'var(--color-primary)',
+                            fontWeight: 700,
+                            textDecoration: 'underline',
+                            flexShrink: 0
+                          }}
+                        >
+                          Get
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Add Contact Modal */}
       {showAddContactModal && (
         <div style={{
@@ -1509,6 +1951,132 @@ export const Chats: React.FC<ChatsProps> = ({
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Create Poll Modal */}
+      {showCreatePollModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div className="glass-panel" style={{
+            width: '100%',
+            maxWidth: '440px',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '2rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            position: 'relative',
+            animation: 'pop-in 0.25s ease'
+          }}>
+            <div className="flex-between">
+              <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>📊</span>
+                <span>Create a Quick Poll</span>
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowCreatePollModal(false);
+                  setPollQuestion('');
+                  setPollOption1('');
+                  setPollOption2('');
+                  setPollOption3('');
+                  setPollOption4('');
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.5rem' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleCreatePoll} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
+                  POLL QUESTION
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Which timeline works best for the rollout?" 
+                  value={pollQuestion}
+                  onChange={(e) => setPollQuestion(e.target.value)}
+                  className="premium-input"
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
+                  OPTION 1 *
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Monday next week" 
+                  value={pollOption1}
+                  onChange={(e) => setPollOption1(e.target.value)}
+                  className="premium-input"
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
+                  OPTION 2 *
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Wednesday next week" 
+                  value={pollOption2}
+                  onChange={(e) => setPollOption2(e.target.value)}
+                  className="premium-input"
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
+                  OPTION 3 (OPTIONAL)
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Friday next week" 
+                  value={pollOption3}
+                  onChange={(e) => setPollOption3(e.target.value)}
+                  className="premium-input"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
+                  OPTION 4 (OPTIONAL)
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Hold off on rollout" 
+                  value={pollOption4}
+                  onChange={(e) => setPollOption4(e.target.value)}
+                  className="premium-input"
+                />
+              </div>
+
+              <button type="submit" className="premium-btn premium-btn-primary" style={{ justifyContent: 'center', marginTop: '0.5rem', fontWeight: 700 }}>
+                Launch Poll
+              </button>
+            </form>
           </div>
         </div>
       )}
