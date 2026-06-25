@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Smile, Paperclip, Search, PlusCircle, MoreVertical, 
-  Video, CheckCheck, ArrowLeft, MessageSquare
+  Video, CheckCheck, ArrowLeft, MessageSquare, Globe, Languages, Copy, Check, Sparkles
 } from 'lucide-react';
 import { mockAuth } from '../supabaseClient';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
+
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  users: string[];
+}
 
 export interface Message {
   id: string;
@@ -12,7 +18,158 @@ export interface Message {
   text: string;
   time: string;
   self: boolean;
+  reactions?: MessageReaction[];
+  translation?: string;
 }
+
+const CodeBlock: React.FC<{ code: string; language: string }> = ({ code, language }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{
+      backgroundColor: '#0F172A',
+      border: '1px solid var(--border-color)',
+      borderRadius: '6px',
+      margin: '0.5rem 0',
+      overflow: 'hidden',
+      fontFamily: 'Consolas, Monaco, "Andale Mono", monospace',
+      fontSize: '0.8rem',
+      textAlign: 'left'
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '0.35rem 0.75rem',
+        backgroundColor: '#1E293B',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+        color: '#94A3B8',
+        fontSize: '0.7rem',
+        textTransform: 'uppercase',
+        fontWeight: 600
+      }}>
+        <span>{language}</span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: copied ? '#10B981' : '#94A3B8',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '3px',
+            fontSize: '0.7rem'
+          }}
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          <span>{copied ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
+      <pre style={{
+        margin: 0,
+        padding: '0.75rem',
+        overflowX: 'auto',
+        color: '#E2E8F0',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all'
+      }}>
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+};
+
+const renderItalicOnly = (text: string, baseKey: string) => {
+  const italicParts = text.split(/(\*[^*]+\*)/g);
+  return (
+    <span key={baseKey}>
+      {italicParts.map((italicPart, idx) => {
+        if (italicPart.startsWith('*') && italicPart.endsWith('*')) {
+          return <em key={idx}>{italicPart.slice(1, -1)}</em>;
+        } else {
+          return italicPart;
+        }
+      })}
+    </span>
+  );
+};
+
+const renderBoldItalic = (text: string, baseKey: string) => {
+  const boldParts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <span key={baseKey}>
+      {boldParts.map((boldPart, idx) => {
+        if (boldPart.startsWith('**') && boldPart.endsWith('**')) {
+          const content = boldPart.slice(2, -2);
+          return (
+            <strong key={idx}>
+              {renderItalicOnly(content, `${baseKey}-${idx}-b`)}
+            </strong>
+          );
+        } else {
+          return renderItalicOnly(boldPart, `${baseKey}-${idx}-n`);
+        }
+      })}
+    </span>
+  );
+};
+
+const renderInlineMarkdown = (text: string, baseKey: number | string) => {
+  const codeParts = text.split(/(`[^`\n]+`)/g);
+  return (
+    <span key={baseKey}>
+      {codeParts.map((codePart, idx) => {
+        if (codePart.startsWith('`') && codePart.endsWith('`')) {
+          return (
+            <code 
+              key={idx}
+              style={{
+                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                padding: '0.1rem 0.3rem',
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.85em',
+                color: '#EF4444',
+                margin: '0 2px'
+              }}
+            >
+              {codePart.slice(1, -1)}
+            </code>
+          );
+        } else {
+          return renderBoldItalic(codePart, `${baseKey}-${idx}`);
+        }
+      })}
+    </span>
+  );
+};
+
+const parseMarkdownText = (text: string) => {
+  const parts = text.split(/(```[\s\S]*?```)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('```') && part.endsWith('```')) {
+      const content = part.slice(3, -3);
+      const lines = content.split('\n');
+      let language = 'code';
+      let code = content;
+      if (lines.length > 0 && lines[0].trim().length > 0 && !lines[0].includes(' ') && !lines[0].includes(';') && !lines[0].includes('=')) {
+        language = lines[0].trim();
+        code = lines.slice(1).join('\n');
+      }
+      return <CodeBlock key={index} code={code} language={language} />;
+    } else {
+      return renderInlineMarkdown(part, index);
+    }
+  });
+};
 
 export interface ChatThread {
   id: string;
@@ -36,6 +193,37 @@ interface ChatsProps {
   activeThreadId: string;
   setActiveThreadId: React.Dispatch<React.SetStateAction<string>>;
 }
+
+const getSmartReplies = (text: string): string[] => {
+  if (!text) {
+    return ["Hi! How are you?", "Let's catch up.", "Are we meeting today?"];
+  }
+  const txt = text.toLowerCase();
+  
+  if (txt.includes("[file:")) {
+    return ["Thanks for sending the file!", "I'll review this now.", "Looks good!"];
+  }
+  if (txt.includes("call_invite:")) {
+    return ["Joining now!", "Give me 2 minutes.", "Can we schedule for later?"];
+  }
+  if (txt.includes("meeting") || txt.includes("align")) {
+    return ["Let's schedule a call.", "Sounds good, I'll join.", "Send me the invite link."];
+  }
+  if (txt.includes("help") || txt.includes("issue") || txt.includes("error")) {
+    return ["Let's debug it together.", "What error do you see?", "I can help with that."];
+  }
+  if (txt.includes("perfect") || txt.includes("great") || txt.includes("awesome")) {
+    return ["Awesome!", "Glad to hear that.", "Let's proceed."];
+  }
+  if (txt.includes("thank") || txt.includes("thanks")) {
+    return ["You're welcome!", "Anytime.", "No problem!"];
+  }
+  if (txt.includes("hello") || txt.includes("hi") || txt.includes("hey")) {
+    return ["Hey there!", "Hello! How can I help?", "Hi, good to connect!"];
+  }
+  
+  return ["Understood.", "Sounds good!", "I will check and let you know."];
+};
 
 export const Chats: React.FC<ChatsProps> = ({ 
   initialTargetContactId, 
@@ -62,6 +250,106 @@ export const Chats: React.FC<ChatsProps> = ({
   const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle');
   const [foundContacts, setFoundContacts] = useState<any[]>([]);
   const [toastMessage, setToastMessage] = useState('');
+
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+  const [translatingMessageId, setTranslatingMessageId] = useState<string | null>(null);
+
+  const handleAddReaction = (messageId: string, emoji: string) => {
+    setThreads(prev => 
+      prev.map(t => {
+        if (t.id === activeThreadId) {
+          return {
+            ...t,
+            messages: t.messages.map(m => {
+              if (m.id === messageId) {
+                const currentReactions = m.reactions || [];
+                const existingReaction = currentReactions.find(r => r.emoji === emoji);
+                let updatedReactions;
+                if (existingReaction) {
+                  const userIdx = existingReaction.users.indexOf(user?.name || 'You');
+                  if (userIdx > -1) {
+                    const updatedUsers = existingReaction.users.filter(u => u !== (user?.name || 'You'));
+                    if (updatedUsers.length === 0) {
+                      updatedReactions = currentReactions.filter(r => r.emoji !== emoji);
+                    } else {
+                      updatedReactions = currentReactions.map(r => 
+                        r.emoji === emoji ? { ...r, count: r.count - 1, users: updatedUsers } : r
+                      );
+                    }
+                  } else {
+                    updatedReactions = currentReactions.map(r => 
+                      r.emoji === emoji ? { ...r, count: r.count + 1, users: [...r.users, user?.name || 'You'] } : r
+                    );
+                  }
+                } else {
+                  updatedReactions = [...currentReactions, { emoji, count: 1, users: [user?.name || 'You'] }];
+                }
+                return { ...m, reactions: updatedReactions };
+              }
+              return m;
+            })
+          };
+        }
+        return t;
+      })
+    );
+  };
+
+  const handleTranslateMessage = (messageId: string, originalText: string) => {
+    const activeMsg = activeThread?.messages.find(m => m.id === messageId);
+    if (activeMsg?.translation) {
+      setThreads(prev => 
+        prev.map(t => {
+          if (t.id === activeThreadId) {
+            return {
+              ...t,
+              messages: t.messages.map(m => m.id === messageId ? { ...m, translation: undefined } : m)
+            };
+          }
+          return t;
+        })
+      );
+      return;
+    }
+
+    setTranslatingMessageId(messageId);
+    
+    setTimeout(() => {
+      let translationText = "This is a secure translation of the encrypted text.";
+      
+      const textLower = originalText.toLowerCase();
+      if (textLower.includes("welcome") || textLower.includes("hello")) {
+        translationText = "Bienvenido a GiinMeet. Espero que nuestra alineación de hoy sea exitosa.";
+      } else if (textLower.includes("perfect") || textLower.includes("great")) {
+        translationText = "Perfecto, los nuevos controles flotantes se sienten muy fluidos.";
+      } else if (textLower.includes("whiteboard") || textLower.includes("canvas")) {
+        translationText = "Dibujaré el esquema en la pizarra colaborativa ahora.";
+      } else if (textLower.includes("hola") || textLower.includes("bienvenido")) {
+        translationText = "Hello! Welcome to GIIN MEET. Let's start the meeting.";
+      } else if (textLower.includes("perfecto") || textLower.includes("bien")) {
+        translationText = "Perfect, the new canvas looks amazing on mobile devices.";
+      } else {
+        if (/[a-zA-Z]/.test(originalText)) {
+          translationText = `[Translated]: ${originalText} (Securely decrypted translation)`;
+        } else {
+          translationText = `[Translated]: Securely decrypted and translated message contents.`;
+        }
+      }
+
+      setThreads(prev => 
+        prev.map(t => {
+          if (t.id === activeThreadId) {
+            return {
+              ...t,
+              messages: t.messages.map(m => m.id === messageId ? { ...m, translation: translationText } : m)
+            };
+          }
+          return t;
+        })
+      );
+      setTranslatingMessageId(null);
+    }, 600);
+  };
 
 
 
@@ -499,7 +787,7 @@ export const Chats: React.FC<ChatsProps> = ({
       }
     }
 
-    return text;
+    return parseMarkdownText(text);
   };
 
   const handleAddEmoji = (emoji: string) => {
@@ -727,14 +1015,80 @@ export const Chats: React.FC<ChatsProps> = ({
               {activeThread.messages.map((m) => (
                 <div 
                   key={m.id}
+                  onMouseEnter={() => setHoveredMessageId(m.id)}
+                  onMouseLeave={() => setHoveredMessageId(null)}
                   style={{
                     alignSelf: m.self ? 'flex-end' : 'flex-start',
                     maxWidth: '65%',
                     display: 'flex',
                     flexDirection: 'column',
-                    alignItems: m.self ? 'flex-end' : 'flex-start'
+                    alignItems: m.self ? 'flex-end' : 'flex-start',
+                    position: 'relative',
+                    padding: '0.25rem 0'
                   }}
                 >
+                  {/* Floating Action Popover on Hover */}
+                  {hoveredMessageId === m.id && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '-15px',
+                      left: m.self ? 'auto' : '10px',
+                      right: m.self ? '10px' : 'auto',
+                      display: 'flex',
+                      gap: '0.35rem',
+                      backgroundColor: 'var(--bg-card)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '9999px',
+                      padding: '0.2rem 0.5rem',
+                      boxShadow: 'var(--shadow-md)',
+                      zIndex: 20,
+                      animation: 'pop-in 0.1s ease',
+                      alignItems: 'center'
+                    }}>
+                      {['👍', '❤️', '😂', '🎉', '😮', '💡'].map(emoji => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => handleAddReaction(m.id, emoji)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            fontSize: '0.9rem',
+                            cursor: 'pointer',
+                            padding: '0.1rem',
+                            transition: 'transform 0.1s ease'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.25)'}
+                          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+
+                      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-color)', margin: '0 0.15rem' }} />
+
+                      <button
+                        type="button"
+                        onClick={() => handleTranslateMessage(m.id, m.text)}
+                        title="Translate Message"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: m.translation ? 'var(--color-primary)' : 'var(--text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0.15rem',
+                          transition: 'transform 0.1s ease'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.2)'}
+                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                      >
+                        <Globe size={11} />
+                      </button>
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
                     <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)' }}>
                       {m.sender}
@@ -743,6 +1097,7 @@ export const Chats: React.FC<ChatsProps> = ({
                       {m.time}
                     </span>
                   </div>
+
                   <div style={{
                     padding: '0.75rem 1rem',
                     borderRadius: m.self ? '16px 16px 2px 16px' : '16px 16px 16px 2px',
@@ -754,7 +1109,88 @@ export const Chats: React.FC<ChatsProps> = ({
                     boxShadow: 'var(--shadow-sm)'
                   }}>
                     {renderMessageContent(m.text, m.self)}
+
+                    {/* Translating loader status */}
+                    {translatingMessageId === m.id && (
+                      <div style={{
+                        marginTop: '0.4rem',
+                        fontSize: '0.75rem',
+                        color: m.self ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)',
+                        fontStyle: 'italic',
+                        borderTop: m.self ? '1px solid rgba(255,255,255,0.15)' : '1px solid var(--border-color)',
+                        paddingTop: '0.35rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        <Languages size={10} className="animate-spin" />
+                        <span>Translating...</span>
+                      </div>
+                    )}
+
+                    {/* Translated body display */}
+                    {m.translation && (
+                      <div style={{
+                        marginTop: '0.4rem',
+                        fontSize: '0.75rem',
+                        color: m.self ? 'rgba(255,255,255,0.9)' : 'var(--text-muted)',
+                        backgroundColor: m.self ? 'rgba(255,255,255,0.08)' : 'rgba(var(--color-secondary-rgb), 0.05)',
+                        borderLeft: '2px solid var(--color-accent)',
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '2px',
+                        borderTop: m.self ? '1px solid rgba(255,255,255,0.15)' : '1px solid var(--border-color)',
+                        paddingTop: '0.35rem',
+                        textAlign: 'left'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontWeight: 700, fontSize: '0.65rem', marginBottom: '2px', color: '#FABD02' }}>
+                          <Languages size={9} />
+                          <span>SECURE TRANSLATION</span>
+                        </div>
+                        {m.translation}
+                      </div>
+                    )}
                   </div>
+
+                  {/* Reaction Count Badges */}
+                  {m.reactions && m.reactions.length > 0 && (
+                    <div style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '0.25rem',
+                      marginTop: '0.25rem',
+                      alignSelf: m.self ? 'flex-end' : 'flex-start'
+                    }}>
+                      {m.reactions.map((r, rIdx) => {
+                        const hasReacted = r.users.includes(user?.name || 'You');
+                        return (
+                          <button
+                            key={rIdx}
+                            type="button"
+                            onClick={() => handleAddReaction(m.id, r.emoji)}
+                            title={`Reacted by: ${r.users.join(', ')}`}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '2px',
+                              backgroundColor: hasReacted ? 'rgba(var(--color-secondary-rgb), 0.15)' : 'rgba(0, 0, 0, 0.03)',
+                              border: hasReacted ? '1px solid var(--color-secondary)' : '1px solid var(--border-color)',
+                              borderRadius: '9999px',
+                              padding: '0.1rem 0.35rem',
+                              fontSize: '0.7rem',
+                              color: 'var(--text-main)',
+                              cursor: 'pointer',
+                              fontWeight: 600,
+                              transition: 'all 0.1s ease'
+                            }}
+                          >
+                            <span>{r.emoji}</span>
+                            <span>{r.count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {m.self && (
                     <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: 'var(--color-secondary)', fontSize: '0.65rem', marginTop: '0.15rem' }}>
                       <CheckCheck size={12} />
@@ -796,6 +1232,59 @@ export const Chats: React.FC<ChatsProps> = ({
                       onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                     >
                       {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* AI Smart Replies suggestions */}
+              {activeThread && activeThread.messages.length > 0 && !activeThread.messages[activeThread.messages.length - 1].self && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  marginBottom: '0.75rem',
+                  flexWrap: 'wrap',
+                  animation: 'slide-in var(--transition-normal)'
+                }}>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    color: 'var(--color-primary)',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                    marginRight: '0.25rem'
+                  }}>
+                    <Sparkles size={11} style={{ color: 'var(--color-accent)' }} />
+                    <span>AI SUGGESTIONS:</span>
+                  </span>
+                  {getSmartReplies(activeThread.messages[activeThread.messages.length - 1].text).map((suggestion, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setChatInput(suggestion)}
+                      style={{
+                        padding: '0.25rem 0.75rem',
+                        fontSize: '0.75rem',
+                        borderRadius: '9999px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'rgba(var(--color-secondary-rgb), 0.05)',
+                        color: 'var(--text-main)',
+                        cursor: 'pointer',
+                        fontWeight: 500,
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'rgba(var(--color-secondary-rgb), 0.12)';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'rgba(var(--color-secondary-rgb), 0.05)';
+                        e.currentTarget.style.transform = 'none';
+                      }}
+                    >
+                      {suggestion}
                     </button>
                   ))}
                 </div>
