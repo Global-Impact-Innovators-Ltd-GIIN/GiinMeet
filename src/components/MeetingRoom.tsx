@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
-  SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle
+  SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -138,6 +138,7 @@ interface MeetingRoomProps {
   onSaveWorkspaceData?: (notes: string, actionItemsCount: number) => void;
   currentUser: { id: string; name: string; email: string } | null;
   initialVideoState?: boolean;
+  isP2PCall?: boolean;
 }
 
 export const MeetingRoom: React.FC<MeetingRoomProps> = ({ 
@@ -146,7 +147,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   onEndMeeting, 
   onSaveWorkspaceData, 
   currentUser,
-  initialVideoState = true
+  initialVideoState = true,
+  isP2PCall = false
 }) => {
   const [showE2EEPannel, setShowE2EEPannel] = useState(false);
 
@@ -171,6 +173,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isAnnotating, setIsAnnotating] = useState(false);
   const [isColleagueSharing, setIsColleagueSharing] = useState(false);
   const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace'>('none');
+  const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
+  const [showMeetingInfo, setShowMeetingInfo] = useState(false);
 
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -1164,7 +1168,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  const isDirectCall = participants.length <= 1 && !isScreenSharing && !Object.keys(peerStates).some(k => peerStates[k].isScreenSharing);
+  const isDirectCall = isP2PCall && participants.length <= 1 && !isScreenSharing && !Object.keys(peerStates).some(k => peerStates[k].isScreenSharing);
 
   return (
     <div style={{
@@ -1197,7 +1201,25 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             {meetingTitle}
           </h3>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem' }}>
+          {!isP2PCall && (
+            <button 
+              onClick={() => setShowMeetingInfo(!showMeetingInfo)}
+              className="premium-btn premium-btn-secondary"
+              style={{
+                padding: '0.35rem 0.75rem',
+                fontSize: '0.75rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px'
+              }}
+            >
+              <Users size={14} />
+              <span>Invite & Info</span>
+            </button>
+          )}
           <button 
             onClick={() => setShowE2EEPannel(true)}
             style={{
@@ -1214,10 +1236,104 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <ShieldCheck size={16} />
             <span>E2EE Active</span>
           </button>
-          <span>&bull;</span>
+          <span style={{ color: 'var(--text-muted)' }}>&bull;</span>
           <span style={{ color: 'var(--color-secondary)' }}>HD Call</span>
         </div>
       </div>
+
+      {/* Floating Invite Info Card Overlay */}
+      {showMeetingInfo && (
+        <div style={{
+          position: 'absolute',
+          top: '80px',
+          right: '24px',
+          zIndex: 100,
+          width: '320px',
+          animation: 'slide-in var(--transition-normal)'
+        }}>
+          <div className="glass-panel" style={{
+            padding: '1.5rem',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+            boxShadow: 'var(--shadow-premium)'
+          }}>
+            <div className="flex-between">
+              <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'white' }}>Boardroom Invite Info</h4>
+              <button 
+                onClick={() => setShowMeetingInfo(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.25rem' }}
+              >
+                &times;
+              </button>
+            </div>
+            
+            <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)', margin: 0 }} />
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Meeting Join Link</span>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input 
+                  type="text" 
+                  value={`${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`}
+                  readOnly 
+                  className="premium-input"
+                  style={{ fontSize: '0.7rem', padding: '0.35rem 0.5rem', backgroundColor: 'rgba(0,0,0,0.15)', flex: 1 }}
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`);
+                    setCopiedInfo('link');
+                    setTimeout(() => setCopiedInfo(null), 2000);
+                  }}
+                  className={`premium-btn ${copiedInfo === 'link' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
+                  style={{ padding: '0.35rem 0.5rem', height: '28px', fontSize: '0.7rem', flexShrink: 0 }}
+                >
+                  {copiedInfo === 'link' ? <Check size={12} /> : <Copy size={12} />}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              <div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Meeting ID</span>
+                <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>
+                  {meetingId}
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Passcode</span>
+                <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>
+                  {passcode || 'ABCD'}
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                const link = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
+                const invitation = `Please join my GIIN Meet video conference:
+Topic: ${meetingTitle}
+Join Link: ${link}
+Meeting ID: ${meetingId}
+Passcode: ${passcode || 'ABCD'}
+
+Securely encrypted under Fintech AES-256 standard.`;
+                navigator.clipboard.writeText(invitation);
+                setCopiedInfo('details');
+                setTimeout(() => setCopiedInfo(null), 2000);
+              }}
+              className={`premium-btn ${copiedInfo === 'details' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
+              style={{ width: '100%', justifyContent: 'center', gap: '6px', padding: '0.5rem', fontSize: '0.75rem' }}
+            >
+              {copiedInfo === 'details' ? <Check size={12} /> : <Copy size={12} />}
+              <span>{copiedInfo === 'details' ? 'Invitation Details Copied' : 'Copy Invitation Email'}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main workspace (Grid & Panels) */}
       <div style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -1487,6 +1603,202 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               }}>
                 You
               </div>
+            </div>
+          </div>
+        ) : participants.length === 0 ? (
+          /* Professional Fintech boardroom details dashboard when alone in a meeting */
+          <div style={{
+            flex: 1,
+            display: 'grid',
+            gridTemplateColumns: '1.2fr 1fr',
+            gap: '2.5rem',
+            padding: '2.5rem',
+            alignItems: 'center',
+            backgroundColor: '#07090E',
+            overflowY: 'auto'
+          }} className="grid-2">
+            {/* Left: Your webcam tile */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{
+                position: 'relative',
+                borderRadius: 'var(--radius-lg)',
+                overflow: 'hidden',
+                backgroundColor: '#111827',
+                aspectRatio: '16/9',
+                border: isSpeaking && !isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
+                boxShadow: 'var(--shadow-premium)',
+                transition: 'all 0.25s ease'
+              }}>
+                {isVideoOn && stream ? (
+                  <video 
+                    ref={el => {
+                      if (el && stream && el.srcObject !== stream) {
+                        el.srcObject = stream;
+                      }
+                    }}
+                    autoPlay 
+                    playsInline 
+                    muted 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} 
+                  />
+                ) : (
+                  <div style={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '1rem',
+                    backgroundColor: '#090D14'
+                  }}>
+                    <div style={{
+                      width: '80px',
+                      height: '80px',
+                      borderRadius: '50%',
+                      backgroundColor: 'var(--color-primary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '1.8rem',
+                      fontWeight: 700,
+                      color: 'white',
+                      border: '2px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase() : 'Y'}
+                    </div>
+                    <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 500 }}>Webcam Off</span>
+                  </div>
+                )}
+
+                {/* E2EE secure emblem overlay */}
+                <div style={{
+                  position: 'absolute',
+                  top: '12px',
+                  left: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  backgroundColor: 'rgba(16, 185, 129, 0.25)',
+                  border: '1px solid rgba(16, 185, 129, 0.4)',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  fontSize: '0.7rem',
+                  color: '#10B981',
+                  fontWeight: 600,
+                  backdropFilter: 'blur(4px)'
+                }}>
+                  <Lock size={10} color="#10B981" />
+                  <span>E2EE SECURE ROOM</span>
+                </div>
+
+                <div style={{
+                  position: 'absolute',
+                  bottom: '12px',
+                  left: '12px',
+                  backgroundColor: 'rgba(7, 9, 14, 0.85)',
+                  border: '1px solid #1E293B',
+                  padding: '0.35rem 0.7rem',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  backdropFilter: 'blur(4px)'
+                }}>
+                  <span style={{ fontWeight: 600 }}>{currentUser?.name || 'You'} (Host)</span>
+                  {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
+                </div>
+              </div>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                You are currently the only participant in this boardroom conference.
+              </span>
+            </div>
+
+            {/* Right: Invitation & Joining Info Card */}
+            <div className="glass-panel" style={{
+              padding: '2rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1.25rem',
+              backgroundColor: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              boxShadow: 'var(--shadow-premium)'
+            }}>
+              <div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--color-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Live Boardroom Hub
+                </span>
+                <h3 style={{ fontSize: '1.35rem', fontWeight: 800, marginTop: '0.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>
+                  Invite Others to Join
+                </h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+                  Share the credentials below to invite remote participants.
+                </p>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)', margin: 0 }} />
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Meeting Join Link</span>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <input 
+                    type="text" 
+                    value={`${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`}
+                    readOnly 
+                    className="premium-input"
+                    style={{ fontSize: '0.75rem', padding: '0.45rem 0.75rem', backgroundColor: 'rgba(0,0,0,0.15)', flex: 1 }}
+                  />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`);
+                      setCopiedInfo('link');
+                      setTimeout(() => setCopiedInfo(null), 2000);
+                    }}
+                    className={`premium-btn ${copiedInfo === 'link' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
+                    style={{ padding: '0.45rem 0.75rem', height: '34px', fontSize: '0.75rem', flexShrink: 0 }}
+                    title="Copy Join Link"
+                  >
+                    {copiedInfo === 'link' ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>Meeting ID</span>
+                  <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'white', marginTop: '0.25rem' }}>
+                    {meetingId}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>Passcode</span>
+                  <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'white', marginTop: '0.25rem' }}>
+                    {passcode || 'ABCD'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  const link = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
+                  const invitation = `Please join my GIIN Meet video conference:
+Topic: ${meetingTitle}
+Join Link: ${link}
+Meeting ID: ${meetingId}
+Passcode: ${passcode || 'ABCD'}
+
+Securely encrypted under Fintech AES-256 standard.`;
+                  navigator.clipboard.writeText(invitation);
+                  setCopiedInfo('details');
+                  setTimeout(() => setCopiedInfo(null), 2000);
+                }}
+                className={`premium-btn ${copiedInfo === 'details' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
+                style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem', fontSize: '0.85rem' }}
+              >
+                {copiedInfo === 'details' ? <Check size={14} /> : <Copy size={14} />}
+                <span>{copiedInfo === 'details' ? 'Invitation Details Copied' : 'Copy Invitation Email'}</span>
+              </button>
             </div>
           </div>
         ) : (

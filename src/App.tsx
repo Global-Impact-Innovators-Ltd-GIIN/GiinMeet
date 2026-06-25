@@ -82,6 +82,7 @@ function App() {
     host: string;
     isVideoOn?: boolean;
   } | null>(null);
+  const [isP2PCall, setIsP2PCall] = useState<boolean>(false);
 
   // Transparent logo loading state
   const [logoUrl, setLogoUrl] = useState(() => localStorage.getItem('giin_custom_logo') || '/logo.png');
@@ -825,6 +826,7 @@ function App() {
     
     // Check if this is a professional meeting (no direct DM ringing)
     const isMeeting = !dmThreadId;
+    setIsP2PCall(!isMeeting);
 
     if (user && user.id) {
       try {
@@ -989,6 +991,7 @@ function App() {
 
   const handleAcceptCall = async () => {
     if (incomingCall) {
+      setIsP2PCall(true);
       const callerChannel = supabase.channel(`user-signals-${incomingCall.callerId}`);
       callerChannel.subscribe((status) => {
         if (status === 'SUBSCRIBED') {
@@ -1272,6 +1275,7 @@ function App() {
         initialPasscode={joinMeetingData.passcode}
         user={user}
         onAdmitted={(title, _participantId, displayName) => {
+          setIsP2PCall(false);
           setActiveCallTitle(title);
           setActiveMeetingId(joinMeetingData.meetingId);
           if (!user) {
@@ -1299,6 +1303,7 @@ function App() {
           onEndMeeting={handleEndMeeting}
           onSaveWorkspaceData={handleSaveWorkspaceData}
           currentUser={guestUser}
+          isP2PCall={false}
         />
       </div>
     );
@@ -1969,6 +1974,7 @@ function App() {
               onSaveWorkspaceData={handleSaveWorkspaceData}
               currentUser={user}
               initialVideoState={activeCallVideoState}
+              isP2PCall={isP2PCall}
             />
           )}
 
