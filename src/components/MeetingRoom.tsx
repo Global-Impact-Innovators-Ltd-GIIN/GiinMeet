@@ -2011,6 +2011,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
         )}
         {activePanel === 'workspace' && (
           <WorkspacePanel 
+            meetingId={meetingId}
             workspaceUsers={participants.map(p => ({ name: p.name, role: p.role }))}
             initialNotes={initialNotes}
             meetingTitle={meetingTitle}
