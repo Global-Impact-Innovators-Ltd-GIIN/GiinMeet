@@ -3,7 +3,7 @@ import {
   Send, Smile, Paperclip, Search, PlusCircle, MoreVertical, 
   Video, CheckCheck, ArrowLeft, MessageSquare, Globe, Languages, Copy, Check, Sparkles,
   Volume2, VolumeX, BarChart2, FolderOpen, Info, FileText, Image, File,
-  ExternalLink, Minimize2, Paintbrush, Calendar, Phone, Users, Lock, ChevronDown
+  ExternalLink, Minimize2, Paintbrush, Calendar, Phone, Users, Lock, Plus
 } from 'lucide-react';
 import { mockAuth, supabase } from '../supabaseClient';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
@@ -442,6 +442,8 @@ export const Chats: React.FC<ChatsProps> = ({
   const [chatInput, setChatInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showConversationMobile, setShowConversationMobile] = useState(false);
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [showWhisperPicker, setShowWhisperPicker] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1756,7 +1758,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}
                 >
                   <Video size={16} />
-                  <span>Call Video</span>
+                  <span className="room-header-btn-text">Call Video</span>
                 </button>
                 <button 
                   onClick={() => onStartMeeting(`Voice Call: ${activeThread.name}`, activeThread.id, false)}
@@ -1764,7 +1766,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}
                 >
                   <Phone size={16} />
-                  <span>Call Voice</span>
+                  <span className="room-header-btn-text">Call Voice</span>
                 </button>
                 <button 
                   onClick={() => setIsPoppedOut(!isPoppedOut)}
@@ -2209,6 +2211,46 @@ export const Chats: React.FC<ChatsProps> = ({
                 </div>
               )}
 
+              {whisperTargetUserId && activeThread.isGroup && (
+                <div style={{
+                  position: 'absolute',
+                  top: '-32px',
+                  left: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                  border: '1.5px dashed #6366F1',
+                  borderRadius: '9999px',
+                  padding: '0.2rem 0.75rem',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: '#6366F1',
+                  animation: 'pop-in 0.15s ease',
+                  zIndex: 10
+                }}>
+                  <Lock size={11} />
+                  <span>Whispering to {activeGroupMembers.find(m => m.id === whisperTargetUserId)?.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setWhisperTargetUserId('')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#6366F1',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                      fontSize: '0.75rem',
+                      padding: '0 2px',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                  >
+                    &times;
+                  </button>
+                </div>
+              )}
+
               <form onSubmit={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <input 
                   type="file" 
@@ -2216,80 +2258,227 @@ export const Chats: React.FC<ChatsProps> = ({
                   onChange={handleFileChange} 
                   style={{ display: 'none' }} 
                 />
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <button 
-                    type="button" 
-                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    title="Emojis"
-                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                
+                {/* Plus Menu Button & Popover */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPlusMenu(!showPlusMenu);
+                      setShowWhisperPicker(false);
+                    }}
+                    title="Add media & options"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: showPlusMenu ? 'var(--color-primary)' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '0.25rem',
+                      transition: 'transform 0.2s ease',
+                      transform: showPlusMenu ? 'rotate(45deg)' : 'none'
+                    }}
                   >
-                    <Smile size={22} />
+                    <Plus size={24} />
                   </button>
-                  <button 
-                    type="button" 
-                    onClick={() => fileInputRef.current?.click()}
-                    title="Attachment"
-                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                  >
-                    <Paperclip size={22} />
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => setShowCreatePollModal(true)}
-                    title="Create Quick Poll"
-                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                  >
-                    <BarChart2 size={22} />
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={handleLaunchDoodle}
-                    title="Collaborative Doodle"
-                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                  >
-                    <Paintbrush size={22} />
-                  </button>
-                </div>
 
-                {activeThread.isGroup && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
-                    <select
-                      value={whisperTargetUserId}
-                      onChange={(e) => setWhisperTargetUserId(e.target.value)}
+                  {showPlusMenu && (
+                    <div 
+                      className="glass-panel"
                       style={{
-                        padding: '0.45rem 1.8rem 0.45rem 0.75rem',
-                        fontSize: '0.75rem',
-                        borderRadius: '9999px',
-                        border: whisperTargetUserId ? '1.5px dashed #6366F1' : '1px solid var(--border-color)',
-                        backgroundColor: whisperTargetUserId ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-card)',
-                        color: whisperTargetUserId ? '#6366F1' : 'var(--text-muted)',
-                        cursor: 'pointer',
-                        fontWeight: whisperTargetUserId ? 700 : 500,
-                        outline: 'none',
-                        transition: 'all 0.2s',
-                        appearance: 'none',
-                        WebkitAppearance: 'none'
+                        position: 'absolute',
+                        bottom: '45px',
+                        left: '0',
+                        width: '200px',
+                        backgroundColor: 'var(--bg-card)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--radius-md)',
+                        boxShadow: 'var(--shadow-lg)',
+                        padding: '0.5rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.25rem',
+                        zIndex: 150,
+                        animation: 'pop-in 0.15s ease'
                       }}
                     >
-                      <option value="">Public Message</option>
-                      {activeGroupMembers
-                        .filter(member => member.id !== user?.id)
-                        .map(member => (
-                          <option key={member.id} value={member.id}>
-                            🔒 Whisper to {member.name}
-                          </option>
-                        ))}
-                    </select>
-                    <div style={{
-                      position: 'absolute',
-                      right: '8px',
-                      pointerEvents: 'none',
-                      color: whisperTargetUserId ? '#6366F1' : 'var(--text-muted)',
-                      display: 'flex',
-                      alignItems: 'center'
-                    }}>
-                      <ChevronDown size={12} />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPlusMenu(false);
+                          setShowEmojiPicker(!showEmojiPicker);
+                        }}
+                        className="plus-menu-item"
+                      >
+                        <Smile size={16} />
+                        <span>Emojis</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPlusMenu(false);
+                          fileInputRef.current?.click();
+                        }}
+                        className="plus-menu-item"
+                      >
+                        <Paperclip size={16} />
+                        <span>Attachment</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPlusMenu(false);
+                          setShowCreatePollModal(true);
+                        }}
+                        className="plus-menu-item"
+                      >
+                        <BarChart2 size={16} />
+                        <span>Create Poll</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPlusMenu(false);
+                          handleLaunchDoodle();
+                        }}
+                        className="plus-menu-item"
+                      >
+                        <Paintbrush size={16} />
+                        <span>Doodle Board</span>
+                      </button>
                     </div>
+                  )}
+                </div>
+
+                {/* Globe & Lock Icons for Public/Whisper modes */}
+                {activeThread.isGroup && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', position: 'relative' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWhisperTargetUserId('');
+                        setShowWhisperPicker(false);
+                        setShowPlusMenu(false);
+                      }}
+                      title="Send Public Message"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: !whisperTargetUserId ? 'var(--color-primary)' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '0.35rem',
+                        borderRadius: '50%',
+                        backgroundColor: !whisperTargetUserId ? 'rgba(var(--color-primary-rgb), 0.08)' : 'transparent',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <Globe size={20} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowWhisperPicker(!showWhisperPicker);
+                        setShowPlusMenu(false);
+                      }}
+                      title="Send Private Whisper"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: whisperTargetUserId ? '#6366F1' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '0.35rem',
+                        borderRadius: '50%',
+                        backgroundColor: whisperTargetUserId ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <Lock size={20} />
+                    </button>
+
+                    {showWhisperPicker && (
+                      <div 
+                        className="glass-panel"
+                        style={{
+                          position: 'absolute',
+                          bottom: '45px',
+                          left: '0',
+                          width: '240px',
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          backgroundColor: 'var(--bg-card)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 'var(--radius-md)',
+                          boxShadow: 'var(--shadow-lg)',
+                          padding: '0.5rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.25rem',
+                          zIndex: 150,
+                          animation: 'pop-in 0.15s ease'
+                        }}
+                      >
+                        <div style={{ 
+                          padding: '0.35rem 0.5rem', 
+                          fontSize: '0.7rem', 
+                          fontWeight: 700, 
+                          color: 'var(--text-muted)', 
+                          textTransform: 'uppercase', 
+                          borderBottom: '1px solid var(--border-color)',
+                          marginBottom: '0.25rem'
+                        }}>
+                          Whisper Private To:
+                        </div>
+                        {activeGroupMembers
+                          .filter(member => member.id !== user?.id)
+                          .map(member => (
+                            <button
+                              key={member.id}
+                              type="button"
+                              onClick={() => {
+                                setWhisperTargetUserId(member.id);
+                                setShowWhisperPicker(false);
+                              }}
+                              className="plus-menu-item"
+                              style={{
+                                color: whisperTargetUserId === member.id ? '#6366F1' : 'var(--text-main)',
+                                backgroundColor: whisperTargetUserId === member.id ? 'rgba(99, 102, 241, 0.08)' : 'transparent'
+                              }}
+                            >
+                              <div style={{
+                                width: '18px',
+                                height: '18px',
+                                borderRadius: '50%',
+                                backgroundColor: 'var(--color-secondary)',
+                                color: 'white',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 700,
+                                fontSize: '0.65rem',
+                                overflow: 'hidden'
+                              }}>
+                                {member.avatar_url ? (
+                                  <img src={member.avatar_url} alt={member.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                ) : (
+                                  member.name.split(' ').map((n: string) => n[0]).join('').toUpperCase()
+                                )}
+                              </div>
+                              <span style={{ fontSize: '0.8rem' }}>{member.name}</span>
+                            </button>
+                          ))}
+                        {activeGroupMembers.filter(member => member.id !== user?.id).length === 0 && (
+                          <div style={{ padding: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                            No other members
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2365,7 +2554,7 @@ export const Chats: React.FC<ChatsProps> = ({
 
       {/* Slide-out Details Side Drawer */}
       {!isPoppedOut && showRightPanel && activeThread && (
-        <div className="glass-panel" style={{
+        <div className="glass-panel conversation-details-panel" style={{
           padding: '1.5rem',
           display: 'flex',
           flexDirection: 'column',
@@ -3344,29 +3533,240 @@ export const Chats: React.FC<ChatsProps> = ({
                     </div>
                   )}
 
-                  <form onSubmit={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div style={{ display: 'flex', gap: '0.25rem' }}>
-                      <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                        <Smile size={18} />
+                  <form onSubmit={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', position: 'relative' }}>
+                    {/* Plus Menu Button & Popover */}
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPlusMenu(!showPlusMenu);
+                          setShowWhisperPicker(false);
+                        }}
+                        title="Add media & options"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: showPlusMenu ? 'var(--color-primary)' : 'var(--text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0.25rem',
+                          transition: 'transform 0.2s ease',
+                          transform: showPlusMenu ? 'rotate(45deg)' : 'none'
+                        }}
+                      >
+                        <Plus size={20} />
                       </button>
-                      <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                        <Paperclip size={18} />
-                      </button>
-                      <button type="button" onClick={() => setShowCreatePollModal(true)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                        <BarChart2 size={18} />
-                      </button>
-                      <button type="button" onClick={handleLaunchDoodle} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                        <Paintbrush size={18} />
-                      </button>
+
+                      {showPlusMenu && (
+                        <div 
+                          className="glass-panel"
+                          style={{
+                            position: 'absolute',
+                            bottom: '40px',
+                            left: '0',
+                            width: '180px',
+                            backgroundColor: 'var(--bg-card)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 'var(--radius-md)',
+                            boxShadow: 'var(--shadow-lg)',
+                            padding: '0.4rem',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.2rem',
+                            zIndex: 150,
+                            animation: 'pop-in 0.15s ease'
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowPlusMenu(false);
+                              setShowEmojiPicker(!showEmojiPicker);
+                            }}
+                            className="plus-menu-item"
+                          >
+                            <Smile size={14} />
+                            <span>Emojis</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowPlusMenu(false);
+                              fileInputRef.current?.click();
+                            }}
+                            className="plus-menu-item"
+                          >
+                            <Paperclip size={14} />
+                            <span>Attachment</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowPlusMenu(false);
+                              setShowCreatePollModal(true);
+                            }}
+                            className="plus-menu-item"
+                          >
+                            <BarChart2 size={14} />
+                            <span>Create Poll</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowPlusMenu(false);
+                              handleLaunchDoodle();
+                            }}
+                            className="plus-menu-item"
+                          >
+                            <Paintbrush size={14} />
+                            <span>Doodle Board</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
+
+                    {/* Globe & Lock Icons for Public/Whisper modes */}
+                    {activeThread.isGroup && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', position: 'relative' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWhisperTargetUserId('');
+                            setShowWhisperPicker(false);
+                            setShowPlusMenu(false);
+                          }}
+                          title="Send Public Message"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: !whisperTargetUserId ? 'var(--color-primary)' : 'var(--text-muted)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '0.25rem',
+                            borderRadius: '50%',
+                            backgroundColor: !whisperTargetUserId ? 'rgba(var(--color-primary-rgb), 0.08)' : 'transparent',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          <Globe size={18} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowWhisperPicker(!showWhisperPicker);
+                            setShowPlusMenu(false);
+                          }}
+                          title="Send Private Whisper"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: whisperTargetUserId ? '#6366F1' : 'var(--text-muted)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '0.25rem',
+                            borderRadius: '50%',
+                            backgroundColor: whisperTargetUserId ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          <Lock size={18} />
+                        </button>
+
+                        {showWhisperPicker && (
+                          <div 
+                            className="glass-panel"
+                            style={{
+                              position: 'absolute',
+                              bottom: '40px',
+                              left: '0',
+                              width: '200px',
+                              maxHeight: '180px',
+                              overflowY: 'auto',
+                              backgroundColor: 'var(--bg-card)',
+                              border: '1px solid var(--border-color)',
+                              borderRadius: 'var(--radius-md)',
+                              boxShadow: 'var(--shadow-lg)',
+                              padding: '0.4rem',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.2rem',
+                              zIndex: 150,
+                              animation: 'pop-in 0.15s ease'
+                            }}
+                          >
+                            <div style={{ 
+                              padding: '0.25rem 0.4rem', 
+                              fontSize: '0.65rem', 
+                              fontWeight: 700, 
+                              color: 'var(--text-muted)', 
+                              textTransform: 'uppercase', 
+                              borderBottom: '1px solid var(--border-color)',
+                              marginBottom: '0.2rem'
+                            }}>
+                              Whisper Private To:
+                            </div>
+                            {activeGroupMembers
+                              .filter(member => member.id !== user?.id)
+                              .map(member => (
+                                <button
+                                  key={member.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setWhisperTargetUserId(member.id);
+                                    setShowWhisperPicker(false);
+                                  }}
+                                  className="plus-menu-item"
+                                  style={{
+                                    color: whisperTargetUserId === member.id ? '#6366F1' : 'var(--text-main)',
+                                    backgroundColor: whisperTargetUserId === member.id ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+                                    padding: '0.4rem'
+                                  }}
+                                >
+                                  <div style={{
+                                    width: '16px',
+                                    height: '16px',
+                                    borderRadius: '50%',
+                                    backgroundColor: 'var(--color-secondary)',
+                                    color: 'white',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontWeight: 700,
+                                    fontSize: '0.6rem',
+                                    overflow: 'hidden'
+                                  }}>
+                                    {member.avatar_url ? (
+                                      <img src={member.avatar_url} alt={member.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    ) : (
+                                      member.name.split(' ').map((n: string) => n[0]).join('').toUpperCase()
+                                    )}
+                                  </div>
+                                  <span style={{ fontSize: '0.75rem' }}>{member.name}</span>
+                                </button>
+                              ))}
+                            {activeGroupMembers.filter(member => member.id !== user?.id).length === 0 && (
+                              <div style={{ padding: '0.4rem', fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                                No other members
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <input 
                       type="text" 
-                      placeholder="Write message..."
+                      placeholder={whisperTargetUserId 
+                        ? `Whisper secretly to ${activeGroupMembers.find(m => m.id === whisperTargetUserId)?.name}...` 
+                        : `Write message...`}
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
                       className="premium-input"
-                      style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.8rem', borderRadius: '9999px' }}
+                      style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.8rem', borderRadius: '9999px', border: whisperTargetUserId ? '1.5px dashed #6366F1' : '1px solid var(--border-color)' }}
                     />
 
                     <button type="submit" className="premium-btn premium-btn-primary" style={{ borderRadius: '50%', width: '32px', height: '32px', padding: 0, justifyContent: 'center' }}>
