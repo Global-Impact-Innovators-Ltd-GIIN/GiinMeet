@@ -3,7 +3,7 @@ import {
   Send, Smile, Paperclip, Search, PlusCircle, MoreVertical, 
   Video, CheckCheck, ArrowLeft, MessageSquare, Globe, Languages, Copy, Check, Sparkles,
   Volume2, VolumeX, BarChart2, FolderOpen, Info, FileText, Image, File,
-  ExternalLink, Minimize2, Paintbrush, Calendar
+  ExternalLink, Minimize2, Paintbrush, Calendar, Phone, Users, Lock, ChevronDown
 } from 'lucide-react';
 import { mockAuth, supabase } from '../supabaseClient';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
@@ -22,6 +22,7 @@ export interface Message {
   self: boolean;
   reactions?: MessageReaction[];
   translation?: string;
+  whisperToId?: string | null;
 }
 
 const CodeBlock: React.FC<{ code: string; language: string }> = ({ code, language }) => {
@@ -386,7 +387,7 @@ export interface ChatThread {
 interface ChatsProps {
   initialTargetContactId?: string | null;
   onClearTargetContact?: () => void;
-  onStartMeeting: (title: string, dmThreadId?: string) => void;
+  onStartMeeting: (title: string, dmThreadId?: string, isVideo?: boolean) => void;
   onJoinCall?: (meetingId: string, passcode: string) => void;
   user: { id: string; email: string; name: string; workspaceName: string; domain: string } | null;
   threads: ChatThread[];
@@ -462,6 +463,19 @@ export const Chats: React.FC<ChatsProps> = ({
   const [isPoppedOut, setIsPoppedOut] = useState(false);
   const [hudPosition, setHudPosition] = useState({ x: 100, y: 100 });
   const [isHudMinimized, setIsHudMinimized] = useState(false);
+
+  // Group creation & members state
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [groupNameInput, setGroupNameInput] = useState('');
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
+  const [allProfilesList, setAllProfilesList] = useState<any[]>([]);
+
+  // Whispering & Mentions states
+  const [whisperTargetUserId, setWhisperTargetUserId] = useState<string>('');
+  const [activeGroupMembers, setActiveGroupMembers] = useState<any[]>([]);
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  const [mentionSearchText, setMentionSearchText] = useState('');
+  const [mentionStartIndex, setMentionStartIndex] = useState(-1);
 
   const handleAddReaction = (messageId: string, emoji: string) => {
     setThreads(prev => 
@@ -813,6 +827,67 @@ export const Chats: React.FC<ChatsProps> = ({
     }
   };
 
+  const handleCreateGroupChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!groupNameInput.trim() || !user) return;
+
+    try {
+      const { data: newGroup, error: groupErr } = await supabase
+        .from('groups')
+        .insert({
+          name: groupNameInput.trim(),
+          creator_id: user.id
+        })
+        .select()
+        .single();
+
+      if (groupErr || !newGroup) {
+        throw new Error(groupErr?.message || 'Failed to create group record');
+      }
+
+      const membersToInsert = [
+        { group_id: newGroup.id, user_id: user.id },
+        ...selectedGroupMembers.map(userId => ({
+          group_id: newGroup.id,
+          user_id: userId
+        }))
+      ];
+
+      const { error: membersErr } = await supabase
+        .from('group_members')
+        .insert(membersToInsert);
+
+      if (membersErr) {
+        throw membersErr;
+      }
+
+      const initials = newGroup.name ? newGroup.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'GP';
+      const newThread: ChatThread = {
+        id: `group_${newGroup.id}`,
+        name: newGroup.name,
+        avatar: initials,
+        avatarBg: '#10B981',
+        isGroup: true,
+        status: 'Online',
+        unreadCount: 0,
+        messages: []
+      };
+
+      setThreads(prev => [newThread, ...prev]);
+      setActiveThreadId(newThread.id);
+      
+      setShowCreateGroupModal(false);
+      setGroupNameInput('');
+      setSelectedGroupMembers([]);
+      setToastMessage('Group created successfully!');
+      setTimeout(() => setToastMessage(''), 3000);
+      setShowConversationMobile(true);
+    } catch (err: any) {
+      console.error('Failed to create group chat:', err);
+      alert('Failed to create group chat: ' + err.message);
+    }
+  };
+
   const handleStartChatWithContact = (contact: any) => {
     if (!user) return;
     const dmId = 'dm_' + [user.id, contact.id].sort().join('_');
@@ -900,6 +975,53 @@ export const Chats: React.FC<ChatsProps> = ({
     }
   }, [initialTargetContactId, threads, user, onClearTargetContact]);
 
+  // Load all profiles for Create Group modal checklist
+  useEffect(() => {
+    const fetchAllProfiles = async () => {
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, name, email, avatar_url');
+        if (data) {
+          // Exclude the current user from checklist
+          const filtered = data.filter(p => p.id !== user?.id);
+          setAllProfilesList(filtered);
+        }
+      } catch (err) {
+        console.error('Error fetching profiles for checklist:', err);
+      }
+    };
+    if (user) {
+      fetchAllProfiles();
+    }
+  }, [user]);
+
+  // Load active group members when activeThreadId changes
+  useEffect(() => {
+    const fetchGroupMembers = async () => {
+      if (!activeThreadId || !activeThreadId.startsWith('group_')) {
+        setActiveGroupMembers([]);
+        setWhisperTargetUserId('');
+        return;
+      }
+      const groupId = activeThreadId.substring(6);
+      try {
+        const { data } = await supabase
+          .from('group_members')
+          .select('user_id, profiles(id, name, email, avatar_url)')
+          .eq('group_id', groupId);
+        
+        if (data) {
+          const membersList = data.map((m: any) => m.profiles).filter(Boolean);
+          setActiveGroupMembers(membersList);
+        }
+      } catch (err) {
+        console.error('Error fetching group members:', err);
+      }
+    };
+    fetchGroupMembers();
+  }, [activeThreadId]);
+
   // Auto scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -917,20 +1039,35 @@ export const Chats: React.FC<ChatsProps> = ({
       if (!activeThreadId) return;
       try {
         const dbMessages = await mockAuth.getMessages(activeThreadId);
-        if (dbMessages && dbMessages.length > 0) {
-          const decryptedMessages = await Promise.all(dbMessages.map(async (m: any) => {
+        if (dbMessages) {
+          const decryptedMessages = (await Promise.all(dbMessages.map(async (m: any) => {
             let text = m.text;
+            let whisperToId: string | null = null;
             if (activeThreadId.startsWith('dm_')) {
               text = await decryptMessage(m.text, activeThreadId);
+            } else if (activeThreadId.startsWith('group_')) {
+              const match = text.match(/^\[WHISPER:([^:]+):([\s\S]*)\]$/);
+              if (match) {
+                const targetId = match[1];
+                const whisperText = match[2];
+                const isSender = m.user_id === user?.id;
+                const isTarget = targetId === user?.id;
+                if (!isSender && !isTarget) {
+                  return null; // hide whisper from other users
+                }
+                text = whisperText;
+                whisperToId = targetId;
+              }
             }
             return {
               id: m.id,
               sender: m.sender_name,
               text: text,
               time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              self: m.sender_name === 'You' || !!(user && m.user_id === user.id)
+              self: m.sender_name === 'You' || !!(user && m.user_id === user.id),
+              whisperToId
             };
-          }));
+          }))).filter(Boolean) as Message[];
           
           setThreads(prev => 
             prev.map(t => t.id === activeThreadId ? { ...t, messages: decryptedMessages } : t)
@@ -953,6 +1090,13 @@ export const Chats: React.FC<ChatsProps> = ({
     const currentText = chatInput;
     setChatInput('');
 
+    let textToSend = currentText;
+    let whisperToId: string | null = null;
+    if (activeThreadId.startsWith('group_') && whisperTargetUserId) {
+      textToSend = `[WHISPER:${whisperTargetUserId}:${currentText}]`;
+      whisperToId = whisperTargetUserId;
+    }
+
     // Generate unique random string for message ID (used locally before database saves)
     const localId = Math.random().toString(36).substr(2, 9);
     const newMsg: Message = {
@@ -960,7 +1104,8 @@ export const Chats: React.FC<ChatsProps> = ({
       sender: 'You',
       text: currentText,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      self: true
+      self: true,
+      whisperToId
     };
 
     setThreads(prev => 
@@ -974,9 +1119,9 @@ export const Chats: React.FC<ChatsProps> = ({
 
     // Save user message to Supabase
     try {
-      let dbText = currentText;
+      let dbText = textToSend;
       if (activeThreadId.startsWith('dm_')) {
-        dbText = await encryptMessage(currentText, activeThreadId);
+        dbText = await encryptMessage(textToSend, activeThreadId);
       }
       await mockAuth.sendMessage({
         thread_id: activeThreadId,
@@ -984,6 +1129,7 @@ export const Chats: React.FC<ChatsProps> = ({
         text: dbText,
         user_id: user?.id || undefined
       });
+      setWhisperTargetUserId('');
     } catch (err) {
       console.error('Failed to send user message to database:', err);
     }
@@ -1419,12 +1565,26 @@ export const Chats: React.FC<ChatsProps> = ({
       <div className={`glass-panel ${showConversationMobile ? 'mobile-hidden' : ''}`} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
         <div className="flex-between">
           <h2 style={{ fontSize: '1.4rem', fontFamily: 'var(--font-heading)' }}>Conversations</h2>
-          <button 
-            onClick={() => setShowAddContactModal(true)}
-            style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer' }}
-          >
-            <PlusCircle size={20} />
-          </button>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            <button 
+              onClick={() => {
+                setGroupNameInput('');
+                setSelectedGroupMembers([]);
+                setShowCreateGroupModal(true);
+              }}
+              title="Create Group Chat"
+              style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+            >
+              <Users size={20} />
+            </button>
+            <button 
+              onClick={() => setShowAddContactModal(true)}
+              title="Start Direct Chat"
+              style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+            >
+              <PlusCircle size={20} />
+            </button>
+          </div>
         </div>
 
         {/* Search */}
@@ -1589,14 +1749,22 @@ export const Chats: React.FC<ChatsProps> = ({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <button 
-                  onClick={() => onStartMeeting(`Meeting with ${activeThread.name}`, activeThread.id)}
+                  onClick={() => onStartMeeting(`Video Meet: ${activeThread.name}`, activeThread.id, true)}
                   className="premium-btn premium-btn-secondary" 
-                  style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
+                  style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}
                 >
                   <Video size={16} />
                   <span>Call Video</span>
+                </button>
+                <button 
+                  onClick={() => onStartMeeting(`Voice Call: ${activeThread.name}`, activeThread.id, false)}
+                  className="premium-btn premium-btn-primary" 
+                  style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <Phone size={16} />
+                  <span>Call Voice</span>
                 </button>
                 <button 
                   onClick={() => setIsPoppedOut(!isPoppedOut)}
@@ -1756,13 +1924,29 @@ export const Chats: React.FC<ChatsProps> = ({
                   <div style={{
                     padding: '0.75rem 1rem',
                     borderRadius: m.self ? '16px 16px 2px 16px' : '16px 16px 16px 2px',
-                    backgroundColor: m.self ? 'var(--color-primary)' : 'var(--bg-app)',
+                    background: !!m.whisperToId 
+                      ? (m.self ? 'linear-gradient(135deg, var(--color-primary) 0%, #4F46E5 100%)' : 'rgba(99, 102, 241, 0.12)')
+                      : (user && m.text.toLowerCase().includes(`@${user.name.toLowerCase()}`) && !m.self
+                        ? 'rgba(250, 189, 2, 0.12)' 
+                        : (m.self ? 'var(--color-primary)' : 'var(--bg-app)')),
                     color: m.self ? 'white' : 'var(--text-main)',
                     fontSize: '0.9rem',
                     lineHeight: 1.45,
-                    border: m.self ? 'none' : '1px solid var(--border-color)',
+                    border: !!m.whisperToId
+                      ? (m.self ? '1px dashed rgba(255,255,255,0.4)' : '1.5px dashed #6366F1')
+                      : (user && m.text.toLowerCase().includes(`@${user.name.toLowerCase()}`) && !m.self
+                        ? '1.5px solid #FABD02'
+                        : (m.self ? 'none' : '1px solid var(--border-color)')),
                     boxShadow: 'var(--shadow-sm)'
                   }}>
+                    {m.whisperToId && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.7rem', fontWeight: 700, color: m.self ? '#FABD02' : '#6366F1', marginBottom: '4px' }}>
+                        <Lock size={11} />
+                        <span>
+                          {m.self ? `Whisper to ${activeGroupMembers.find(member => member.id === m.whisperToId)?.name || 'Member'}` : 'Whisper to You'}
+                        </span>
+                      </div>
+                    )}
                     {renderMessageContent(m.text, m.self, m.id)}
 
                     {/* Translating loader status */}
@@ -1945,6 +2129,86 @@ export const Chats: React.FC<ChatsProps> = ({
                 </div>
               )}
 
+              {/* Mentions Autocomplete Popup */}
+              {showMentionDropdown && activeThread.isGroup && (
+                <div className="glass-panel" style={{
+                  position: 'absolute',
+                  bottom: '75px',
+                  left: '120px',
+                  width: '240px',
+                  maxHeight: '160px',
+                  overflowY: 'auto',
+                  backgroundColor: 'var(--bg-card)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-md)',
+                  boxShadow: 'var(--shadow-lg)',
+                  zIndex: 200,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  padding: '0.25rem',
+                  animation: 'pop-in 0.15s ease'
+                }}>
+                  <div style={{ padding: '0.35rem 0.5rem', fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', borderBottom: '1px solid var(--border-color)' }}>
+                    Mention Group Member
+                  </div>
+                  {activeGroupMembers
+                    .filter(member => member.name.toLowerCase().includes(mentionSearchText.toLowerCase()))
+                    .map(member => (
+                      <button
+                        key={member.id}
+                        type="button"
+                        onClick={() => {
+                          const textBeforeAt = chatInput.slice(0, mentionStartIndex);
+                          const textAfterCursor = chatInput.slice(mentionStartIndex + 1 + mentionSearchText.length);
+                          setChatInput(`${textBeforeAt}@${member.name} ${textAfterCursor}`);
+                          setShowMentionDropdown(false);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.5rem',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-main)',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          fontSize: '0.8rem',
+                          borderRadius: '4px',
+                          transition: 'background-color 0.15s'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(var(--color-primary-rgb), 0.08)'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                      >
+                        <div style={{
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          backgroundColor: 'var(--color-secondary)',
+                          color: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 700,
+                          fontSize: '0.6rem'
+                        }}>
+                          {member.avatar_url ? (
+                            <img src={member.avatar_url} alt={member.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            member.name.split(' ').map((n: string) => n[0]).join('').toUpperCase()
+                          )}
+                        </div>
+                        <span style={{ fontWeight: 600 }}>{member.name}</span>
+                      </button>
+                    ))}
+                  {activeGroupMembers.filter(member => member.name.toLowerCase().includes(mentionSearchText.toLowerCase())).length === 0 && (
+                    <div style={{ padding: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                      No members match
+                    </div>
+                  )}
+                </div>
+              )}
+
               <form onSubmit={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <input 
                   type="file" 
@@ -1952,7 +2216,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   onChange={handleFileChange} 
                   style={{ display: 'none' }} 
                 />
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <button 
                     type="button" 
                     onClick={() => setShowEmojiPicker(!showEmojiPicker)}
@@ -1987,13 +2251,73 @@ export const Chats: React.FC<ChatsProps> = ({
                   </button>
                 </div>
 
+                {activeThread.isGroup && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+                    <select
+                      value={whisperTargetUserId}
+                      onChange={(e) => setWhisperTargetUserId(e.target.value)}
+                      style={{
+                        padding: '0.45rem 1.8rem 0.45rem 0.75rem',
+                        fontSize: '0.75rem',
+                        borderRadius: '9999px',
+                        border: whisperTargetUserId ? '1.5px dashed #6366F1' : '1px solid var(--border-color)',
+                        backgroundColor: whisperTargetUserId ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-card)',
+                        color: whisperTargetUserId ? '#6366F1' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                        fontWeight: whisperTargetUserId ? 700 : 500,
+                        outline: 'none',
+                        transition: 'all 0.2s',
+                        appearance: 'none',
+                        WebkitAppearance: 'none'
+                      }}
+                    >
+                      <option value="">Public Message</option>
+                      {activeGroupMembers
+                        .filter(member => member.id !== user?.id)
+                        .map(member => (
+                          <option key={member.id} value={member.id}>
+                            🔒 Whisper to {member.name}
+                          </option>
+                        ))}
+                    </select>
+                    <div style={{
+                      position: 'absolute',
+                      right: '8px',
+                      pointerEvents: 'none',
+                      color: whisperTargetUserId ? '#6366F1' : 'var(--text-muted)',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}>
+                      <ChevronDown size={12} />
+                    </div>
+                  </div>
+                )}
+
                 <input 
                   type="text" 
-                  placeholder={`Write your message to ${activeThread.name}...`}
+                  placeholder={whisperTargetUserId 
+                    ? `Whisper secretly to ${activeGroupMembers.find(m => m.id === whisperTargetUserId)?.name}...` 
+                    : `Write your message to ${activeThread.name}...`}
                   value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setChatInput(val);
+                    if (activeThread.isGroup) {
+                      const selectionStart = e.target.selectionStart || 0;
+                      const textBeforeCursor = val.slice(0, selectionStart);
+                      const lastAtIdx = textBeforeCursor.lastIndexOf('@');
+                      if (lastAtIdx !== -1 && !textBeforeCursor.slice(lastAtIdx).includes(' ')) {
+                        const search = textBeforeCursor.slice(lastAtIdx + 1);
+                        setMentionSearchText(search);
+                        setMentionStartIndex(lastAtIdx);
+                        setShowMentionDropdown(true);
+                      } else {
+                        setShowMentionDropdown(false);
+                      }
+                    }
+                  }}
                   className="premium-input"
-                  style={{ flex: 1, borderRadius: '9999px', padding: '0.75rem 1.5rem' }}
+                  style={{ flex: 1, borderRadius: '9999px', padding: '0.75rem 1.5rem', border: whisperTargetUserId ? '1.5px dashed #6366F1' : '1px solid var(--border-color)' }}
                 />
 
                 <button 
@@ -2113,6 +2437,101 @@ export const Chats: React.FC<ChatsProps> = ({
             </button>
           </div>
 
+          {/* Group Members List (For Group Chats only) */}
+          {activeThread.isGroup && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <h4 style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Users size={13} />
+                <span>Group Members ({activeGroupMembers.length})</span>
+              </h4>
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+                maxHeight: '180px',
+                overflowY: 'auto',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.5rem',
+                backgroundColor: 'rgba(0,0,0,0.01)'
+              }}>
+                {activeGroupMembers.map(member => (
+                  <div key={member.id} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.25rem 0.5rem',
+                    borderRadius: '4px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                      <div style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        backgroundColor: 'var(--color-primary)',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 700,
+                        fontSize: '0.7rem',
+                        overflow: 'hidden',
+                        flexShrink: 0
+                      }}>
+                        {member.avatar_url ? (
+                          <img src={member.avatar_url} alt={member.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          member.name.split(' ').map((n: string) => n[0]).join('').toUpperCase()
+                        )}
+                      </div>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={member.name}>
+                        {member.name} {member.id === user?.id ? '(You)' : ''}
+                      </span>
+                    </div>
+
+                    {member.id !== user?.id && (
+                      <div style={{ display: 'flex', gap: '0.25rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => setWhisperTargetUserId(member.id)}
+                          title="Whisper secretly"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#6366F1',
+                            cursor: 'pointer',
+                            fontSize: '0.7rem',
+                            fontWeight: 700
+                          }}
+                        >
+                          Whisper
+                        </button>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>|</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setChatInput(prev => `${prev}@${member.name} `);
+                          }}
+                          title="Mention in chat"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--color-secondary)',
+                            cursor: 'pointer',
+                            fontSize: '0.7rem',
+                            fontWeight: 700
+                          }}
+                        >
+                          Mention
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Shared Files List */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
             <h4 style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -2204,6 +2623,156 @@ export const Chats: React.FC<ChatsProps> = ({
                 </div>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* Create Group Modal */}
+      {showCreateGroupModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div className="glass-panel" style={{
+            width: '100%',
+            maxWidth: '480px',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '2rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            position: 'relative',
+            animation: 'pop-in 0.25s ease'
+          }}>
+            <div className="flex-between">
+              <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Users size={20} color="var(--color-primary)" />
+                <span>Create Group Chat</span>
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowCreateGroupModal(false);
+                  setGroupNameInput('');
+                  setSelectedGroupMembers([]);
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.5rem' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateGroupChat} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
+                  GROUP CHAT NAME
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. GIIN Marketing, Design Sync..." 
+                  value={groupNameInput}
+                  onChange={(e) => setGroupNameInput(e.target.value)}
+                  className="premium-input"
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
+                  SELECT MEMBERS
+                </label>
+                <div style={{
+                  maxHeight: '200px',
+                  overflowY: 'auto',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0.75rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
+                  backgroundColor: 'rgba(0,0,0,0.02)'
+                }}>
+                  {allProfilesList.map(profile => (
+                    <label 
+                      key={profile.id} 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.75rem', 
+                        padding: '0.35rem 0.5rem', 
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(var(--color-secondary-rgb), 0.05)'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      <input 
+                        type="checkbox" 
+                        checked={selectedGroupMembers.includes(profile.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedGroupMembers(prev => [...prev, profile.id]);
+                          } else {
+                            setSelectedGroupMembers(prev => prev.filter(id => id !== profile.id));
+                          }
+                        }}
+                        style={{ width: '16px', height: '16px', accentColor: 'var(--color-primary)' }}
+                      />
+                      <div style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '50%',
+                        backgroundColor: 'var(--color-secondary)',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 600,
+                        fontSize: '0.75rem',
+                        overflow: 'hidden'
+                      }}>
+                        {profile.avatar_url ? (
+                          <img src={profile.avatar_url} alt={profile.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          (profile.name || 'User').split(' ').map((n: string) => n[0]).join('').toUpperCase()
+                        )}
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', color: 'var(--text-main)' }}>{profile.name}</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {profile.email || 'Workspace Member'}
+                        </span>
+                      </div>
+                    </label>
+                  ))}
+                  {allProfilesList.length === 0 && (
+                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '1rem 0' }}>
+                      No workspace profiles found.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <button 
+                type="submit" 
+                className="premium-btn premium-btn-primary" 
+                style={{ justifyContent: 'center', marginTop: '0.5rem', fontWeight: 700 }}
+              >
+                Create Group ({selectedGroupMembers.length} selected)
+              </button>
+            </form>
           </div>
         </div>
       )}
@@ -2702,12 +3271,28 @@ export const Chats: React.FC<ChatsProps> = ({
                       <div style={{
                         padding: '0.5rem 0.75rem',
                         borderRadius: m.self ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                        backgroundColor: m.self ? 'var(--color-primary)' : 'var(--bg-app)',
+                        background: !!m.whisperToId 
+                          ? (m.self ? 'linear-gradient(135deg, var(--color-primary) 0%, #4F46E5 100%)' : 'rgba(99, 102, 241, 0.12)')
+                          : (user && m.text.toLowerCase().includes(`@${user.name.toLowerCase()}`) && !m.self
+                            ? 'rgba(250, 189, 2, 0.12)' 
+                            : (m.self ? 'var(--color-primary)' : 'var(--bg-app)')),
                         color: m.self ? 'white' : 'var(--text-main)',
                         fontSize: '0.85rem',
                         lineHeight: 1.4,
-                        border: m.self ? 'none' : '1px solid var(--border-color)'
+                        border: !!m.whisperToId
+                          ? (m.self ? '1px dashed rgba(255,255,255,0.4)' : '1.5px dashed #6366F1')
+                          : (user && m.text.toLowerCase().includes(`@${user.name.toLowerCase()}`) && !m.self
+                            ? '1.5px solid #FABD02'
+                            : (m.self ? 'none' : '1px solid var(--border-color)')),
                       }}>
+                        {m.whisperToId && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.65rem', fontWeight: 700, color: m.self ? '#FABD02' : '#6366F1', marginBottom: '3px' }}>
+                            <Lock size={9} />
+                            <span>
+                              {m.self ? `Whisper to ${activeGroupMembers.find(member => member.id === m.whisperToId)?.name || 'Member'}` : 'Whisper to You'}
+                            </span>
+                          </div>
+                        )}
                         {renderMessageContent(m.text, m.self, m.id)}
 
                         {translatingMessageId === m.id && (

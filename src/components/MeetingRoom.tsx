@@ -137,9 +137,17 @@ interface MeetingRoomProps {
   onEndMeeting: () => void;
   onSaveWorkspaceData?: (notes: string, actionItemsCount: number) => void;
   currentUser: { id: string; name: string; email: string } | null;
+  initialVideoState?: boolean;
 }
 
-export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitle, onEndMeeting, onSaveWorkspaceData, currentUser }) => {
+export const MeetingRoom: React.FC<MeetingRoomProps> = ({ 
+  meetingId, 
+  meetingTitle, 
+  onEndMeeting, 
+  onSaveWorkspaceData, 
+  currentUser,
+  initialVideoState = true
+}) => {
   const [showE2EEPannel, setShowE2EEPannel] = useState(false);
 
   const deriveE2EESeal = (id: string) => {
@@ -157,7 +165,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({ meetingId, meetingTitl
 
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOn, setIsVideoOn] = useState(true);
+  const [isVideoOn, setIsVideoOn] = useState(initialVideoState);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isAnnotating, setIsAnnotating] = useState(false);

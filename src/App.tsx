@@ -138,12 +138,21 @@ function App() {
     if (!user) return;
     const loadAllThreads = async () => {
       try {
+        // Fetch groups the current user belongs to
+        const { data: memberships } = await supabase
+          .from('group_members')
+          .select('group_id, groups(id, name)')
+          .eq('user_id', user.id);
+
+        const userGroups = memberships?.map((m: any) => m.groups).filter(Boolean) || [];
+        const userGroupIds = new Set(userGroups.map(g => g.id));
+
         const { data: dbMessages } = await supabase
           .from('messages')
           .select('*')
           .order('created_at', { ascending: true });
         
-        if (dbMessages && dbMessages.length > 0) {
+        if (dbMessages) {
           const threadGroups: { [key: string]: any[] } = {};
           dbMessages.forEach(m => {
             if (!threadGroups[m.thread_id]) {
@@ -157,12 +166,15 @@ function App() {
 
           const mappedThreadsPromises = Object.keys(threadGroups)
             .filter(threadId => {
-              // ONLY load DM threads for Chat Center sidebar
               if (threadId.startsWith('dm_')) {
                 const parts = threadId.split('_');
                 return parts.includes(user.id);
               }
-              return false; // Ignore meeting chats and other non-DM threads
+              if (threadId.startsWith('group_')) {
+                const groupId = threadId.substring(6);
+                return userGroupIds.has(groupId);
+              }
+              return false;
             })
             .map(async (threadId) => {
               const msgs = threadGroups[threadId];
@@ -170,6 +182,7 @@ function App() {
               let name = threadId;
               let avatar = threadId.substring(0, 2).toUpperCase();
               let avatarBg = '#8B5CF6';
+              let isGroupThread = false;
 
               const profile = profilesMap.get(threadId);
               if (profile) {
@@ -193,12 +206,16 @@ function App() {
                   }
                   avatarBg = `hsl(${Math.abs(hash % 360)}, 60%, 40%)`;
                 }
-              } else if (threadId.includes('-') && !threadId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-                name = threadId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                avatar = name.split(' ').map(n => n[0]).join('');
+              } else if (threadId.startsWith('group_')) {
+                isGroupThread = true;
+                const groupId = threadId.substring(6);
+                const matchedGroup = userGroups.find(g => g.id === groupId);
+                name = matchedGroup?.name || 'Group Chat';
+                avatar = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || 'GP';
+                avatarBg = '#10B981';
               }
 
-              // Asynchronously decrypt all messages in the group
+              // Decrypt DM messages, clear text group messages
               const decryptedMessages = await Promise.all(msgs.map(async (m) => {
                 let text = m.text;
                 if (threadId.startsWith('dm_')) {
@@ -218,7 +235,7 @@ function App() {
                 name: name,
                 avatar: avatar,
                 avatarBg: avatarBg,
-                isGroup: false,
+                isGroup: isGroupThread,
                 status: 'Online' as const,
                 unreadCount: 0,
                 messages: decryptedMessages
@@ -227,9 +244,29 @@ function App() {
 
           const loadedThreads = await Promise.all(mappedThreadsPromises);
 
+          // Build empty group chats (created but no messages sent yet)
+          const activeThreadIds = new Set(Object.keys(threadGroups));
+          const emptyGroupThreads = userGroups
+            .filter(g => !activeThreadIds.has(`group_${g.id}`))
+            .map(g => {
+              const initials = g.name ? g.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'GP';
+              return {
+                id: `group_${g.id}`,
+                name: g.name,
+                avatar: initials,
+                avatarBg: '#10B981',
+                isGroup: true,
+                status: 'Online' as const,
+                unreadCount: 0,
+                messages: []
+              };
+            });
+
+          const allThreads = [...loadedThreads, ...emptyGroupThreads];
+
           setThreads(prev => {
             const merged = [...prev];
-            loadedThreads.forEach(lt => {
+            allThreads.forEach(lt => {
               const idx = merged.findIndex(m => m.id === lt.id);
               if (idx >= 0) {
                 merged[idx] = lt;
@@ -240,8 +277,8 @@ function App() {
             return merged;
           });
 
-          if (loadedThreads.length > 0 && !activeThreadId) {
-            setActiveThreadId(loadedThreads[0].id);
+          if (allThreads.length > 0 && !activeThreadId) {
+            setActiveThreadId(allThreads[0].id);
           }
         }
       } catch (err) {
@@ -265,23 +302,63 @@ function App() {
           const newMsg = payload.new;
           if (!newMsg) return;
 
-          // ONLY process DM messages involving the current user
-          if (!newMsg.thread_id.startsWith('dm_')) return;
-          const parts = newMsg.thread_id.split('_');
-          if (!parts.includes(user.id)) return;
+          // ONLY process DM messages involving the current user or group messages of groups they belong to
+          let isGroup = false;
+          let isMember = false;
 
-          // Decrypt if it's an encrypted direct message
-          let text = newMsg.text;
           if (newMsg.thread_id.startsWith('dm_')) {
-            text = await decryptMessage(newMsg.text, newMsg.thread_id);
+            const parts = newMsg.thread_id.split('_');
+            if (parts.includes(user.id)) {
+              isMember = true;
+            }
+          } else if (newMsg.thread_id.startsWith('group_')) {
+            isGroup = true;
+            const groupId = newMsg.thread_id.substring(6);
+            const { data: memberRecord } = await supabase
+              .from('group_members')
+              .select('id')
+              .eq('group_id', groupId)
+              .eq('user_id', user.id)
+              .maybeSingle();
+            if (memberRecord) {
+              isMember = true;
+            }
           }
 
-          const mappedMsg: Message = {
+          if (!isMember) return;
+
+          // Decrypt if it's an encrypted direct message or filter whispers for group chats
+          let text = newMsg.text;
+          let whisperToId: string | null = null;
+          if (newMsg.thread_id.startsWith('dm_')) {
+            text = await decryptMessage(newMsg.text, newMsg.thread_id);
+          } else if (newMsg.thread_id.startsWith('group_')) {
+            const match = text.match(/^\[WHISPER:([^:]+):([\s\S]*)\]$/);
+            if (match) {
+              const targetId = match[1];
+              const whisperText = match[2];
+              const isSender = newMsg.user_id === user.id;
+              const isTarget = targetId === user.id;
+              if (!isSender && !isTarget) {
+                // Whisper not for current user, silently skip
+                return;
+              }
+              text = whisperText;
+              whisperToId = targetId;
+            }
+          }
+
+          // Mention check
+          const hasMention = text.toLowerCase().includes(`@${user.name.toLowerCase()}`) || 
+                             (user.email && text.toLowerCase().includes(`@${user.email.toLowerCase()}`));
+
+          const mappedMsg: Message & { whisperToId?: string | null } = {
             id: newMsg.id,
             sender: newMsg.sender_name,
             text: text,
             time: new Date(newMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            self: newMsg.user_id === user.id || newMsg.sender_name === 'You'
+            self: newMsg.user_id === user.id || newMsg.sender_name === 'You',
+            whisperToId
           };
 
           setThreads(prev => {
@@ -315,6 +392,28 @@ function App() {
                     }
                     setThreads(current => [newThread, ...current.filter(t => t.id !== newMsg.thread_id)]);
                   }
+                } else if (newMsg.thread_id.startsWith('group_')) {
+                  const groupId = newMsg.thread_id.substring(6);
+                  const { data: matchedGroup } = await supabase.from('groups').select('*').eq('id', groupId).maybeSingle();
+                  if (matchedGroup) {
+                    const initials = matchedGroup.name ? matchedGroup.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'GP';
+                    const newThread: ChatThread = {
+                      id: newMsg.thread_id,
+                      name: matchedGroup.name,
+                      avatar: initials,
+                      avatarBg: '#10B981',
+                      isGroup: true,
+                      status: 'Online',
+                      unreadCount: activeThreadId !== newMsg.thread_id || currentView !== 'chats' ? 1 : 0,
+                      messages: [mappedMsg]
+                    };
+                    if (newMsg.user_id !== user.id) {
+                      if (hasMention) {
+                        triggerInAppNotification(`${newMsg.sender_name} (Mentioned You)`, text);
+                      }
+                    }
+                    setThreads(current => [newThread, ...current.filter(t => t.id !== newMsg.thread_id)]);
+                  }
                 }
               };
               loadNewThread();
@@ -329,7 +428,13 @@ function App() {
                 const unreadCount = !isCurrent && newMsg.user_id !== user.id ? (t.unreadCount || 0) + 1 : 0;
 
                 if (!isCurrent && newMsg.user_id !== user.id) {
-                  triggerInAppNotification(t.name, text);
+                  if (isGroup) {
+                    if (hasMention) {
+                      triggerInAppNotification(`${newMsg.sender_name} (Mentioned You)`, text);
+                    }
+                  } else {
+                    triggerInAppNotification(t.name, text);
+                  }
                 }
 
                 return {
@@ -593,6 +698,7 @@ function App() {
 
   // Active call states
   const [activeCallTitle, setActiveCallTitle] = useState<string | null>(null);
+  const [activeCallVideoState, setActiveCallVideoState] = useState<boolean>(true);
 
   // Chat redirect helper
   const [targetContactId, setTargetContactId] = useState<string | null>(null);
@@ -702,9 +808,10 @@ function App() {
     setIsDarkMode(!isDarkMode);
   };
 
-  const handleStartCall = async (title?: string, dmThreadId?: string) => {
+  const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true) => {
     const finalTitle = title || 'Instant Call';
     setActiveCallTitle(finalTitle);
+    setActiveCallVideoState(isVideo);
     
     if (user && user.id) {
       try {
@@ -731,23 +838,12 @@ function App() {
           };
           setMeetingHistory(prev => [mapped, ...prev]);
 
-          if (dmThreadId && dmThreadId.startsWith('dm_')) {
-            const parts = dmThreadId.split('_');
-            const targetUserId = parts[1] === user.id ? parts[2] : parts[1];
-            const targetThread = threads.find(t => t.id === dmThreadId);
-            const targetName = targetThread ? targetThread.name : 'Contact';
-
-            setDialingState({
-              targetUserId,
-              targetUserName: targetName,
-              meetingId: saved.id,
-              passcode: saved.passcode
-            });
-
-            startRingSound();
-
+          if (dmThreadId) {
             const inviteMsg = `📞 CALL_INVITE:${saved.id}:${saved.passcode}:${user.name}`;
-            const dbText = await encryptMessage(inviteMsg, dmThreadId);
+            let dbText = inviteMsg;
+            if (dmThreadId.startsWith('dm_')) {
+              dbText = await encryptMessage(inviteMsg, dmThreadId);
+            }
             await mockAuth.sendMessage({
               thread_id: dmThreadId,
               sender_name: user.name || 'You',
@@ -755,21 +851,37 @@ function App() {
               user_id: user.id
             });
 
-            const targetChannel = supabase.channel(`user-signals-${targetUserId}`);
-            targetChannel.subscribe((status) => {
-              if (status === 'SUBSCRIBED') {
-                targetChannel.send({
-                  type: 'broadcast',
-                  event: 'incoming-call',
-                  payload: {
-                    meetingId: saved.id,
-                    passcode: saved.passcode,
-                    callerName: user.name || 'You',
-                    callerId: user.id
-                  }
-                });
-              }
-            });
+            if (dmThreadId.startsWith('dm_')) {
+              const parts = dmThreadId.split('_');
+              const targetUserId = parts[1] === user.id ? parts[2] : parts[1];
+              const targetThread = threads.find(t => t.id === dmThreadId);
+              const targetName = targetThread ? targetThread.name : 'Contact';
+
+              setDialingState({
+                targetUserId,
+                targetUserName: targetName,
+                meetingId: saved.id,
+                passcode: saved.passcode
+              });
+
+              startRingSound();
+
+              const targetChannel = supabase.channel(`user-signals-${targetUserId}`);
+              targetChannel.subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                  targetChannel.send({
+                    type: 'broadcast',
+                    event: 'incoming-call',
+                    payload: {
+                      meetingId: saved.id,
+                      passcode: saved.passcode,
+                      callerName: user.name || 'You',
+                      callerId: user.id
+                    }
+                  });
+                }
+              });
+            }
           }
         }
       } catch (err) {
@@ -1762,6 +1874,7 @@ function App() {
               onEndMeeting={handleEndMeeting}
               onSaveWorkspaceData={handleSaveWorkspaceData}
               currentUser={user}
+              initialVideoState={activeCallVideoState}
             />
           )}
 

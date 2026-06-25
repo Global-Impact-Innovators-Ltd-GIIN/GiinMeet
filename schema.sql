@@ -195,3 +195,33 @@ CREATE POLICY "Allow public read access to meetings" ON public.meetings FOR SELE
 ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.meeting_participants;
 
+
+-- 7. GROUPS AND GROUP MEMBERS
+CREATE TABLE IF NOT EXISTS public.groups (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  creator_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+ALTER TABLE public.groups ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public read access to groups" ON public.groups FOR SELECT USING (true);
+CREATE POLICY "Allow public insert access to groups" ON public.groups FOR INSERT WITH CHECK (true);
+
+CREATE TABLE IF NOT EXISTS public.group_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  group_id UUID NOT NULL REFERENCES public.groups(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  joined_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  UNIQUE(group_id, user_id)
+);
+
+ALTER TABLE public.group_members ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public read access to group_members" ON public.group_members FOR SELECT USING (true);
+CREATE POLICY "Allow public insert access to group_members" ON public.group_members FOR INSERT WITH CHECK (true);
+
+-- Enable real-time for groups and group_members
+ALTER PUBLICATION supabase_realtime ADD TABLE public.groups;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.group_members;
+
+
