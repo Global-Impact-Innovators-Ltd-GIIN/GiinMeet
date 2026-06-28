@@ -721,34 +721,171 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* UI Theme Styles */
+/* UI Theme Styles */
 [data-ui-style="neumorphism"] {
   --glass-bg: var(--bg-card);
   --glass-border: none;
   --glass-blur: 0px;
+  
+  /* Light Mode Neumorphic Shadows */
+  --shadow-neumorphic-out: 6px 6px 12px #b5bcc7, -6px -6px 12px #ffffff;
+  --shadow-neumorphic-in: inset 4px 4px 8px #b5bcc7, inset -4px -4px 8px #ffffff;
+  --shadow-neumorphic-icon-out: 4px 4px 8px #b5bcc7, -4px -4px 8px #ffffff;
+  --shadow-neumorphic-icon-in: inset 3px 3px 6px #b5bcc7, inset -3px -3px 6px #ffffff;
+}
+
+/* Dark Mode Neumorphic Shadows override */
+[data-ui-style="neumorphism"][data-theme="dark"],
+[data-theme="dark"] [data-ui-style="neumorphism"],
+[data-ui-style="neumorphism"] [data-theme="dark"] {
+  --shadow-neumorphic-out: 6px 6px 12px #05070b, -6px -6px 12px #192237;
+  --shadow-neumorphic-in: inset 4px 4px 8px #05070b, inset -4px -4px 8px #192237;
+  --shadow-neumorphic-icon-out: 4px 4px 8px #05070b, -4px -4px 8px #192237;
+  --shadow-neumorphic-icon-in: inset 3px 3px 6px #05070b, inset -3px -3px 6px #192237;
 }
 
 [data-ui-style="neumorphism"] .glass-panel {
-  box-shadow: var(--shadow-premium) !important;
+  box-shadow: var(--shadow-neumorphic-out) !important;
   border: none !important;
   transition: all var(--transition-normal);
 }
 
 [data-ui-style="neumorphism"] .premium-btn-secondary,
 [data-ui-style="neumorphism"] .premium-input {
-  box-shadow: var(--shadow-sm) !important;
+  box-shadow: var(--shadow-neumorphic-icon-out) !important;
   border: none !important;
   background-color: var(--bg-card) !important;
   transition: all var(--transition-fast);
 }
 
 [data-ui-style="neumorphism"] .premium-btn-primary {
-  box-shadow: var(--shadow-sm) !important;
+  background: var(--color-primary) !important;
+  box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.25), -4px -4px 10px rgba(255, 255, 255, 0.08) !important;
   border: none !important;
+  transition: all var(--transition-fast) !important;
+}
+
+[data-ui-style="neumorphism"] .premium-btn-primary:hover {
+  background: var(--color-primary-hover) !important;
+  box-shadow: 6px 6px 14px rgba(0, 0, 0, 0.3), -6px -6px 14px rgba(255, 255, 255, 0.12) !important;
+  transform: translateY(-1px);
+}
+
+[data-ui-style="neumorphism"] .premium-btn-primary:active {
+  box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.3), inset -4px -4px 8px rgba(255, 255, 255, 0.05) !important;
+  transform: translateY(0);
 }
 
 [data-ui-style="neumorphism"] .premium-btn:active,
 [data-ui-style="neumorphism"] .premium-input:focus {
-  box-shadow: var(--shadow-inset) !important;
+  box-shadow: var(--shadow-neumorphic-in) !important;
+}
+
+/* Sidebar Custom Neumorphism styling */
+[data-ui-style="neumorphism"] .sidebar-btn {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 1px solid transparent !important;
+  transition: all var(--transition-fast) !important;
+}
+
+[data-ui-style="neumorphism"] .sidebar-btn:hover {
+  background: rgba(255, 255, 255, 0.02) !important;
+  box-shadow: var(--shadow-neumorphic-icon-out) !important;
+  border-radius: var(--radius-md) !important;
+}
+
+[data-ui-style="neumorphism"] .sidebar-btn.active {
+  background: rgba(var(--color-primary-rgb), 0.08) !important;
+  box-shadow: var(--shadow-neumorphic-in) !important;
+  color: var(--color-primary) !important;
+  border-radius: var(--radius-md) !important;
+  border: none !important;
+}
+
+[data-ui-style="neumorphism"] .sidebar-btn.active svg {
+  filter: drop-shadow(0 0 3px var(--color-primary));
+}
+
+[data-ui-style="neumorphism"] .sidebar-upgrade-card {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: none !important;
+  box-shadow: var(--shadow-neumorphic-in) !important;
+  border-radius: var(--radius-lg) !important;
+  transition: all var(--transition-normal) !important;
+}
+
+[data-ui-style="neumorphism"] .sidebar-upgrade-card:hover {
+  box-shadow: var(--shadow-neumorphic-out) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-ui-style="neumorphism"] .sidebar-reset-btn {
+  border-radius: var(--radius-md) !important;
+  transition: all var(--transition-fast) !important;
+}
+
+[data-ui-style="neumorphism"] .sidebar-reset-btn:hover {
+  box-shadow: var(--shadow-neumorphic-icon-out) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-ui-style="neumorphism"] .sidebar-reset-btn:active {
+  box-shadow: var(--shadow-neumorphic-icon-in) !important;
+}
+
+/* Header Neumorphic Circular Icon Buttons */
+[data-ui-style="neumorphism"] .header-icon-btn {
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 50% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--bg-card) !important;
+  box-shadow: var(--shadow-neumorphic-icon-out) !important;
+  border: none !important;
+  transition: all var(--transition-fast) !important;
+  color: var(--text-main) !important;
+}
+
+[data-ui-style="neumorphism"] .header-icon-btn:hover {
+  transform: translateY(-1px);
+}
+
+[data-ui-style="neumorphism"] .header-icon-btn:active {
+  box-shadow: var(--shadow-neumorphic-icon-in) !important;
+  transform: translateY(0);
+}
+
+[data-ui-style="neumorphism"] .header-profile-trigger {
+  padding: 4px 10px !important;
+  border-radius: 20px !important;
+  background: var(--bg-card) !important;
+  box-shadow: var(--shadow-neumorphic-icon-out) !important;
+  transition: all var(--transition-fast) !important;
+}
+
+[data-ui-style="neumorphism"] .header-profile-trigger:hover {
+  transform: translateY(-1px);
+}
+
+[data-ui-style="neumorphism"] .header-profile-trigger:active {
+  box-shadow: var(--shadow-neumorphic-icon-in) !important;
+  transform: translateY(0);
+}
+
+/* Dashboard Card Icon Wells */
+[data-ui-style="neumorphism"] .dashboard-card-icon {
+  background: var(--bg-app) !important;
+  box-shadow: var(--shadow-neumorphic-icon-in) !important;
+  border: none !important;
+}
+
+[data-ui-style="neumorphism"] .history-icon-wrapper {
+  background: var(--bg-app) !important;
+  box-shadow: var(--shadow-neumorphic-icon-in) !important;
+  border: none !important;
 }
 
 /* Cyberpunk Glow Styles */

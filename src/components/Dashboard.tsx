@@ -116,15 +116,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
             e.currentTarget.style.boxShadow = 'var(--shadow-premium)';
           }}
         >
-          <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '12px',
-            backgroundColor: 'rgba(255,255,255,0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
+          <div 
+            className="dashboard-card-icon"
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(255,255,255,0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
             <Video size={24} color="var(--color-accent)" />
           </div>
           <div>
@@ -152,15 +155,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
             e.currentTarget.style.transform = 'translateY(0)';
           }}
         >
-          <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '12px',
-            backgroundColor: 'rgba(112, 130, 190, 0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
+          <div 
+            className="dashboard-card-icon"
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(112, 130, 190, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
             <UserPlus size={24} color="var(--color-primary)" />
           </div>
           <div>
@@ -188,15 +194,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
             e.currentTarget.style.transform = 'translateY(0)';
           }}
         >
-          <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '12px',
-            backgroundColor: 'rgba(250, 189, 2, 0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
+          <div 
+            className="dashboard-card-icon"
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(250, 189, 2, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
             <Calendar size={24} color="var(--color-accent)" />
           </div>
           <div>
@@ -235,16 +244,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
-                  <div style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    backgroundColor: meeting.status === 'In Progress' ? 'rgba(16, 185, 129, 0.15)' : 
-                                    meeting.status === 'Scheduled' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(100, 116, 139, 0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
+                  <div 
+                    className="history-icon-wrapper"
+                    style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '50%',
+                      backgroundColor: meeting.status === 'In Progress' ? 'rgba(16, 185, 129, 0.15)' : 
+                                      meeting.status === 'Scheduled' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(100, 116, 139, 0.1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
                     {meeting.status === 'Completed' && <CheckCircle2 size={20} color="#64748B" />}
                     {meeting.status === 'In Progress' && <Play size={18} className="mic-indicator" style={{ color: '#10B981', animation: 'pulse-ring 2s infinite' }} />}
                     {meeting.status === 'Scheduled' && <Clock size={20} color="#3B82F6" />}

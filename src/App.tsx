@@ -1484,6 +1484,7 @@ function App() {
                 setTargetContactId(null);
                 setCurrentView('dashboard');
               }}
+              className={`sidebar-btn ${currentView === 'dashboard' ? 'active' : ''}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1508,6 +1509,7 @@ function App() {
             {/* Chats Link */}
             <button 
               onClick={() => setCurrentView('chats')}
+              className={`sidebar-btn ${currentView === 'chats' ? 'active' : ''}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1548,6 +1550,7 @@ function App() {
             {/* Contacts Link */}
             <button 
               onClick={() => setCurrentView('contacts')}
+              className={`sidebar-btn ${currentView === 'contacts' ? 'active' : ''}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1572,6 +1575,7 @@ function App() {
             {/* Private Space E2EE Vault Link */}
             <button 
               onClick={() => setCurrentView('private')}
+              className={`sidebar-btn ${currentView === 'private' ? 'active' : ''}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1596,6 +1600,7 @@ function App() {
             {/* Help Center Link */}
             <button 
               onClick={() => setCurrentView('help')}
+              className={`sidebar-btn ${currentView === 'help' ? 'active' : ''}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1621,6 +1626,7 @@ function App() {
             {user?.is_superadmin && (
               <button 
                 onClick={() => setCurrentView('superadmin')}
+                className={`sidebar-btn ${currentView === 'superadmin' ? 'active' : ''}`}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -1646,6 +1652,7 @@ function App() {
             {/* Settings Link */}
             <button 
               onClick={() => setCurrentView('settings')}
+              className={`sidebar-btn ${currentView === 'settings' ? 'active' : ''}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1674,6 +1681,7 @@ function App() {
           {/* Plan badge */}
           <div 
             onClick={() => setCurrentView('billing')}
+            className="sidebar-upgrade-card"
             style={{
               padding: '1rem',
               borderRadius: 'var(--radius-lg)',
@@ -1707,6 +1715,7 @@ function App() {
               localStorage.clear();
               window.location.reload();
             }}
+            className="sidebar-reset-btn"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1795,6 +1804,7 @@ function App() {
             {/* Theme quick toggler */}
             <button 
               onClick={handleToggleTheme}
+              className="header-icon-btn theme-toggle-btn"
               style={{
                 background: 'none',
                 border: 'none',
@@ -1815,6 +1825,7 @@ function App() {
                   setShowProfileDropdown(false);
                   markAllNotificationsRead();
                 }}
+                className="header-icon-btn notif-toggle-btn"
                 style={{
                   background: 'none',
                   border: 'none',
@@ -1900,6 +1911,7 @@ function App() {
                   setShowProfileDropdown(!showProfileDropdown);
                   setShowNotifDropdown(false);
                 }}
+                className="header-profile-trigger"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
