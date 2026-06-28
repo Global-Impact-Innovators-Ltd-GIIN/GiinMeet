@@ -1437,13 +1437,21 @@ function App() {
       }}>
         {/* Upper Logo Section */}
         <div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            marginBottom: '3rem',
-            paddingLeft: '0.5rem'
-          }}>
+          <div 
+            onClick={() => {
+              setTargetContactId(null);
+              setCurrentView('dashboard');
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              marginBottom: '3rem',
+              paddingLeft: '0.5rem',
+              cursor: 'pointer'
+            }}
+            title="Go to Dashboard"
+          >
             <img 
               src={logoUrl} 
               alt="GIIN MEET Logo" 
@@ -1758,10 +1766,19 @@ function App() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             {/* Mobile Branding Header */}
-            <div className="mobile-brand-container" style={{
-              alignItems: 'center',
-              gap: '0.5rem',
-            }}>
+            <div 
+              className="mobile-brand-container" 
+              onClick={() => {
+                setTargetContactId(null);
+                setCurrentView('dashboard');
+              }}
+              style={{
+                alignItems: 'center',
+                gap: '0.5rem',
+                cursor: 'pointer'
+              }}
+              title="Go to Dashboard"
+            >
               <img 
                 src={logoUrl} 
                 alt="GIIN MEET Logo" 
