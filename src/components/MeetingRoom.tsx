@@ -151,6 +151,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   isP2PCall = false
 }) => {
   const [showE2EEPannel, setShowE2EEPannel] = useState(false);
+  const sigChannelRef = useRef<any>(null);
+  const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
+  const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
 
   const deriveE2EESeal = (id: string) => {
     let hashVal = 5381;
@@ -316,7 +319,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const { data } = await mockAuth.getMeetingDetails(meetingId);
         if (data) {
           setMeetingAdminId(data.admin_id || '');
-          setPasscode(data.passcode || '');
+          setPasscode(data.passcode || getDeterministicPasscode(meetingId));
           setInitialNotes(data.notes || '');
         }
       } catch (err) {
@@ -462,6 +465,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
     });
 
+    sigChannelRef.current = sigChannel;
+
     const initPeerConnection = (peerKey: string, isCaller: boolean) => {
       if (pcsRef.current[peerKey]) {
         pcsRef.current[peerKey].close();
@@ -495,8 +500,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
 
       pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          sigChannel.send({
+        if (event.candidate && sigChannelRef.current) {
+          sigChannelRef.current.send({
             type: 'broadcast',
             event: 'signal',
             payload: {
@@ -511,13 +516,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       pc.ontrack = (event) => {
         const remoteStream = event.streams[0] || new MediaStream([event.track]);
+        const newStream = new MediaStream(remoteStream.getTracks());
         setRemoteStreams(prev => ({
           ...prev,
-          [peerKey]: remoteStream
+          [peerKey]: newStream
         }));
 
         setupReceiverE2EE(event.receiver);
-        setupSpeakingDetection(remoteStream, peerKey, false);
+        setupSpeakingDetection(newStream, peerKey, false);
       };
 
       pc.onconnectionstatechange = () => {
@@ -541,16 +547,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           try {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-            sigChannel.send({
-              type: 'broadcast',
-              event: 'signal',
-              payload: {
-                type: 'offer',
-                targetKey: peerKey,
-                senderKey: myKey,
-                sdp: offer
-              }
-            });
+            if (sigChannelRef.current) {
+              sigChannelRef.current.send({
+                type: 'broadcast',
+                event: 'signal',
+                payload: {
+                  type: 'offer',
+                  targetKey: peerKey,
+                  senderKey: myKey,
+                  sdp: offer
+                }
+              });
+            }
           } catch (err) {
             console.error('[WebRTC] Offer error:', err);
           }
@@ -569,16 +577,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         
-        sigChannel.send({
-          type: 'broadcast',
-          event: 'signal',
-          payload: {
-            type: 'answer',
-            targetKey: senderKey,
-            senderKey: myKey,
-            sdp: answer
-          }
-        });
+        if (sigChannelRef.current) {
+          sigChannelRef.current.send({
+            type: 'broadcast',
+            event: 'signal',
+            payload: {
+              type: 'answer',
+              targetKey: senderKey,
+              senderKey: myKey,
+              sdp: answer
+            }
+          });
+        }
 
         // Process buffered ICE candidates
         const candidates = pcCandidatesRef.current[senderKey] || [];
@@ -827,17 +837,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         });
 
         // Broadcast screenshare media state changes
-        const sigChannel = supabase.channel(`sig-webrtc-${meetingId}`);
-        sigChannel.send({
-          type: 'broadcast',
-          event: 'media-state',
-          payload: {
-            senderKey: myKey,
-            isVideoOn,
-            isMuted,
-            isScreenSharing: true
-          }
-        });
+        if (sigChannelRef.current) {
+          sigChannelRef.current.send({
+            type: 'broadcast',
+            event: 'media-state',
+            payload: {
+              senderKey: myKey,
+              isVideoOn,
+              isMuted,
+              isScreenSharing: true
+            }
+          });
+        }
 
         screenTrack.onended = () => {
           stopScreenShare();
@@ -882,17 +893,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
 
     // Broadcast screenshare media state changes
-    const sigChannel = supabase.channel(`sig-webrtc-${meetingId}`);
-    sigChannel.send({
-      type: 'broadcast',
-      event: 'media-state',
-      payload: {
-        senderKey: myKey,
-        isVideoOn,
-        isMuted,
-        isScreenSharing: false
-      }
-    });
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'media-state',
+        payload: {
+          senderKey: myKey,
+          isVideoOn,
+          isMuted,
+          isScreenSharing: false
+        }
+      });
+    }
   };
 
   // Admins check for waiting participants via realtime and fallback polling
@@ -952,13 +964,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Share link and passcode
-  const handleCopyCredentials = () => {
-    const link = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
-    const text = `Join my GIIN MEET call:\nTitle: ${meetingTitle}\nLink: ${link}\nPasscode: ${passcode}`;
-    navigator.clipboard.writeText(text);
-    alert('Meeting credentials (link & passcode) copied to clipboard!');
-  };
+
   
   const colleagueCanvasRef = useRef<HTMLCanvasElement | null>(null);
   
@@ -973,98 +979,173 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Initial participants list from DB
   const [participants, setParticipants] = useState<Participant[]>([]);
 
-  // Handle media devices (webcam)
+  // Set srcObject for local video element when stream changes
   useEffect(() => {
-    async function startCamera() {
-      try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 },
-          audio: true
-        });
-        setStream(mediaStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-        }
-
-        // Setup local audio analyzer
-        setupSpeakingDetection(mediaStream, myKey, true);
-
-        // Replace track in existing connections if camera restarts
-        mediaStream.getTracks().forEach(track => {
-          Object.values(pcsRef.current).forEach(pc => {
-            const senders = pc.getSenders();
-            const sender = senders.find(s => s.track && s.track.kind === track.kind);
-            if (sender) {
-              sender.replaceTrack(track);
-            }
-          });
-        });
-        setIsMediaInitialized(true);
-      } catch (err) {
-        console.warn('Camera access denied or unavailable. Running in simulated fallback mode.', err);
-        setIsMediaInitialized(true);
+    if (videoRef.current && stream) {
+      if (videoRef.current.srcObject !== stream) {
+        videoRef.current.srcObject = stream;
       }
     }
+  }, [stream]);
 
-    if (isVideoOn) {
-      startCamera();
-    } else {
-      stopCamera();
+  // Initialize audio track (kept alive throughout the meeting)
+  useEffect(() => {
+    async function initAudio() {
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioTrack = audioStream.getAudioTracks()[0];
+        localAudioTrackRef.current = audioTrack;
+        audioTrack.enabled = !isMuted;
+        
+        setStream(prev => {
+          const newStream = prev || new MediaStream();
+          newStream.getAudioTracks().forEach(t => newStream.removeTrack(t));
+          newStream.addTrack(audioTrack);
+          return newStream;
+        });
+
+        // Setup local audio analyzer
+        setupSpeakingDetection(new MediaStream([audioTrack]), myKey, true);
+
+        // Add to any existing peer connections
+        Object.values(pcsRef.current).forEach(pc => {
+          const senders = pc.getSenders();
+          const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+          if (audioSender) {
+            audioSender.replaceTrack(audioTrack);
+          } else {
+            const sender = pc.addTrack(audioTrack, stream || new MediaStream([audioTrack]));
+            setupSenderE2EE(sender);
+          }
+        });
+      } catch (err) {
+        console.error('Error acquiring audio:', err);
+      }
+    }
+    initAudio();
+    return () => {
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.stop();
+      }
+    };
+  }, []);
+
+  // Initialize/toggle video track (dynamic camera access)
+  useEffect(() => {
+    let active = true;
+    async function syncVideo() {
+      if (isVideoOn) {
+        if (!localVideoTrackRef.current) {
+          try {
+            const videoStream = await navigator.mediaDevices.getUserMedia({
+              video: { width: 640, height: 480 }
+            });
+            if (!active) {
+              videoStream.getTracks().forEach(t => t.stop());
+              return;
+            }
+            const videoTrack = videoStream.getVideoTracks()[0];
+            localVideoTrackRef.current = videoTrack;
+            
+            setStream(prev => {
+              const newStream = prev || new MediaStream();
+              newStream.getVideoTracks().forEach(t => newStream.removeTrack(t));
+              newStream.addTrack(videoTrack);
+              return newStream;
+            });
+
+            // Replace track in all active peer connections
+            Object.values(pcsRef.current).forEach(pc => {
+              const senders = pc.getSenders();
+              const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+              if (videoSender) {
+                videoSender.replaceTrack(videoTrack);
+              } else {
+                const sender = pc.addTrack(videoTrack, stream || new MediaStream([videoTrack]));
+                setupSenderE2EE(sender);
+              }
+            });
+          } catch (err) {
+            console.warn('Error acquiring video:', err);
+            setIsVideoOn(false);
+          }
+        } else {
+          localVideoTrackRef.current.enabled = true;
+        }
+      } else {
+        // Stop camera track to turn off camera light
+        if (localVideoTrackRef.current) {
+          localVideoTrackRef.current.stop();
+          const oldTrack = localVideoTrackRef.current;
+          localVideoTrackRef.current = null;
+
+          setStream(prev => {
+            if (prev) {
+              prev.removeTrack(oldTrack);
+            }
+            return prev;
+          });
+
+          // Replace track with null in peer connections
+          Object.values(pcsRef.current).forEach(pc => {
+            const senders = pc.getSenders();
+            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+            if (videoSender) {
+              videoSender.replaceTrack(null);
+            }
+          });
+        }
+      }
       setIsMediaInitialized(true);
     }
 
+    syncVideo();
+
     return () => {
-      stopCamera();
+      active = false;
     };
   }, [isVideoOn]);
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
-  };
 
   // Toggle buttons
   const toggleMute = () => {
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
-    if (stream) {
-      stream.getAudioTracks().forEach(track => {
-        track.enabled = !nextMuted;
-      });
+    if (localAudioTrackRef.current) {
+      localAudioTrackRef.current.enabled = !nextMuted;
     }
 
-    // Broadcast audio state change
-    const sigChannel = supabase.channel(`sig-webrtc-${meetingId}`);
-    sigChannel.send({
-      type: 'broadcast',
-      event: 'media-state',
-      payload: {
-        senderKey: myKey,
-        isVideoOn,
-        isMuted: nextMuted,
-        isScreenSharing
-      }
-    });
+    // Broadcast audio state change using the active channel ref
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'media-state',
+        payload: {
+          senderKey: myKey,
+          isVideoOn,
+          isMuted: nextMuted,
+          isScreenSharing
+        }
+      });
+    }
   };
 
   const toggleVideo = () => {
     const nextVideoOn = !isVideoOn;
     setIsVideoOn(nextVideoOn);
 
-    // Broadcast video state change
-    const sigChannel = supabase.channel(`sig-webrtc-${meetingId}`);
-    sigChannel.send({
-      type: 'broadcast',
-      event: 'media-state',
-      payload: {
-        senderKey: myKey,
-        isVideoOn: nextVideoOn,
-        isMuted,
-        isScreenSharing
-      }
-    });
+    // Broadcast video state change using the active channel ref
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'media-state',
+        payload: {
+          senderKey: myKey,
+          isVideoOn: nextVideoOn,
+          isMuted,
+          isScreenSharing
+        }
+      });
+    }
   };
 
   // Simulated Speaking status fluctuations (backup fallback)
@@ -1420,7 +1501,10 @@ Securely encrypted under Fintech AES-256 standard.`;
                           width: '100%',
                           height: '100%',
                           objectFit: 'cover',
-                          display: pState.isVideoOn ? 'block' : 'none'
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          zIndex: 1
                         }}
                       />
                     )}
@@ -1438,7 +1522,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                         left: 0,
                         right: 0,
                         bottom: 0,
-                        zIndex: 1
+                        zIndex: 2
                       }}>
                         <div className="pulsing-avatar-container" style={{
                           width: '120px',
@@ -1609,16 +1693,16 @@ Securely encrypted under Fintech AES-256 standard.`;
           /* Professional Fintech boardroom details dashboard when alone in a meeting */
           <div style={{
             flex: 1,
-            display: 'grid',
-            gridTemplateColumns: '1.2fr 1fr',
-            gap: '2.5rem',
-            padding: '2.5rem',
+            display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
+            justifyContent: 'center',
+            padding: '2rem',
             backgroundColor: '#07090E',
             overflowY: 'auto'
-          }} className="grid-2">
-            {/* Left: Your webcam tile */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          }}>
+            {/* Centered: Your webcam tile */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', maxWidth: '800px' }}>
               <div style={{
                 position: 'relative',
                 borderRadius: 'var(--radius-lg)',
@@ -1710,95 +1794,9 @@ Securely encrypted under Fintech AES-256 standard.`;
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                 </div>
               </div>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>
                 You are currently the only participant in this boardroom conference.
               </span>
-            </div>
-
-            {/* Right: Invitation & Joining Info Card */}
-            <div className="glass-panel" style={{
-              padding: '2rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '1.25rem',
-              backgroundColor: 'var(--bg-card)',
-              border: '1px solid var(--border-color)',
-              boxShadow: 'var(--shadow-premium)'
-            }}>
-              <div>
-                <span style={{ fontSize: '0.75rem', color: 'var(--color-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Live Boardroom Hub
-                </span>
-                <h3 style={{ fontSize: '1.35rem', fontWeight: 800, marginTop: '0.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>
-                  Invite Others to Join
-                </h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-                  Share the credentials below to invite remote participants.
-                </p>
-              </div>
-
-              <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)', margin: 0 }} />
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Meeting Join Link</span>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <input 
-                    type="text" 
-                    value={`${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`}
-                    readOnly 
-                    className="premium-input"
-                    style={{ fontSize: '0.75rem', padding: '0.45rem 0.75rem', backgroundColor: 'rgba(0,0,0,0.15)', flex: 1 }}
-                  />
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`);
-                      setCopiedInfo('link');
-                      setTimeout(() => setCopiedInfo(null), 2000);
-                    }}
-                    className={`premium-btn ${copiedInfo === 'link' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
-                    style={{ padding: '0.45rem 0.75rem', height: '34px', fontSize: '0.75rem', flexShrink: 0 }}
-                    title="Copy Join Link"
-                  >
-                    {copiedInfo === 'link' ? <Check size={14} /> : <Copy size={14} />}
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>Meeting ID</span>
-                  <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'white', marginTop: '0.25rem' }}>
-                    {meetingId}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>Passcode</span>
-                  <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'white', marginTop: '0.25rem' }}>
-                    {passcode || 'ABCD'}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  const link = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
-                  const invitation = `Please join my GIIN Meet video conference:
-Topic: ${meetingTitle}
-Join Link: ${link}
-Meeting ID: ${meetingId}
-Passcode: ${passcode || 'ABCD'}
-
-Securely encrypted under Fintech AES-256 standard.`;
-                  navigator.clipboard.writeText(invitation);
-                  setCopiedInfo('details');
-                  setTimeout(() => setCopiedInfo(null), 2000);
-                }}
-                className={`premium-btn ${copiedInfo === 'details' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
-                style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem', fontSize: '0.85rem' }}
-              >
-                {copiedInfo === 'details' ? <Check size={14} /> : <Copy size={14} />}
-                <span>{copiedInfo === 'details' ? 'Invitation Details Copied' : 'Copy Invitation Email'}</span>
-              </button>
             </div>
           </div>
         ) : (
@@ -2052,7 +2050,10 @@ Securely encrypted under Fintech AES-256 standard.`;
                           width: '100%',
                           height: '100%',
                           objectFit: 'cover',
-                          display: pState.isVideoOn ? 'block' : 'none'
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          zIndex: 1
                         }}
                       />
                     )}
@@ -2066,12 +2067,12 @@ Securely encrypted under Fintech AES-256 standard.`;
                         justifyContent: 'center',
                         gap: '0.85rem',
                         backgroundColor: '#090D14',
-                        position: (hasConnection && peerStreamObj) ? 'absolute' : 'relative',
+                        position: 'absolute',
                         top: 0,
                         left: 0,
                         right: 0,
                         bottom: 0,
-                        zIndex: 1
+                        zIndex: 2
                       }}>
                         <div style={{
                           width: '60px',
@@ -2509,10 +2510,10 @@ Securely encrypted under Fintech AES-256 standard.`;
             <span>ID: </span>
             <span style={{ color: 'white', fontWeight: 500 }}>{meetingId.slice(0, 8)}</span>
             <button 
-              onClick={handleCopyCredentials}
+              onClick={() => setShowMeetingInfo(!showMeetingInfo)}
               className="premium-btn premium-btn-secondary" 
               style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              title="Copy link and passcode to clipboard"
+              title="View meeting info and share"
             >
               Share
             </button>
