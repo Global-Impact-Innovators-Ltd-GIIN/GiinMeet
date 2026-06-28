@@ -1980,6 +1980,7 @@ function App() {
               currentUser={user}
               initialVideoState={activeCallVideoState}
               isP2PCall={isP2PCall}
+              isHost={meetingHistory.some(m => m.id === activeMeetingId && (m.host === 'You' || m.host === user?.name))}
             />
           )}
 

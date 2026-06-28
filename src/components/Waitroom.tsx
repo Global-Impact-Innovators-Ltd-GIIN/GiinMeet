@@ -32,6 +32,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const [displayName, setDisplayName] = useState(user?.name || '');
   const [participantId, setParticipantId] = useState<string>('');
   const [waitingStatus, setWaitingStatus] = useState<'Waiting' | 'Admitted' | 'Declined' | 'None'>('None');
+  const [guestKey] = useState(() => user?.id || 'guest-' + Math.random().toString(36).substring(2, 11));
 
   // Load meeting details on mount
   useEffect(() => {
@@ -61,17 +62,21 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     fetchDetails();
   }, [meetingId, initialPasscode, user]);
 
-  // Real-time waiting room status checking with fallback polling for resilience
+  // Real-time waiting room status checking with fallback polling and instant broadcast channel
   useEffect(() => {
-    if (!participantId || waitingStatus !== 'Waiting') return;
+    if (waitingStatus !== 'Waiting') return;
 
+    let active = true;
+
+    // 1. Database fallback checking (if participantId is available)
     const checkStatus = async () => {
+      if (!participantId || !active) return;
       try {
         const status = await mockAuth.checkParticipantStatus(participantId);
-        if (status === 'Admitted') {
+        if (status === 'Admitted' && active) {
           setWaitingStatus('Admitted');
           onAdmitted(meetingDetails?.title || 'GIIN MEET Call', participantId, displayName);
-        } else if (status === 'Declined') {
+        } else if (status === 'Declined' && active) {
           setWaitingStatus('Declined');
           onDeclined();
         }
@@ -80,45 +85,54 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       }
     };
 
-    // Check status immediately
-    checkStatus();
+    if (participantId) {
+      checkStatus();
+    }
 
-    // Subscribe to realtime status update broadcast for the current participant
-    const channel = supabase
-      .channel(`waitroom-status-${participantId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'meeting_participants',
-          filter: `id=eq.${participantId}`
-        },
-        (payload: any) => {
-          const newStatus = payload.new?.status;
-          if (newStatus === 'Admitted') {
+    // 2. Instant Broadcast Channel subscription
+    const waitChannel = supabase.channel(`sig-webrtc-${meetingId}`);
+    
+    waitChannel
+      .on('broadcast', { event: 'waitroom-response' }, (payload: any) => {
+        const data = payload.payload;
+        if (data.targetKey === guestKey || (participantId && data.targetKey === participantId)) {
+          if (data.status === 'Admitted' && active) {
             setWaitingStatus('Admitted');
-            onAdmitted(meetingDetails?.title || 'GIIN MEET Call', participantId, displayName);
-          } else if (newStatus === 'Declined') {
+            onAdmitted(meetingDetails?.title || 'GIIN MEET Call', data.targetKey, displayName);
+          } else if (data.status === 'Declined' && active) {
             setWaitingStatus('Declined');
             onDeclined();
           }
         }
-      )
-      .subscribe((status, err) => {
-        if (status !== 'SUBSCRIBED') {
-          console.warn('[Waitroom Realtime] Subscription status:', status, err);
+      })
+      .subscribe();
+
+    // 3. Broadcast presence request to host every 2 seconds
+    const broadcastInterval = setInterval(() => {
+      waitChannel.send({
+        type: 'broadcast',
+        event: 'waitroom-request',
+        payload: {
+          senderKey: guestKey,
+          name: displayName
         }
       });
+    }, 2000);
 
-    // Standby polling fallback every 4 seconds
-    const interval = setInterval(checkStatus, 4000);
+    // Standby database polling fallback every 4 seconds
+    const pollInterval = setInterval(() => {
+      if (participantId) {
+        checkStatus();
+      }
+    }, 4000);
 
     return () => {
-      supabase.removeChannel(channel);
-      clearInterval(interval);
+      active = false;
+      supabase.removeChannel(waitChannel);
+      clearInterval(broadcastInterval);
+      clearInterval(pollInterval);
     };
-  }, [participantId, waitingStatus, meetingDetails, displayName, onAdmitted, onDeclined]);
+  }, [participantId, waitingStatus, meetingDetails, displayName, onAdmitted, onDeclined, guestKey, meetingId]);
 
   // Handle Passcode Validation
   const handleVerifyPasscode = (e: React.FormEvent) => {
@@ -141,16 +155,13 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     if (!name.trim()) return;
     setLoading(true);
     try {
+      setWaitingStatus('Waiting');
       const data = await mockAuth.joinMeetingRoom(meetingId, name, user?.id);
       if (data) {
         setParticipantId(data.id);
-        setWaitingStatus('Waiting');
-      } else {
-        setErrorMsg('Unable to enter waitroom at this time.');
       }
     } catch (err) {
-      console.error(err);
-      setErrorMsg('Network error trying to request admittance.');
+      console.warn('Database waitroom join failed, running in pure broadcast mode:', err);
     } finally {
       setLoading(false);
     }

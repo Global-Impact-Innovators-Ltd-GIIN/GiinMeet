@@ -138,6 +138,7 @@ interface MeetingRoomProps {
   currentUser: { id: string; name: string; email: string } | null;
   initialVideoState?: boolean;
   isP2PCall?: boolean;
+  isHost?: boolean;
 }
 
 export const MeetingRoom: React.FC<MeetingRoomProps> = ({ 
@@ -147,7 +148,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   onSaveWorkspaceData, 
   currentUser,
   initialVideoState = true,
-  isP2PCall = false
+  isP2PCall = false,
+  isHost = false
 }) => {
   const [showE2EEPannel, setShowE2EEPannel] = useState(false);
   const sigChannelRef = useRef<any>(null);
@@ -187,7 +189,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isMediaInitialized, setIsMediaInitialized] = useState(false);
   const [waitingList, setWaitingList] = useState<any[]>([]);
   const [initialNotes, setInitialNotes] = useState<string>('');
-  const isAdmin = currentUser && meetingAdminId === currentUser.id;
+  const isAdmin = isHost || (currentUser && meetingAdminId === currentUser.id);
 
   // WebRTC Peer States & Connections
   const myKey = currentUser?.id || 'guest-user-' + Math.random().toString(36).substring(2, 7);
@@ -672,6 +674,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const data = payload.payload;
         cleanupPeer(data.senderKey);
       })
+      .on('broadcast', { event: 'waitroom-request' }, (payload: any) => {
+        if (isAdmin) {
+          const data = payload.payload;
+          setWaitingList(prev => {
+            if (prev.some(p => p.id === data.senderKey)) return prev;
+            return [...prev, { id: data.senderKey, name: data.name }];
+          });
+        }
+      })
+      .on('broadcast', { event: 'end-meeting' }, () => {
+        if (!isAdmin) {
+          alert('The host has ended this meeting.');
+          onEndMeeting();
+        }
+      })
       .on('broadcast', { event: 'signal' }, (payload: any) => {
         const data = payload.payload;
         if (data.targetKey === myKey) {
@@ -939,7 +956,23 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Handle host admission action
   const handleAdmitParticipant = async (participantId: string, status: 'Admitted' | 'Declined') => {
     try {
-      await mockAuth.updateParticipantStatus(participantId, status);
+      // 1. Broadcast the decision instantly over the channel
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'waitroom-response',
+          payload: {
+            targetKey: participantId,
+            status: status
+          }
+        });
+      }
+
+      // 2. Update database in background if it's a real database record
+      if (!participantId.startsWith('guest-') && !participantId.startsWith('virtual-')) {
+        await mockAuth.updateParticipantStatus(participantId, status);
+      }
+      
       setWaitingList(prev => prev.filter(p => p.id !== participantId));
     } catch (err) {
       console.error(err);
@@ -1139,6 +1172,23 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           isScreenSharing
         }
       });
+    }
+  };
+
+  const handleLeaveOrEnd = () => {
+    if (isAdmin) {
+      if (confirm('Are you sure you want to end this meeting for all participants?')) {
+        if (sigChannelRef.current) {
+          sigChannelRef.current.send({
+            type: 'broadcast',
+            event: 'end-meeting',
+            payload: {}
+          });
+        }
+        onEndMeeting();
+      }
+    } else {
+      onEndMeeting();
     }
   };
 
@@ -2477,7 +2527,7 @@ Securely encrypted under Fintech AES-256 standard.`;
 
           {/* End Call / Hang Up */}
           <button 
-            onClick={onEndMeeting}
+            onClick={handleLeaveOrEnd}
             style={{
               width: '56px',
               height: '56px',
@@ -2694,7 +2744,7 @@ Securely encrypted under Fintech AES-256 standard.`;
             </button>
 
             <button 
-              onClick={onEndMeeting}
+              onClick={handleLeaveOrEnd}
               className="premium-btn premium-btn-danger"
               style={{
                 padding: '0.5rem 1.25rem',
