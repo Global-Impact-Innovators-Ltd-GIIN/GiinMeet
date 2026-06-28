@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
-  SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings
+  SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings,
+  MoreHorizontal
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -205,6 +206,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Host Meeting Settings States
   const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
   const [isChatLocked, setIsChatLocked] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [admittedKeys, setAdmittedKeys] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem(`admitted_keys_${meetingId}`);
@@ -2806,11 +2808,11 @@ Securely encrypted under Fintech AES-256 standard.`;
           </button>
         </div>
       ) : (
-        <div className="meeting-toolbar">
+        <div className="meeting-toolbar" style={{ position: 'relative' }}>
           {/* Left Side details */}
-          <div className="meeting-toolbar-left">
-            <span>ID: </span>
-            <span style={{ color: 'white', fontWeight: 500 }}>{meetingId.slice(0, 8)}</span>
+          <div className="meeting-toolbar-left" style={{ gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: </span>
+            <span style={{ color: 'white', fontWeight: 600, fontSize: '0.85rem' }}>{meetingId.slice(0, 8)}</span>
             <button 
               onClick={() => setShowMeetingInfo(!showMeetingInfo)}
               className="premium-btn premium-btn-secondary" 
@@ -2822,13 +2824,13 @@ Securely encrypted under Fintech AES-256 standard.`;
           </div>
 
           {/* Center Controls */}
-          <div className="meeting-toolbar-center">
+          <div className="meeting-toolbar-center" style={{ gap: '0.75rem', position: 'relative' }}>
             {/* Mute Audio */}
             <button 
               onClick={toggleMute}
               style={{
-                width: '44px',
-                height: '44px',
+                width: '40px',
+                height: '40px',
                 borderRadius: '50%',
                 backgroundColor: isMuted ? '#EF4444' : '#1E293B',
                 border: 'none',
@@ -2839,6 +2841,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                 cursor: 'pointer',
                 transition: 'all var(--transition-fast)'
               }}
+              title={isMuted ? "Unmute Mic" : "Mute Mic"}
             >
               {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
             </button>
@@ -2847,8 +2850,8 @@ Securely encrypted under Fintech AES-256 standard.`;
             <button 
               onClick={toggleVideo}
               style={{
-                width: '44px',
-                height: '44px',
+                width: '40px',
+                height: '40px',
                 borderRadius: '50%',
                 backgroundColor: !isVideoOn ? '#EF4444' : '#1E293B',
                 border: 'none',
@@ -2859,6 +2862,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                 cursor: 'pointer',
                 transition: 'all var(--transition-fast)'
               }}
+              title={isVideoOn ? "Turn Camera Off" : "Turn Camera On"}
             >
               {isVideoOn ? <VideoIcon size={18} /> : <VideoOff size={18} />}
             </button>
@@ -2873,8 +2877,8 @@ Securely encrypted under Fintech AES-256 standard.`;
                 }
               }}
               style={{
-                width: '44px',
-                height: '44px',
+                width: '40px',
+                height: '40px',
                 borderRadius: '50%',
                 backgroundColor: isScreenSharing ? 'var(--color-accent)' : '#1E293B',
                 border: 'none',
@@ -2895,8 +2899,8 @@ Securely encrypted under Fintech AES-256 standard.`;
               <button 
                 onClick={() => setIsAnnotating(!isAnnotating)}
                 style={{
-                  width: '44px',
-                  height: '44px',
+                  width: '40px',
+                  height: '40px',
                   borderRadius: '50%',
                   backgroundColor: isAnnotating ? 'var(--color-primary)' : '#1E293B',
                   border: isAnnotating ? '1px solid var(--color-accent)' : 'none',
@@ -2913,20 +2917,14 @@ Securely encrypted under Fintech AES-256 standard.`;
               </button>
             )}
 
-            {/* Simulate Colleague Share */}
+            {/* More Options Dropdown Toggle */}
             <button 
-              onClick={() => {
-                const nextVal = !isColleagueSharing;
-                setIsColleagueSharing(nextVal);
-                if (nextVal) {
-                  setIsScreenSharing(false);
-                }
-              }}
+              onClick={() => setShowMoreMenu(!showMoreMenu)}
               style={{
-                width: '44px',
-                height: '44px',
+                width: '40px',
+                height: '40px',
                 borderRadius: '50%',
-                backgroundColor: isColleagueSharing ? 'var(--color-secondary)' : '#1E293B',
+                backgroundColor: showMoreMenu ? 'rgba(255, 255, 255, 0.15)' : '#1E293B',
                 border: 'none',
                 display: 'flex',
                 alignItems: 'center',
@@ -2935,36 +2933,119 @@ Securely encrypted under Fintech AES-256 standard.`;
                 cursor: 'pointer',
                 transition: 'all var(--transition-fast)'
               }}
-              title="Simulate Remote Share"
+              title="More Options"
             >
-              <Users size={18} />
+              <MoreHorizontal size={18} />
             </button>
+
+            {/* Floating More Options Menu */}
+            {showMoreMenu && (
+              <>
+                <div 
+                  onClick={() => setShowMoreMenu(false)} 
+                  style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 140 }}
+                />
+                <div style={{
+                  position: 'absolute',
+                  bottom: '50px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                  backdropFilter: 'blur(16px)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '8px',
+                  padding: '0.5rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem',
+                  zIndex: 150,
+                  width: '220px',
+                  boxShadow: 'var(--shadow-premium)'
+                }}>
+                  {/* Workspace / Notes */}
+                  <button 
+                    onClick={() => {
+                      setActivePanel(activePanel === 'workspace' ? 'none' : 'workspace');
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: activePanel === 'workspace' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Edit2 size={16} />
+                    <span>Workspace Notes</span>
+                  </button>
+
+                  {/* Host Controls (if Admin) */}
+                  {isAdmin && (
+                    <button 
+                      onClick={() => {
+                        setActivePanel(activePanel === 'host-settings' ? 'none' : 'host-settings');
+                        setShowMoreMenu(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        backgroundColor: activePanel === 'host-settings' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                        border: 'none',
+                        padding: '0.6rem 0.85rem',
+                        borderRadius: '6px',
+                        color: 'white',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                        textAlign: 'left'
+                      }}
+                    >
+                      <Settings size={16} />
+                      <span>Host Controls</span>
+                    </button>
+                  )}
+
+                  {/* Simulate Remote Share */}
+                  <button 
+                    onClick={() => {
+                      const nextVal = !isColleagueSharing;
+                      setIsColleagueSharing(nextVal);
+                      if (nextVal) {
+                        setIsScreenSharing(false);
+                      }
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: isColleagueSharing ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Users size={16} />
+                    <span>Simulate Remote Share</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Right Side Options & Leave */}
-          <div className="meeting-toolbar-right">
-            {isAdmin && (
-              <button 
-                onClick={() => setActivePanel(activePanel === 'host-settings' ? 'none' : 'host-settings')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  backgroundColor: activePanel === 'host-settings' ? 'rgba(112, 130, 190, 0.2)' : 'transparent',
-                  border: '1px solid #1E293B',
-                  padding: '0.5rem 0.85rem',
-                  borderRadius: 'var(--radius-sm)',
-                  color: activePanel === 'host-settings' ? 'var(--color-accent)' : 'white',
-                  fontSize: '0.85rem',
-                  cursor: 'pointer'
-                }}
-                title="Host Controls & Settings"
-              >
-                <Settings size={16} />
-                <span className="hide-mobile-text">Host Controls</span>
-              </button>
-            )}
-
+          <div className="meeting-toolbar-right" style={{ gap: '0.5rem' }}>
             <button 
               onClick={() => setActivePanel(activePanel === 'participants' ? 'none' : 'participants')}
               style={{
@@ -2973,35 +3054,16 @@ Securely encrypted under Fintech AES-256 standard.`;
                 gap: '0.4rem',
                 backgroundColor: activePanel === 'participants' ? 'rgba(112, 130, 190, 0.2)' : 'transparent',
                 border: '1px solid #1E293B',
-                padding: '0.5rem 0.85rem',
+                padding: '0.45rem 0.75rem',
                 borderRadius: 'var(--radius-sm)',
                 color: activePanel === 'participants' ? 'var(--color-accent)' : 'white',
-                fontSize: '0.85rem',
-                cursor: 'pointer'
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                height: '36px'
               }}
             >
-              <Users size={16} />
+              <Users size={15} />
               <span className="hide-mobile-text">Participants</span>
-            </button>
-
-            <button 
-              onClick={() => setActivePanel(activePanel === 'workspace' ? 'none' : 'workspace')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                backgroundColor: activePanel === 'workspace' ? 'rgba(112, 130, 190, 0.2)' : 'transparent',
-                border: '1px solid #1E293B',
-                padding: '0.5rem 0.85rem',
-                borderRadius: 'var(--radius-sm)',
-                color: activePanel === 'workspace' ? 'var(--color-accent)' : 'white',
-                fontSize: '0.85rem',
-                cursor: 'pointer'
-              }}
-              title="Meeting Workspace Notes"
-            >
-              <Edit2 size={16} />
-              <span className="hide-mobile-text">Workspace</span>
             </button>
 
             <button 
@@ -3012,14 +3074,15 @@ Securely encrypted under Fintech AES-256 standard.`;
                 gap: '0.4rem',
                 backgroundColor: activePanel === 'chat' ? 'rgba(112, 130, 190, 0.2)' : 'transparent',
                 border: '1px solid #1E293B',
-                padding: '0.5rem 0.85rem',
+                padding: '0.45rem 0.75rem',
                 borderRadius: 'var(--radius-sm)',
                 color: activePanel === 'chat' ? 'var(--color-accent)' : 'white',
-                fontSize: '0.85rem',
-                cursor: 'pointer'
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                height: '36px'
               }}
             >
-              <MessageSquare size={16} />
+              <MessageSquare size={15} />
               <span className="hide-mobile-text">Chat</span>
             </button>
 
@@ -3027,15 +3090,16 @@ Securely encrypted under Fintech AES-256 standard.`;
               onClick={handleLeaveOrEnd}
               className="premium-btn premium-btn-danger"
               style={{
-                padding: '0.5rem 1.25rem',
+                padding: '0.45rem 1rem',
                 borderRadius: 'var(--radius-sm)',
-                fontSize: '0.85rem',
+                fontSize: '0.8rem',
                 fontWeight: 600,
                 gap: '0.35rem',
-                backgroundColor: '#EF4444'
+                backgroundColor: '#EF4444',
+                height: '36px'
               }}
             >
-              <PhoneOff size={16} />
+              <PhoneOff size={15} />
               <span className="hide-mobile-text">{isAdmin ? 'End for All' : 'Leave Call'}</span>
             </button>
           </div>
