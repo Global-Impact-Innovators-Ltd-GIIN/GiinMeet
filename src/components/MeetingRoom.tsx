@@ -935,8 +935,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             }
           });
 
-          // Start calling tone loop until a peer joins
-          startRingSound();
+          // Start calling tone loop until a peer joins (only for P2P calls)
+          if (isP2PCall) {
+            startRingSound();
+          }
         }
       });
 
@@ -2174,6 +2176,16 @@ Securely encrypted under Fintech AES-256 standard.`;
                 return (
                   <div style={{ width: '100%', height: '100%', position: 'relative' }}>
                     {hasConnection && peerStreamObj && (
+                      <audio
+                        ref={el => {
+                          if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
+                            el.srcObject = peerStreamObj;
+                          }
+                        }}
+                        autoPlay
+                      />
+                    )}
+                    {hasConnection && peerStreamObj && pState.isVideoOn && (
                       <video
                         ref={el => {
                           if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
@@ -2182,6 +2194,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                         }}
                         autoPlay
                         playsInline
+                        muted
                         style={{
                           width: '100%',
                           height: '100%',
@@ -2771,26 +2784,37 @@ Securely encrypted under Fintech AES-256 standard.`;
                   }}>
                     {hasConnection && peerStreamObj && (
                       <>
-                        <video
+                        <audio
                           ref={el => {
                             if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
                               el.srcObject = peerStreamObj;
                             }
                           }}
                           autoPlay
-                          playsInline
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            zIndex: 1,
-                            filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
-                          }}
                         />
-                        {pState.isStudioLightEnabled && (
+                        {pState.isVideoOn && (
+                          <video
+                            ref={el => {
+                              if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
+                                el.srcObject = peerStreamObj;
+                              }
+                            }}
+                            autoPlay
+                            playsInline
+                            muted
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              zIndex: 1,
+                              filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
+                            }}
+                          />
+                        )}
+                        {pState.isStudioLightEnabled && pState.isVideoOn && (
                           <div style={{
                             position: 'absolute',
                             top: 0,

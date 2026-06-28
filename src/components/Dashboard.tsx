@@ -67,8 +67,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setJoinError('Please enter a valid meeting code.');
       return;
     }
-    // Simulate joining
-    onStartMeeting(`Meeting: ${meetingCode}`);
+    // Join the existing meeting by code
+    onStartMeeting(undefined, undefined, true, meetingCode.trim());
     setShowJoinModal(false);
     setMeetingCode('');
   };
