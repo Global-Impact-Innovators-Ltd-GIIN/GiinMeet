@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
   SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings,
-  MoreHorizontal
+  MoreHorizontal, BarChart3, Smile, Volume2, Info
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -177,7 +177,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isAnnotating, setIsAnnotating] = useState(false);
   const [isColleagueSharing, setIsColleagueSharing] = useState(false);
-  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings'>('none');
+  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings' | 'polls' | 'filters' | 'soundboard' | 'info'>('none');
   const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
   const [showMeetingInfo, setShowMeetingInfo] = useState(false);
 
@@ -215,6 +215,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       return new Set();
     }
   });
+
+  // New Interactive States (Polls, Soundboard, Video Filters)
+  const [polls, setPolls] = useState<any[]>([]);
+  const [userVotes, setUserVotes] = useState<{ [pollId: string]: number }>({});
+  const [newPollQuestion, setNewPollQuestion] = useState('');
+  const [newPollOptions, setNewPollOptions] = useState(['', '']);
+  const [videoFilter, setVideoFilter] = useState('none');
 
   // WebRTC Peer States & Connections
   const myKey = currentUser?.id || 'guest-user-' + Math.random().toString(36).substring(2, 7);
@@ -756,6 +763,59 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           }
           alert("The host has disabled everyone's video.");
         }
+      })
+      .on('broadcast', { event: 'play-sound' }, (payload: any) => {
+        const data = payload.payload;
+        playSynthesizedSound(data.soundType);
+      })
+      .on('broadcast', { event: 'launch-poll' }, (payload: any) => {
+        const data = payload.payload;
+        setPolls(prev => {
+          if (prev.some(p => p.id === data.poll.id)) return prev;
+          return [...prev, data.poll];
+        });
+      })
+      .on('broadcast', { event: 'vote-poll' }, (payload: any) => {
+        if (isAdmin) {
+          const data = payload.payload;
+          setPolls(prev => {
+            return prev.map(p => {
+              if (p.id === data.pollId) {
+                const votes = [...p.votes];
+                votes[data.optionIndex] = (votes[data.optionIndex] || 0) + 1;
+                
+                // Broadcast updated results back to everyone
+                if (sigChannelRef.current) {
+                  sigChannelRef.current.send({
+                    type: 'broadcast',
+                    event: 'update-poll-results',
+                    payload: {
+                      pollId: p.id,
+                      votes: votes
+                    }
+                  });
+                }
+                
+                return { ...p, votes };
+              }
+              return p;
+            });
+          });
+        }
+      })
+      .on('broadcast', { event: 'update-poll-results' }, (payload: any) => {
+        const data = payload.payload;
+        setPolls(prev => prev.map(p => p.id === data.pollId ? { ...p, votes: data.votes } : p));
+      })
+      .on('broadcast', { event: 'media-filter' }, (payload: any) => {
+        const data = payload.payload;
+        setPeerStates(prev => {
+          if (!prev[data.senderKey]) return prev;
+          return {
+            ...prev,
+            [data.senderKey]: { ...prev[data.senderKey], videoFilter: data.filter }
+          };
+        });
       })
       .on('broadcast', { event: 'signal' }, (payload: any) => {
         const data = payload.payload;
@@ -1363,6 +1423,143 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  const playSynthesizedSound = (type: string) => {
+    try {
+      const ctx = getAudioCtx();
+      const now = ctx.currentTime;
+      
+      if (type === 'bell') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(1760, now + 0.1);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 1.5);
+      } else if (type === 'applause') {
+        const bufferSize = ctx.sampleRate * 1.0;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 1000;
+        filter.Q.value = 1.0;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.0);
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+        noise.start(now);
+      } else if (type === 'horn') {
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc1.type = 'sawtooth';
+        osc2.type = 'triangle';
+        osc1.frequency.setValueAtTime(220, now);
+        osc1.frequency.linearRampToValueAtTime(440, now + 0.4);
+        osc2.frequency.setValueAtTime(225, now);
+        osc2.frequency.linearRampToValueAtTime(445, now + 0.4);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctx.destination);
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.6);
+        osc2.stop(now + 0.6);
+      } else if (type === 'alert') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(600, now);
+        gain.gain.setValueAtTime(0.08, now);
+        gain.gain.setValueAtTime(0, now + 0.15);
+        gain.gain.setValueAtTime(0.08, now + 0.25);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.5);
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const triggerSoundboard = (soundType: string) => {
+    playSynthesizedSound(soundType);
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'play-sound',
+        payload: { soundType }
+      });
+    }
+  };
+
+  const changeVideoFilter = (filter: string) => {
+    setVideoFilter(filter);
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'media-filter',
+        payload: {
+          senderKey: myKey,
+          filter
+        }
+      });
+    }
+  };
+
+  const handleCreatePoll = () => {
+    if (!newPollQuestion.trim()) return;
+    const cleanOptions = newPollOptions.filter(o => o.trim() !== '');
+    if (cleanOptions.length < 2) return;
+
+    const newPoll = {
+      id: 'poll-' + Math.random().toString(36).substring(2, 9),
+      question: newPollQuestion,
+      options: cleanOptions,
+      votes: cleanOptions.map(() => 0),
+      creatorId: currentUser?.id || myKey
+    };
+
+    setPolls(prev => [...prev, newPoll]);
+    setNewPollQuestion('');
+    setNewPollOptions(['', '']);
+
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'launch-poll',
+        payload: { poll: newPoll }
+      });
+    }
+  };
+
+  const handleVotePoll = (pollId: string, optionIndex: number) => {
+    setUserVotes(prev => ({ ...prev, [pollId]: optionIndex }));
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'vote-poll',
+        payload: { pollId, optionIndex }
+      });
+    }
+  };
+
   // Simulated Speaking status fluctuations (backup fallback)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1850,7 +2047,7 @@ Securely encrypted under Fintech AES-256 standard.`;
               transition: 'all 0.3s ease'
             }}>
               {isVideoOn && stream ? (
-                <video
+                <video 
                   ref={el => {
                     if (el && stream && el.srcObject !== stream) {
                       el.srcObject = stream;
@@ -1859,7 +2056,14 @@ Securely encrypted under Fintech AES-256 standard.`;
                   autoPlay
                   playsInline
                   muted
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    transform: 'scaleX(-1)',
+                    display: isVideoOn ? 'block' : 'none',
+                    filter: videoFilter === 'blur' ? 'blur(6px)' : videoFilter === 'sepia' ? 'sepia(0.8)' : videoFilter === 'grayscale' ? 'grayscale(1)' : videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'
+                  }}
                 />
               ) : (
                 <div style={{
@@ -2634,6 +2838,301 @@ Securely encrypted under Fintech AES-256 standard.`;
             </div>
           </div>
         )}
+        {activePanel === 'polls' && (
+          <div style={{
+            width: '300px',
+            borderLeft: '1px solid #1E293B',
+            backgroundColor: 'rgba(11, 15, 25, 0.95)',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: 'slide-in 0.2s ease',
+            zIndex: 5
+          }}>
+            <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Interactive Polls</h4>
+              <button 
+                onClick={() => setActivePanel('none')}
+                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {/* Host Poll Creator */}
+              {isAdmin && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>CREATE A POLL</span>
+                  <input 
+                    type="text" 
+                    placeholder="Ask a question..."
+                    value={newPollQuestion}
+                    onChange={(e) => setNewPollQuestion(e.target.value)}
+                    className="premium-input"
+                    style={{ fontSize: '0.8rem', height: '36px' }}
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {newPollOptions.map((opt, idx) => (
+                      <input 
+                        key={idx}
+                        type="text" 
+                        placeholder={`Option ${idx + 1}`}
+                        value={opt}
+                        onChange={(e) => {
+                          const copy = [...newPollOptions];
+                          copy[idx] = e.target.value;
+                          setNewPollOptions(copy);
+                        }}
+                        className="premium-input"
+                        style={{ fontSize: '0.8rem', height: '32px' }}
+                      />
+                    ))}
+                    <button 
+                      onClick={() => setNewPollOptions([...newPollOptions, ''])}
+                      style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: '0.75rem', textAlign: 'left', cursor: 'pointer', padding: 0 }}
+                    >
+                      + Add Option
+                    </button>
+                  </div>
+                  <button 
+                    onClick={handleCreatePoll}
+                    className="premium-btn premium-btn-primary"
+                    style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', height: '36px' }}
+                  >
+                    Launch Poll
+                  </button>
+                </div>
+              )}
+
+              {/* Active Polls List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>ACTIVE POLLS</span>
+                {polls.length === 0 ? (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', display: 'block', padding: '1rem 0' }}>No active polls yet.</span>
+                ) : (
+                  polls.map(p => {
+                    const totalVotes = p.votes.reduce((a: number, b: number) => a + b, 0);
+                    const hasVoted = userVotes[p.id] !== undefined;
+
+                    return (
+                      <div key={p.id} style={{ padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{p.question}</span>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {p.options.map((opt: string, idx: number) => {
+                            const voteCount = p.votes[idx] || 0;
+                            const percent = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
+                            const isMyVote = userVotes[p.id] === idx;
+
+                            if (hasVoted) {
+                              return (
+                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                  <div className="flex-between" style={{ fontSize: '0.8rem' }}>
+                                    <span style={{ color: isMyVote ? 'var(--color-accent)' : 'white' }}>
+                                      {opt} {isMyVote && '✓'}
+                                    </span>
+                                    <span style={{ color: 'var(--text-muted)' }}>{voteCount} ({percent}%)</span>
+                                  </div>
+                                  <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                                    <div style={{ width: `${percent}%`, height: '100%', backgroundColor: isMyVote ? 'var(--color-accent)' : 'var(--color-primary)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                                  </div>
+                                </div>
+                              );
+                            } else {
+                              return (
+                                <button 
+                                  key={idx}
+                                  onClick={() => handleVotePoll(p.id, idx)}
+                                  className="premium-btn premium-btn-secondary"
+                                  style={{ width: '100%', justifyContent: 'flex-start', fontSize: '0.8rem', padding: '0.5rem 0.75rem' }}
+                                >
+                                  {opt}
+                                </button>
+                              );
+                            }
+                          })}
+                        </div>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total votes: {totalVotes}</span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activePanel === 'filters' && (
+          <div style={{
+            width: '300px',
+            borderLeft: '1px solid #1E293B',
+            backgroundColor: 'rgba(11, 15, 25, 0.95)',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: 'slide-in 0.2s ease',
+            zIndex: 5
+          }}>
+            <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Camera Filters</h4>
+              <button 
+                onClick={() => setActivePanel('none')}
+                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>CHOOSE A FILTER</span>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                {[
+                  { id: 'none', label: 'Normal' },
+                  { id: 'blur', label: 'Blur' },
+                  { id: 'sepia', label: 'Sepia' },
+                  { id: 'grayscale', label: 'B&W' },
+                  { id: 'warm', label: 'Warm' },
+                  { id: 'cyberpunk', label: 'Cyberpunk' }
+                ].map(f => (
+                  <button 
+                    key={f.id}
+                    onClick={() => changeVideoFilter(f.id)}
+                    className="premium-btn"
+                    style={{
+                      justifyContent: 'center',
+                      fontSize: '0.8rem',
+                      height: '50px',
+                      border: videoFilter === f.id ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
+                      backgroundColor: videoFilter === f.id ? 'rgba(250,189,2,0.1)' : 'rgba(255,255,255,0.02)',
+                      color: videoFilter === f.id ? 'var(--color-accent)' : 'white'
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activePanel === 'soundboard' && (
+          <div style={{
+            width: '300px',
+            borderLeft: '1px solid #1E293B',
+            backgroundColor: 'rgba(11, 15, 25, 0.95)',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: 'slide-in 0.2s ease',
+            zIndex: 5
+          }}>
+            <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>React Soundboard</h4>
+              <button 
+                onClick={() => setActivePanel('none')}
+                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRIGGER SOUND EFFECTS</span>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                {[
+                  { id: 'applause', label: '👏 Applause' },
+                  { id: 'bell', label: '🔔 Bell Chime' },
+                  { id: 'horn', label: '🎉 Party Horn' },
+                  { id: 'alert', label: '⚠️ Warning' }
+                ].map(s => (
+                  <button 
+                    key={s.id}
+                    onClick={() => triggerSoundboard(s.id)}
+                    className="premium-btn premium-btn-secondary"
+                    style={{
+                      justifyContent: 'center',
+                      fontSize: '0.8rem',
+                      height: '60px',
+                      backgroundColor: 'rgba(255,255,255,0.02)'
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activePanel === 'info' && (
+          <div style={{
+            width: '300px',
+            borderLeft: '1px solid #1E293B',
+            backgroundColor: 'rgba(11, 15, 25, 0.95)',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: 'slide-in 0.2s ease',
+            zIndex: 5
+          }}>
+            <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Meeting Credentials</h4>
+              <button 
+                onClick={() => setActivePanel('none')}
+                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>MEETING TITLE</span>
+                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'white' }}>{meetingTitle}</span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>MEETING ID</span>
+                <div className="flex-between" style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '0.5rem 0.75rem', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                  <code style={{ fontSize: '0.8rem', color: 'var(--color-accent)' }}>{meetingId}</code>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(meetingId);
+                      setCopiedInfo('details');
+                      setTimeout(() => setCopiedInfo(null), 2000);
+                    }}
+                    style={{ background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer' }}
+                  >
+                    {copiedInfo === 'details' ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>PASSCODE</span>
+                <div className="flex-between" style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '0.5rem 0.75rem', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                  <code style={{ fontSize: '0.8rem', color: 'white', letterSpacing: '0.1em' }}>{passcode}</code>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>INVITATION LINK</span>
+                <button 
+                  onClick={() => {
+                    const inviteUrl = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
+                    navigator.clipboard.writeText(inviteUrl);
+                    setCopiedInfo('link');
+                    setTimeout(() => setCopiedInfo(null), 2000);
+                  }}
+                  className="premium-btn premium-btn-accent"
+                  style={{ width: '100%', justifyContent: 'center', gap: '0.5rem', fontSize: '0.8rem' }}
+                >
+                  {copiedInfo === 'link' ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copiedInfo === 'link' ? 'Copied Link!' : 'Copy Share Link'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {activePanel === 'workspace' && (
           <WorkspacePanel 
             meetingId={meetingId}
@@ -2962,6 +3461,30 @@ Securely encrypted under Fintech AES-256 standard.`;
                   width: '220px',
                   boxShadow: 'var(--shadow-premium)'
                 }}>
+                  {/* Meeting Info */}
+                  <button 
+                    onClick={() => {
+                      setActivePanel(activePanel === 'info' ? 'none' : 'info');
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: activePanel === 'info' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Info size={16} />
+                    <span>Meeting Info</span>
+                  </button>
+
                   {/* Workspace / Notes */}
                   <button 
                     onClick={() => {
@@ -2984,6 +3507,78 @@ Securely encrypted under Fintech AES-256 standard.`;
                   >
                     <Edit2 size={16} />
                     <span>Workspace Notes</span>
+                  </button>
+
+                  {/* Interactive Polls */}
+                  <button 
+                    onClick={() => {
+                      setActivePanel(activePanel === 'polls' ? 'none' : 'polls');
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: activePanel === 'polls' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <BarChart3 size={16} />
+                    <span>Interactive Polls</span>
+                  </button>
+
+                  {/* Camera Filters */}
+                  <button 
+                    onClick={() => {
+                      setActivePanel(activePanel === 'filters' ? 'none' : 'filters');
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: activePanel === 'filters' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Smile size={16} />
+                    <span>Camera Filters</span>
+                  </button>
+
+                  {/* React Soundboard */}
+                  <button 
+                    onClick={() => {
+                      setActivePanel(activePanel === 'soundboard' ? 'none' : 'soundboard');
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: activePanel === 'soundboard' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Volume2 size={16} />
+                    <span>Soundboard Reacts</span>
                   </button>
 
                   {/* Host Controls (if Admin) */}
