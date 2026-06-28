@@ -189,7 +189,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isMediaInitialized, setIsMediaInitialized] = useState(false);
   const [waitingList, setWaitingList] = useState<any[]>([]);
   const [initialNotes, setInitialNotes] = useState<string>('');
-  const isAdmin = isHost || (currentUser && meetingAdminId === currentUser.id);
+  const [localAdminId, setLocalAdminId] = useState<string>('');
+
+  useEffect(() => {
+    if (meetingAdminId) {
+      setLocalAdminId(meetingAdminId);
+    }
+  }, [meetingAdminId]);
+
+  const isAdmin = isHost || (currentUser && localAdminId === currentUser.id);
+
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [selectedNewAdminId, setSelectedNewAdminId] = useState<string>('');
 
   // WebRTC Peer States & Connections
   const myKey = currentUser?.id || 'guest-user-' + Math.random().toString(36).substring(2, 7);
@@ -689,6 +700,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           onEndMeeting();
         }
       })
+      .on('broadcast', { event: 'designate-admin' }, (payload: any) => {
+        const data = payload.payload;
+        setLocalAdminId(data.newAdminId);
+        if (currentUser && data.newAdminId === currentUser.id) {
+          alert('You have been designated as the meeting host.');
+        }
+      })
       .on('broadcast', { event: 'signal' }, (payload: any) => {
         const data = payload.payload;
         if (data.targetKey === myKey) {
@@ -1177,18 +1195,51 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const handleLeaveOrEnd = () => {
     if (isAdmin) {
-      if (confirm('Are you sure you want to end this meeting for all participants?')) {
-        if (sigChannelRef.current) {
-          sigChannelRef.current.send({
-            type: 'broadcast',
-            event: 'end-meeting',
-            payload: {}
-          });
-        }
+      if (participants.length > 0) {
+        setShowLeaveModal(true);
+      } else {
         onEndMeeting();
       }
     } else {
       onEndMeeting();
+    }
+  };
+
+  const handleEndForAll = () => {
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'end-meeting',
+        payload: {}
+      });
+    }
+    setShowLeaveModal(false);
+    onEndMeeting();
+  };
+
+  const handleTransferAndLeave = async () => {
+    if (!selectedNewAdminId) return;
+
+    try {
+      // 1. Broadcast the designation to everyone
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'designate-admin',
+          payload: {
+            newAdminId: selectedNewAdminId
+          }
+        });
+      }
+
+      // 2. Update database in background
+      await mockAuth.changeMeetingAdmin(meetingId, selectedNewAdminId);
+      
+      // 3. Leave the meeting
+      setShowLeaveModal(false);
+      onEndMeeting();
+    } catch (err) {
+      console.error('Failed to transfer host role:', err);
     }
   };
 
@@ -2834,6 +2885,115 @@ Securely encrypted under Fintech AES-256 standard.`;
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.8rem' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981' }} />
               <span>Zero-Knowledge Verification Passed</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Leave Meeting Modal for Admin */}
+      {showLeaveModal && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.75)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 300,
+          backdropFilter: 'blur(8px)'
+        }}>
+          <div className="glass-panel" style={{
+            width: '400px',
+            padding: '2rem',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            boxShadow: 'var(--shadow-premium)',
+            animation: 'pop-in 0.25s ease'
+          }}>
+            <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: 'white', fontFamily: 'var(--font-heading)' }}>
+              Leave Meeting
+            </h3>
+            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+              As the host, you cannot leave the meeting without either ending the call for everyone or designating another participant to be the new host.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+                DESIGNATE NEW HOST TO LEAVE
+              </label>
+              <select
+                value={selectedNewAdminId}
+                onChange={(e) => setSelectedNewAdminId(e.target.value)}
+                className="premium-input"
+                style={{
+                  width: '100%',
+                  height: '40px',
+                  backgroundColor: 'rgba(0,0,0,0.2)',
+                  color: 'white',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '6px',
+                  padding: '0 0.5rem',
+                  fontSize: '0.85rem'
+                }}
+              >
+                <option value="">-- Select a participant --</option>
+                {participants.map(p => (
+                  <option key={p.id} value={p.userId || p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <button
+                onClick={handleTransferAndLeave}
+                disabled={!selectedNewAdminId}
+                className="premium-btn premium-btn-primary"
+                style={{
+                  width: '100%',
+                  justifyContent: 'center',
+                  height: '40px',
+                  opacity: selectedNewAdminId ? 1 : 0.5,
+                  cursor: selectedNewAdminId ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Transfer Host & Leave
+              </button>
+              
+              <button
+                onClick={handleEndForAll}
+                className="premium-btn premium-btn-danger"
+                style={{
+                  width: '100%',
+                  justifyContent: 'center',
+                  height: '40px',
+                  backgroundColor: '#EF4444'
+                }}
+              >
+                End Meeting for All
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowLeaveModal(false);
+                  setSelectedNewAdminId('');
+                }}
+                className="premium-btn premium-btn-secondary"
+                style={{
+                  width: '100%',
+                  justifyContent: 'center',
+                  height: '40px'
+                }}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
