@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
-  SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check
+  SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -176,7 +176,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isAnnotating, setIsAnnotating] = useState(false);
   const [isColleagueSharing, setIsColleagueSharing] = useState(false);
-  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace'>('none');
+  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings'>('none');
   const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
   const [showMeetingInfo, setShowMeetingInfo] = useState(false);
 
@@ -201,6 +201,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [selectedNewAdminId, setSelectedNewAdminId] = useState<string>('');
+
+  // Host Meeting Settings States
+  const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
+  const [isChatLocked, setIsChatLocked] = useState(false);
+  const [admittedKeys, setAdmittedKeys] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(`admitted_keys_${meetingId}`);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch (e) {
+      return new Set();
+    }
+  });
 
   // WebRTC Peer States & Connections
   const myKey = currentUser?.id || 'guest-user-' + Math.random().toString(36).substring(2, 7);
@@ -688,6 +700,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       .on('broadcast', { event: 'waitroom-request' }, (payload: any) => {
         if (isAdmin) {
           const data = payload.payload;
+          
+          const isPreviouslyAdmitted = admittedKeys.has(data.senderKey) || 
+            JSON.parse(localStorage.getItem(`admitted_keys_${meetingId}`) || '[]').includes(data.senderKey);
+
+          if (!isWaitingRoomEnabled || isPreviouslyAdmitted) {
+            handleAdmitParticipant(data.senderKey, 'Admitted');
+            return;
+          }
+
           setWaitingList(prev => {
             if (prev.some(p => p.id === data.senderKey)) return prev;
             return [...prev, { id: data.senderKey, name: data.name }];
@@ -705,6 +726,33 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setLocalAdminId(data.newAdminId);
         if (currentUser && data.newAdminId === currentUser.id) {
           alert('You have been designated as the meeting host.');
+        }
+      })
+      .on('broadcast', { event: 'settings-update' }, (payload: any) => {
+        const data = payload.payload;
+        if (data.isWaitingRoomEnabled !== undefined) {
+          setIsWaitingRoomEnabled(data.isWaitingRoomEnabled);
+        }
+        if (data.isChatLocked !== undefined) {
+          setIsChatLocked(data.isChatLocked);
+        }
+      })
+      .on('broadcast', { event: 'mute-all' }, () => {
+        if (!isAdmin) {
+          setIsMuted(true);
+          if (localAudioTrackRef.current) {
+            localAudioTrackRef.current.enabled = false;
+          }
+          alert('The host has muted everyone.');
+        }
+      })
+      .on('broadcast', { event: 'disable-video-all' }, () => {
+        if (!isAdmin) {
+          setIsVideoOn(false);
+          if (localVideoTrackRef.current) {
+            localVideoTrackRef.current.enabled = false;
+          }
+          alert("The host has disabled everyone's video.");
         }
       })
       .on('broadcast', { event: 'signal' }, (payload: any) => {
@@ -984,6 +1032,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             status: status
           }
         });
+        // Also send current settings so the new participant is in sync!
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'settings-update',
+          payload: {
+            isWaitingRoomEnabled,
+            isChatLocked
+          }
+        });
       }
 
       // 2. Update database in background if it's a real database record
@@ -991,6 +1048,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         await mockAuth.updateParticipantStatus(participantId, status);
       }
       
+      if (status === 'Admitted') {
+        setAdmittedKeys(prev => {
+          const next = new Set(prev);
+          next.add(participantId);
+          try {
+            localStorage.setItem(`admitted_keys_${meetingId}`, JSON.stringify([...next]));
+          } catch (e) {}
+          return next;
+        });
+      }
+
       setWaitingList(prev => prev.filter(p => p.id !== participantId));
     } catch (err) {
       console.error(err);
@@ -1240,6 +1308,56 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       onEndMeeting();
     } catch (err) {
       console.error('Failed to transfer host role:', err);
+    }
+  };
+
+  const handleToggleWaitingRoom = (enabled: boolean) => {
+    setIsWaitingRoomEnabled(enabled);
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'settings-update',
+        payload: {
+          isWaitingRoomEnabled: enabled,
+          isChatLocked
+        }
+      });
+    }
+  };
+
+  const handleToggleChatLock = (locked: boolean) => {
+    setIsChatLocked(locked);
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'settings-update',
+        payload: {
+          isWaitingRoomEnabled,
+          isChatLocked: locked
+        }
+      });
+    }
+  };
+
+  const handleMuteAll = () => {
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'mute-all',
+        payload: {}
+      });
+      alert('Mute all request sent.');
+    }
+  };
+
+  const handleDisableVideoAll = () => {
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'disable-video-all',
+        payload: {}
+      });
+      alert('Disable video request sent.');
     }
   };
 
@@ -2327,31 +2445,38 @@ Securely encrypted under Fintech AES-256 standard.`;
             <form onSubmit={sendChatMessage} style={{ padding: '0.75rem', borderTop: '1px solid #1E293B', display: 'flex', gap: '0.5rem' }}>
               <input 
                 type="text" 
-                placeholder="Send message to everyone..." 
+                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : "Send message to everyone..."} 
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
+                disabled={isChatLocked && !isAdmin}
                 style={{
                   flex: 1,
                   padding: '0.5rem 0.75rem',
                   borderRadius: '4px',
-                  backgroundColor: '#090D16',
+                  backgroundColor: isChatLocked && !isAdmin ? '#1E293B' : '#090D16',
                   border: '1px solid #1E293B',
                   color: 'white',
-                  fontSize: '0.85rem'
+                  fontSize: '0.85rem',
+                  cursor: isChatLocked && !isAdmin ? 'not-allowed' : 'text'
                 }}
               />
-              <button type="submit" style={{
-                background: 'var(--color-primary)',
-                border: 'none',
-                borderRadius: '4px',
-                width: '34px',
-                height: '34px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                cursor: 'pointer'
-              }}>
+              <button 
+                type="submit" 
+                disabled={isChatLocked && !isAdmin}
+                style={{
+                  background: isChatLocked && !isAdmin ? '#475569' : 'var(--color-primary)',
+                  border: 'none',
+                  borderRadius: '4px',
+                  width: '34px',
+                  height: '34px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: isChatLocked && !isAdmin ? 'not-allowed' : 'pointer',
+                  opacity: isChatLocked && !isAdmin ? 0.6 : 1
+                }}
+              >
                 <SendHorizontal size={16} />
               </button>
             </form>
@@ -2422,6 +2547,88 @@ Securely encrypted under Fintech AES-256 standard.`;
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+        {activePanel === 'host-settings' && isAdmin && (
+          <div style={{
+            width: '300px',
+            borderLeft: '1px solid #1E293B',
+            backgroundColor: 'rgba(11, 15, 25, 0.95)',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: 'slide-in 0.2s ease',
+            zIndex: 5
+          }}>
+            <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Host Controls</h4>
+              <button 
+                onClick={() => setActivePanel('none')}
+                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {/* Toggle Waiting Room */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Waiting Room</span>
+                  <input 
+                    type="checkbox" 
+                    checked={isWaitingRoomEnabled} 
+                    onChange={(e) => handleToggleWaitingRoom(e.target.checked)}
+                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                  />
+                </div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  When enabled, new participants must be approved by you before entering the meeting.
+                </span>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* Toggle In-Call Chat */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Lock In-Call Chat</span>
+                  <input 
+                    type="checkbox" 
+                    checked={isChatLocked} 
+                    onChange={(e) => handleToggleChatLock(e.target.checked)}
+                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                  />
+                </div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  When locked, only the host can send messages. Other participants can only view.
+                </span>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* Global Audio/Video Actions */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Global Actions</span>
+                
+                <button 
+                  onClick={handleMuteAll}
+                  className="premium-btn premium-btn-secondary"
+                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '0.5rem' }}
+                >
+                  <MicOff size={14} style={{ marginRight: '4px' }} />
+                  Mute All Participants
+                </button>
+
+                <button 
+                  onClick={handleDisableVideoAll}
+                  className="premium-btn premium-btn-secondary"
+                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '0.5rem' }}
+                >
+                  <VideoOff size={14} style={{ marginRight: '4px' }} />
+                  Turn Off All Videos
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -2736,6 +2943,28 @@ Securely encrypted under Fintech AES-256 standard.`;
 
           {/* Right Side Options & Leave */}
           <div className="meeting-toolbar-right">
+            {isAdmin && (
+              <button 
+                onClick={() => setActivePanel(activePanel === 'host-settings' ? 'none' : 'host-settings')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  backgroundColor: activePanel === 'host-settings' ? 'rgba(112, 130, 190, 0.2)' : 'transparent',
+                  border: '1px solid #1E293B',
+                  padding: '0.5rem 0.85rem',
+                  borderRadius: 'var(--radius-sm)',
+                  color: activePanel === 'host-settings' ? 'var(--color-accent)' : 'white',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer'
+                }}
+                title="Host Controls & Settings"
+              >
+                <Settings size={16} />
+                <span className="hide-mobile-text">Host Controls</span>
+              </button>
+            )}
+
             <button 
               onClick={() => setActivePanel(activePanel === 'participants' ? 'none' : 'participants')}
               style={{

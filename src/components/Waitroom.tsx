@@ -34,6 +34,15 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const [waitingStatus, setWaitingStatus] = useState<'Waiting' | 'Admitted' | 'Declined' | 'None'>('None');
   const [guestKey] = useState(() => user?.id || 'guest-' + Math.random().toString(36).substring(2, 11));
 
+  // If already admitted once, bypass waitroom completely!
+  useEffect(() => {
+    if (localStorage.getItem(`admitted_meeting_${meetingId}`) === 'true') {
+      const savedTitle = localStorage.getItem(`admitted_meeting_title_${meetingId}`) || 'GIIN MEET Call';
+      const savedName = localStorage.getItem(`admitted_meeting_name_${meetingId}`) || displayName || user?.name || 'Guest';
+      onAdmitted(savedTitle, user?.id || 'guest-' + Math.random().toString(36).substring(2, 11), savedName);
+    }
+  }, [meetingId, onAdmitted, user]);
+
   // Load meeting details on mount
   useEffect(() => {
     const fetchDetails = async () => {
@@ -75,6 +84,9 @@ export const Waitroom: React.FC<WaitroomProps> = ({
         const status = await mockAuth.checkParticipantStatus(participantId);
         if (status === 'Admitted' && active) {
           setWaitingStatus('Admitted');
+          localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
+          localStorage.setItem(`admitted_meeting_title_${meetingId}`, meetingDetails?.title || 'GIIN MEET Call');
+          localStorage.setItem(`admitted_meeting_name_${meetingId}`, displayName);
           onAdmitted(meetingDetails?.title || 'GIIN MEET Call', participantId, displayName);
         } else if (status === 'Declined' && active) {
           setWaitingStatus('Declined');
@@ -98,6 +110,9 @@ export const Waitroom: React.FC<WaitroomProps> = ({
         if (data.targetKey === guestKey || (participantId && data.targetKey === participantId)) {
           if (data.status === 'Admitted' && active) {
             setWaitingStatus('Admitted');
+            localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
+            localStorage.setItem(`admitted_meeting_title_${meetingId}`, meetingDetails?.title || 'GIIN MEET Call');
+            localStorage.setItem(`admitted_meeting_name_${meetingId}`, displayName);
             onAdmitted(meetingDetails?.title || 'GIIN MEET Call', data.targetKey, displayName);
           } else if (data.status === 'Declined' && active) {
             setWaitingStatus('Declined');
