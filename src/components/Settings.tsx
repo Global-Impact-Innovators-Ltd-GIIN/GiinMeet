@@ -7,6 +7,67 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
+const applyFont = (fontFamilyHeading: string, fontFamilyBody: string) => {
+  document.documentElement.style.setProperty('--font-heading', fontFamilyHeading);
+  document.documentElement.style.setProperty('--font-sans', fontFamilyBody);
+  const fontId = 'google-font-' + fontFamilyHeading.replace(/\s+/g, '-').toLowerCase();
+  if (!document.getElementById(fontId)) {
+    const link = document.createElement('link');
+    link.id = fontId;
+    link.rel = 'stylesheet';
+    link.href = `https://fonts.googleapis.com/css2?family=${fontFamilyHeading.replace(/\s+/g, '+')}:wght@400;500;600;700&family=${fontFamilyBody.replace(/\s+/g, '+')}:wght@400;500;600;700&display=swap`;
+    document.head.appendChild(link);
+  }
+};
+
+const applyBorderRadius = (radius: number) => {
+  document.documentElement.style.setProperty('--radius-sm', `${radius * 0.5}px`);
+  document.documentElement.style.setProperty('--radius-md', `${radius}px`);
+  document.documentElement.style.setProperty('--radius-lg', `${radius * 2}px`);
+  document.documentElement.style.setProperty('--radius-xl', `${radius * 3}px`);
+};
+
+const applyUiStyle = (style: string, isDark: boolean) => {
+  document.documentElement.setAttribute('data-ui-style', style);
+  if (style === 'neumorphism') {
+    const shadowDark = isDark ? '#070a10' : '#b8c2d0';
+    const shadowLight = isDark ? '#1d273c' : '#ffffff';
+    document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
+    document.documentElement.style.setProperty('--glass-border', 'none');
+    document.documentElement.style.setProperty('--glass-blur', '0px');
+    document.documentElement.style.setProperty('--shadow-premium', `8px 8px 16px ${shadowDark}, -8px -8px 16px ${shadowLight}`);
+    document.documentElement.style.setProperty('--shadow-sm', `3px 3px 6px ${shadowDark}, -3px -3px 6px ${shadowLight}`);
+    document.documentElement.style.setProperty('--shadow-md', `6px 6px 12px ${shadowDark}, -6px -6px 12px ${shadowLight}`);
+    document.documentElement.style.setProperty('--shadow-inset', `inset 4px 4px 8px ${shadowDark}, inset -4px -4px 8px ${shadowLight}`);
+  } else if (style === 'cyberpunk-glow') {
+    document.documentElement.style.setProperty('--glass-bg', isDark ? '#080c16' : '#f0f4ff');
+    document.documentElement.style.setProperty('--glass-border', '2px solid var(--color-primary)');
+    document.documentElement.style.setProperty('--glass-blur', '0px');
+    document.documentElement.style.setProperty('--shadow-premium', '0 0 15px rgba(var(--color-primary-rgb), 0.35)');
+    document.documentElement.style.setProperty('--shadow-sm', '0 0 5px rgba(var(--color-primary-rgb), 0.2)');
+    document.documentElement.style.setProperty('--shadow-md', '0 0 8px rgba(var(--color-primary-rgb), 0.3)');
+  } else if (style === 'flat-minimal') {
+    document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
+    document.documentElement.style.setProperty('--glass-border', '1px solid var(--border-color)');
+    document.documentElement.style.setProperty('--glass-blur', '0px');
+    document.documentElement.style.setProperty('--shadow-premium', 'none');
+    document.documentElement.style.setProperty('--shadow-sm', 'none');
+    document.documentElement.style.setProperty('--shadow-md', 'none');
+  } else { // glassmorphism
+    if (isDark) {
+      document.documentElement.style.setProperty('--glass-bg', 'rgba(18, 24, 38, 0.75)');
+      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.06)');
+      document.documentElement.style.setProperty('--glass-blur', '16px');
+      document.documentElement.style.setProperty('--shadow-premium', '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4)');
+    } else {
+      document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.7)');
+      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.4)');
+      document.documentElement.style.setProperty('--glass-blur', '12px');
+      document.documentElement.style.setProperty('--shadow-premium', '0 20px 25px -5px rgba(0, 32, 91, 0.08), 0 10px 10px -5px rgba(0, 32, 91, 0.04)');
+    }
+  }
+};
+
 interface SettingsProps {
   isDarkMode: boolean;
   onToggleTheme: () => void;
@@ -92,6 +153,15 @@ export const Settings: React.FC<SettingsProps> = ({
   const [logoPreview, setLogoPreview] = useState(() => localStorage.getItem('giin_custom_logo') || '');
   const [meetingWatermark, setMeetingWatermark] = useState(() => localStorage.getItem('giin_watermark') || 'branded');
   const [layoutStyle, setLayoutStyle] = useState(() => localStorage.getItem('giin_layout') || 'left-docked');
+
+  const [brandNameState, setBrandNameState] = useState(() => localStorage.getItem('giin_brand_name') || 'GIIN MEET');
+  const [brandSloganState, setBrandSloganState] = useState(() => localStorage.getItem('giin_brand_slogan') || 'VIRTUALIZATION HUB');
+  const [fontHeading, setFontHeading] = useState(() => localStorage.getItem('giin_font_heading') || 'Outfit');
+  const [fontBody, setFontBody] = useState(() => localStorage.getItem('giin_font_body') || 'Inter');
+  const [borderRadiusVal, setBorderRadiusVal] = useState(() => localStorage.getItem('giin_border_radius') || '8');
+  const [uiStyle, setUiStyle] = useState(() => localStorage.getItem('giin_ui_style') || 'glassmorphism');
+  const [watermarkOpacity, setWatermarkOpacity] = useState(() => localStorage.getItem('giin_watermark_opacity') || '80');
+  const [watermarkScale, setWatermarkScale] = useState(() => localStorage.getItem('giin_watermark_scale') || '100');
 
   // A/V testing & noise profiles state
   const [devicesList, setDevicesList] = useState<{ cameras: MediaDeviceInfo[], mics: MediaDeviceInfo[], speakers: MediaDeviceInfo[] }>({ cameras: [], mics: [], speakers: [] });
@@ -433,6 +503,46 @@ export const Settings: React.FC<SettingsProps> = ({
     localStorage.setItem('giin_watermark', watermark);
     localStorage.setItem('giin_layout', layout);
     triggerToast('Advanced branding configuration saved!');
+  };
+
+  const handleUpdateBrandingText = (name: string, slogan: string) => {
+    setBrandNameState(name);
+    setBrandSloganState(slogan);
+    localStorage.setItem('giin_brand_name', name);
+    localStorage.setItem('giin_brand_slogan', slogan);
+    window.dispatchEvent(new Event('giin_branding_changed'));
+    triggerToast('Brand identity updated!');
+  };
+
+  const handleUpdateFont = (heading: string, body: string) => {
+    setFontHeading(heading);
+    setFontBody(body);
+    localStorage.setItem('giin_font_heading', heading);
+    localStorage.setItem('giin_font_body', body);
+    applyFont(heading, body);
+    triggerToast('Typography style updated!');
+  };
+
+  const handleUpdateBorderRadius = (radius: string) => {
+    setBorderRadiusVal(radius);
+    localStorage.setItem('giin_border_radius', radius);
+    applyBorderRadius(parseInt(radius, 10));
+    triggerToast('Corner shape updated!');
+  };
+
+  const handleUpdateUiStyle = (style: string) => {
+    setUiStyle(style);
+    localStorage.setItem('giin_ui_style', style);
+    applyUiStyle(style, isDarkMode);
+    triggerToast('UI Style effect applied!');
+  };
+
+  const handleUpdateWatermarkSettings = (opacity: string, scale: string) => {
+    setWatermarkOpacity(opacity);
+    setWatermarkScale(scale);
+    localStorage.setItem('giin_watermark_opacity', opacity);
+    localStorage.setItem('giin_watermark_scale', scale);
+    triggerToast('Watermark geometry saved!');
   };
 
   // Toggle camera hardware test
@@ -852,10 +962,36 @@ export const Settings: React.FC<SettingsProps> = ({
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Customize global branding themes, accent colors, custom logo headers, and meeting layouts.</p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '520px' }}>
+              
+              {/* Brand Identity Details */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600 }}>Brand Identity Texts</span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Company/App Name</label>
+                    <input 
+                      type="text" 
+                      value={brandNameState} 
+                      onChange={(e) => handleUpdateBrandingText(e.target.value, brandSloganState)} 
+                      className="premium-input" 
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Tagline / Slogan</label>
+                    <input 
+                      type="text" 
+                      value={brandSloganState} 
+                      onChange={(e) => handleUpdateBrandingText(brandNameState, e.target.value)} 
+                      className="premium-input" 
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Custom Logo Upload */}
               <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
                 <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Custom Branding Logo Header</span>
-                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>Upload your corporate brand icon to replace the default GIIN logo dynamically.</span>
+                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>Upload your corporate brand icon to replace the default logo dynamically.</span>
                 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
                   <input type="file" ref={logoInputRef} onChange={handleLogoUpload} accept="image/*" style={{ display: 'none' }} />
@@ -873,7 +1009,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     {logoPreview ? (
                       <img src={logoPreview} alt="Custom Logo Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     ) : (
-                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>GIIN Logo</span>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Default Logo</span>
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -889,16 +1025,20 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
               </div>
 
-              {/* Highlight color picker */}
+              {/* Theme Primary Accent */}
               <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
                 <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Theme Primary Accent</span>
-                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center', marginBottom: '1rem' }}>
                   {[
                     { name: 'Azul Brant', primary: '#3B82F6', hover: '#2563EB' },
                     { name: 'Eclipse Purple', primary: '#8B5CF6', hover: '#7C3AED' },
                     { name: 'Emerald Mint', primary: '#10B981', hover: '#059669' },
                     { name: 'Crimson Flame', primary: '#EF4444', hover: '#DC2626' },
-                    { name: 'Sunset Amber', primary: '#F59E0B', hover: '#D97706' }
+                    { name: 'Sunset Amber', primary: '#F59E0B', hover: '#D97706' },
+                    { name: 'Cyberpunk Pink', primary: '#FF007F', hover: '#D6006B' },
+                    { name: 'Ocean Teal', primary: '#008080', hover: '#006666' },
+                    { name: 'Royal Velvet', primary: '#4B0082', hover: '#3A0063' },
+                    { name: 'Luxury Gold', primary: '#D4AF37', hover: '#AA8C2C' }
                   ].map((color) => (
                     <button
                       key={color.name}
@@ -918,34 +1058,128 @@ export const Settings: React.FC<SettingsProps> = ({
                       title={color.name}
                     />
                   ))}
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>Change highlight color</span>
+                </div>
+                
+                {/* Custom color picker */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Custom Accent Color</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: 'auto' }}>
+                    <input 
+                      type="color" 
+                      value={accentColor} 
+                      onChange={(e) => applyAccentColor(e.target.value, e.target.value)} 
+                      style={{ border: 'none', width: '32px', height: '32px', borderRadius: '4px', cursor: 'pointer', padding: 0, backgroundColor: 'transparent' }} 
+                    />
+                    <input 
+                      type="text" 
+                      value={accentColor} 
+                      onChange={(e) => applyAccentColor(e.target.value, e.target.value)} 
+                      className="premium-input" 
+                      style={{ width: '100px', padding: '0.25rem 0.5rem', fontSize: '0.8rem', textAlign: 'center' }} 
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Glassmorphism settings */}
+              {/* UI Theme Style Effect */}
               <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Glassmorphism Blur Filter</span>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>UI Styling Theme Effect</span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                   {[
-                    { id: 'frosted', label: 'Frosted Glass' },
-                    { id: 'ultra-clear', label: 'Ultra Clear' },
-                    { id: 'none', label: 'Solid Panels' }
-                  ].map((lvl) => (
+                    { id: 'glassmorphism', label: 'Glassmorphism' },
+                    { id: 'neumorphism', label: 'Neumorphism' },
+                    { id: 'cyberpunk-glow', label: 'Cyberpunk Glow' },
+                    { id: 'flat-minimal', label: 'Flat Minimal' }
+                  ].map((style) => (
                     <button
-                      key={lvl.id}
+                      key={style.id}
                       type="button"
-                      onClick={() => selectGlassOpacity(lvl.id)}
-                      className={`premium-btn ${glassOpacity === lvl.id ? 'premium-btn-primary' : 'premium-btn-secondary'}`}
-                      style={{ flex: 1, padding: '0.35rem', fontSize: '0.75rem', justifyContent: 'center' }}
+                      onClick={() => handleUpdateUiStyle(style.id)}
+                      className={`premium-btn ${uiStyle === style.id ? 'premium-btn-primary' : 'premium-btn-secondary'}`}
+                      style={{ padding: '0.4rem', fontSize: '0.75rem', justifyContent: 'center' }}
                     >
-                      {lvl.label}
+                      {style.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Meeting Watermark & Sidebar Layout Configuration */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Glassmorphism Blur Filter (Only visible if glassmorphism is selected) */}
+              {uiStyle === 'glassmorphism' && (
+                <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
+                  <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Glassmorphism Blur Filter</span>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {[
+                      { id: 'frosted', label: 'Frosted Glass' },
+                      { id: 'ultra-clear', label: 'Ultra Clear' },
+                      { id: 'none', label: 'Solid Panels' }
+                    ].map((lvl) => (
+                      <button
+                        key={lvl.id}
+                        type="button"
+                        onClick={() => selectGlassOpacity(lvl.id)}
+                        className={`premium-btn ${glassOpacity === lvl.id ? 'premium-btn-primary' : 'premium-btn-secondary'}`}
+                        style={{ flex: 1, padding: '0.35rem', fontSize: '0.75rem', justifyContent: 'center' }}
+                      >
+                        {lvl.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Premium Typography (Fonts) */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Premium Typography (Fonts)</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {[
+                    { id: 'sleek', label: 'Sleek Sans (Outfit / Inter)', heading: 'Outfit', body: 'Inter' },
+                    { id: 'classic', label: 'Classic Serif (Playfair Display / Georgia)', heading: 'Playfair Display', body: 'Georgia' },
+                    { id: 'tech', label: 'Monospace Tech (Fira Code)', heading: 'Fira Code', body: 'Fira Code' },
+                    { id: 'modern', label: 'Elegant Modern (Montserrat)', heading: 'Montserrat', body: 'Montserrat' },
+                    { id: 'futuristic', label: 'Futuristic Glow (Orbitron / Rajdhani)', heading: 'Orbitron', body: 'Rajdhani' }
+                  ].map((font) => {
+                    const isSelected = fontHeading === font.heading && fontBody === font.body;
+                    return (
+                      <button
+                        key={font.id}
+                        type="button"
+                        onClick={() => handleUpdateFont(font.heading, font.body)}
+                        className={`premium-btn ${isSelected ? 'premium-btn-primary' : 'premium-btn-secondary'}`}
+                        style={{ padding: '0.5rem', fontSize: '0.8rem', justifyContent: 'flex-start', fontFamily: font.heading }}
+                      >
+                        {font.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Corner Shapes (Border Radius) */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Corner Shapes (Border Radius)</span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  {[
+                    { val: '0', label: 'Sharp' },
+                    { val: '8', label: 'Sleek' },
+                    { val: '16', label: 'Rounded' },
+                    { val: '24', label: 'Soft Pill' }
+                  ].map((shape) => (
+                    <button
+                      key={shape.val}
+                      type="button"
+                      onClick={() => handleUpdateBorderRadius(shape.val)}
+                      className={`premium-btn ${borderRadiusVal === shape.val ? 'premium-btn-primary' : 'premium-btn-secondary'}`}
+                      style={{ flex: 1, padding: '0.35rem', fontSize: '0.75rem', justifyContent: 'center' }}
+                    >
+                      {shape.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Watermark & Layout Configuration */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Video Feed Watermark</label>
                   <select value={meetingWatermark} onChange={(e) => saveBrandingConfig(e.target.value, layoutStyle)} className="premium-input">
@@ -955,7 +1189,38 @@ export const Settings: React.FC<SettingsProps> = ({
                   </select>
                 </div>
 
-                <div>
+                {meetingWatermark !== 'none' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <div>
+                      <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Watermark Opacity ({watermarkOpacity}%)</label>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="10" 
+                        max="100" 
+                        value={watermarkOpacity} 
+                        onChange={(e) => handleUpdateWatermarkSettings(e.target.value, watermarkScale)} 
+                        style={{ width: '100%', cursor: 'pointer', accentColor: 'var(--color-primary)' }} 
+                      />
+                    </div>
+                    <div>
+                      <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Watermark Scale ({watermarkScale}%)</label>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="50" 
+                        max="150" 
+                        value={watermarkScale} 
+                        onChange={(e) => handleUpdateWatermarkSettings(watermarkOpacity, e.target.value)} 
+                        style={{ width: '100%', cursor: 'pointer', accentColor: 'var(--color-primary)' }} 
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Navbar Scaffolding Layout</label>
                   <select value={layoutStyle} onChange={(e) => saveBrandingConfig(meetingWatermark, e.target.value)} className="premium-input">
                     <option value="left-docked">Left Docked Panel (Icon Menu)</option>

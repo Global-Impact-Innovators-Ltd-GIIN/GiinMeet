@@ -31,6 +31,67 @@ interface Meeting {
   passcode?: string;
 }
 
+const applyFont = (fontFamilyHeading: string, fontFamilyBody: string) => {
+  document.documentElement.style.setProperty('--font-heading', fontFamilyHeading);
+  document.documentElement.style.setProperty('--font-sans', fontFamilyBody);
+  const fontId = 'google-font-' + fontFamilyHeading.replace(/\s+/g, '-').toLowerCase();
+  if (!document.getElementById(fontId)) {
+    const link = document.createElement('link');
+    link.id = fontId;
+    link.rel = 'stylesheet';
+    link.href = `https://fonts.googleapis.com/css2?family=${fontFamilyHeading.replace(/\s+/g, '+')}:wght@400;500;600;700&family=${fontFamilyBody.replace(/\s+/g, '+')}:wght@400;500;600;700&display=swap`;
+    document.head.appendChild(link);
+  }
+};
+
+const applyBorderRadius = (radius: number) => {
+  document.documentElement.style.setProperty('--radius-sm', `${radius * 0.5}px`);
+  document.documentElement.style.setProperty('--radius-md', `${radius}px`);
+  document.documentElement.style.setProperty('--radius-lg', `${radius * 2}px`);
+  document.documentElement.style.setProperty('--radius-xl', `${radius * 3}px`);
+};
+
+const applyUiStyle = (style: string, isDark: boolean) => {
+  document.documentElement.setAttribute('data-ui-style', style);
+  if (style === 'neumorphism') {
+    const shadowDark = isDark ? '#070a10' : '#b8c2d0';
+    const shadowLight = isDark ? '#1d273c' : '#ffffff';
+    document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
+    document.documentElement.style.setProperty('--glass-border', 'none');
+    document.documentElement.style.setProperty('--glass-blur', '0px');
+    document.documentElement.style.setProperty('--shadow-premium', `8px 8px 16px ${shadowDark}, -8px -8px 16px ${shadowLight}`);
+    document.documentElement.style.setProperty('--shadow-sm', `3px 3px 6px ${shadowDark}, -3px -3px 6px ${shadowLight}`);
+    document.documentElement.style.setProperty('--shadow-md', `6px 6px 12px ${shadowDark}, -6px -6px 12px ${shadowLight}`);
+    document.documentElement.style.setProperty('--shadow-inset', `inset 4px 4px 8px ${shadowDark}, inset -4px -4px 8px ${shadowLight}`);
+  } else if (style === 'cyberpunk-glow') {
+    document.documentElement.style.setProperty('--glass-bg', isDark ? '#080c16' : '#f0f4ff');
+    document.documentElement.style.setProperty('--glass-border', '2px solid var(--color-primary)');
+    document.documentElement.style.setProperty('--glass-blur', '0px');
+    document.documentElement.style.setProperty('--shadow-premium', '0 0 15px rgba(var(--color-primary-rgb), 0.35)');
+    document.documentElement.style.setProperty('--shadow-sm', '0 0 5px rgba(var(--color-primary-rgb), 0.2)');
+    document.documentElement.style.setProperty('--shadow-md', '0 0 8px rgba(var(--color-primary-rgb), 0.3)');
+  } else if (style === 'flat-minimal') {
+    document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
+    document.documentElement.style.setProperty('--glass-border', '1px solid var(--border-color)');
+    document.documentElement.style.setProperty('--glass-blur', '0px');
+    document.documentElement.style.setProperty('--shadow-premium', 'none');
+    document.documentElement.style.setProperty('--shadow-sm', 'none');
+    document.documentElement.style.setProperty('--shadow-md', 'none');
+  } else { // glassmorphism
+    if (isDark) {
+      document.documentElement.style.setProperty('--glass-bg', 'rgba(18, 24, 38, 0.75)');
+      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.06)');
+      document.documentElement.style.setProperty('--glass-blur', '16px');
+      document.documentElement.style.setProperty('--shadow-premium', '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4)');
+    } else {
+      document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.7)');
+      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.4)');
+      document.documentElement.style.setProperty('--glass-blur', '12px');
+      document.documentElement.style.setProperty('--shadow-premium', '0 20px 25px -5px rgba(0, 32, 91, 0.08), 0 10px 10px -5px rgba(0, 32, 91, 0.04)');
+    }
+  }
+};
+
 function App() {
   // Authentication & Directory Discovery
   const [user, setUser] = useState<{ 
@@ -84,6 +145,10 @@ function App() {
     isVideoOn?: boolean;
   } | null>(null);
   const [isP2PCall, setIsP2PCall] = useState<boolean>(false);
+
+  // Dynamic branding text
+  const [brandName, setBrandName] = useState(() => localStorage.getItem('giin_brand_name') || 'GIIN MEET');
+  const [brandSlogan, setBrandSlogan] = useState(() => localStorage.getItem('giin_brand_slogan') || 'VIRTUALIZATION HUB');
 
   // Transparent logo loading state
   const [logoUrl, setLogoUrl] = useState(() => localStorage.getItem('giin_custom_logo') || '/logo.png');
@@ -733,8 +798,9 @@ function App() {
     }
   }, [isDarkMode]);
 
-  // Effect to apply custom accent colors & glassmorphism settings dynamically
+  // Effect to apply custom accent colors, glassmorphism, fonts, border-radii & UI styles dynamically
   useEffect(() => {
+    // 1. Accent color
     const savedAccent = localStorage.getItem('giin_accent_color');
     const savedHover = localStorage.getItem('giin_accent_hover');
     if (savedAccent && savedHover) {
@@ -753,21 +819,50 @@ function App() {
       document.documentElement.style.removeProperty('--color-primary-rgb');
     }
 
+    // 2. Glassmorphism opacity (only applies if default glassmorphism is selected)
+    const savedUiStyle = localStorage.getItem('giin_ui_style') || 'glassmorphism';
     const savedGlass = localStorage.getItem('giin_glass_opacity');
-    if (savedGlass === 'none') {
-      document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
-      document.documentElement.style.setProperty('--glass-border', 'var(--border-color)');
-      document.documentElement.style.setProperty('--glass-blur', '0px');
-    } else if (savedGlass === 'ultra-clear') {
-      document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.15)');
-      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.04)');
-      document.documentElement.style.setProperty('--glass-blur', '8px');
-    } else {
-      document.documentElement.style.removeProperty('--glass-bg');
-      document.documentElement.style.removeProperty('--glass-border');
-      document.documentElement.style.removeProperty('--glass-blur');
+    
+    if (savedUiStyle === 'glassmorphism') {
+      if (savedGlass === 'none') {
+        document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
+        document.documentElement.style.setProperty('--glass-border', 'var(--border-color)');
+        document.documentElement.style.setProperty('--glass-blur', '0px');
+      } else if (savedGlass === 'ultra-clear') {
+        document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.15)');
+        document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.04)');
+        document.documentElement.style.setProperty('--glass-blur', '8px');
+      } else {
+        document.documentElement.style.removeProperty('--glass-bg');
+        document.documentElement.style.removeProperty('--glass-border');
+        document.documentElement.style.removeProperty('--glass-blur');
+      }
     }
-  }, [user]);
+
+    // 3. UI Style
+    applyUiStyle(savedUiStyle, isDarkMode);
+
+    // 4. Typography / Font Families
+    const savedFontHeading = localStorage.getItem('giin_font_heading') || 'Outfit';
+    const savedFontBody = localStorage.getItem('giin_font_body') || 'Inter';
+    applyFont(savedFontHeading, savedFontBody);
+
+    // 5. Border Radius
+    const savedRadius = localStorage.getItem('giin_border_radius') || '8';
+    applyBorderRadius(parseInt(savedRadius, 10));
+
+    // 6. Listen for branding details change
+    const handleBrandingChange = () => {
+      setBrandName(localStorage.getItem('giin_brand_name') || 'GIIN MEET');
+      setBrandSlogan(localStorage.getItem('giin_brand_slogan') || 'VIRTUALIZATION HUB');
+    };
+    window.addEventListener('giin_branding_changed', handleBrandingChange);
+    handleBrandingChange();
+
+    return () => {
+      window.removeEventListener('giin_branding_changed', handleBrandingChange);
+    };
+  }, [user, isDarkMode]);
 
   const totalUnreadMessages = threads.reduce((acc, t) => acc + (t.unreadCount || 0), 0);
 
@@ -1368,7 +1463,7 @@ function App() {
                 letterSpacing: '0.05em',
                 color: 'white'
               }}>
-                GIIN MEET
+                {brandName}
               </span>
               <span style={{
                 display: 'block',
@@ -1376,7 +1471,7 @@ function App() {
                 letterSpacing: '0.1em',
                 color: 'var(--color-secondary)'
               }}>
-                VIRTUALIZATION HUB
+                {brandSlogan}
               </span>
             </div>
           </div>
@@ -1675,7 +1770,7 @@ function App() {
                 letterSpacing: '0.03em',
                 color: 'var(--text-main)'
               }}>
-                GIIN MEET
+                {brandName}
               </span>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0.25rem' }}>|</span>
             </div>

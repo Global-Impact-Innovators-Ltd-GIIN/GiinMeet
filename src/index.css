@@ -698,4 +698,92 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* Typography Options */
+.font-sleek-sans {
+  --font-heading: 'Outfit', sans-serif;
+  --font-sans: 'Inter', sans-serif;
+}
+.font-classic-serif {
+  --font-heading: 'Playfair Display', serif;
+  --font-sans: 'Georgia', serif;
+}
+.font-tech-mono {
+  --font-heading: 'Fira Code', monospace;
+  --font-sans: 'Fira Code', monospace;
+}
+.font-elegant-modern {
+  --font-heading: 'Montserrat', sans-serif;
+  --font-sans: 'Montserrat', sans-serif;
+}
+.font-futuristic {
+  --font-heading: 'Orbitron', sans-serif;
+  --font-sans: 'Rajdhani', sans-serif;
+}
+
+/* UI Theme Styles */
+[data-ui-style="neumorphism"] {
+  --glass-bg: var(--bg-card);
+  --glass-border: none;
+  --glass-blur: 0px;
+}
+
+[data-ui-style="neumorphism"] .glass-panel {
+  box-shadow: var(--shadow-premium) !important;
+  border: none !important;
+  transition: all var(--transition-normal);
+}
+
+[data-ui-style="neumorphism"] .premium-btn-secondary,
+[data-ui-style="neumorphism"] .premium-input {
+  box-shadow: var(--shadow-sm) !important;
+  border: none !important;
+  background-color: var(--bg-card) !important;
+  transition: all var(--transition-fast);
+}
+
+[data-ui-style="neumorphism"] .premium-btn-primary {
+  box-shadow: var(--shadow-sm) !important;
+  border: none !important;
+}
+
+[data-ui-style="neumorphism"] .premium-btn:active,
+[data-ui-style="neumorphism"] .premium-input:focus {
+  box-shadow: var(--shadow-inset) !important;
+}
+
+/* Cyberpunk Glow Styles */
+[data-ui-style="cyberpunk-glow"] .glass-panel {
+  border: 1px solid var(--color-primary) !important;
+  box-shadow: 0 0 15px rgba(var(--color-primary-rgb), 0.35) !important;
+  background-color: rgba(6, 9, 17, 0.95) !important;
+}
+
+[data-ui-style="cyberpunk-glow"] .premium-btn-primary {
+  box-shadow: 0 0 10px rgba(var(--color-primary-rgb), 0.5) !important;
+  border: 1px solid var(--color-primary) !important;
+}
+
+[data-ui-style="cyberpunk-glow"] .premium-btn-secondary {
+  border: 1px solid var(--color-secondary) !important;
+  box-shadow: 0 0 5px rgba(var(--color-secondary-rgb), 0.2) !important;
+}
+
+[data-ui-style="cyberpunk-glow"] h1,
+[data-ui-style="cyberpunk-glow"] h2,
+[data-ui-style="cyberpunk-glow"] h3 {
+  text-shadow: 0 0 8px rgba(var(--color-primary-rgb), 0.5);
+}
+
+/* Flat Minimal Styles */
+[data-ui-style="flat-minimal"] .glass-panel {
+  border: 1px solid var(--border-color) !important;
+  box-shadow: none !important;
+  background-color: var(--bg-card) !important;
+}
+
+[data-ui-style="flat-minimal"] .premium-btn {
+  border-radius: 4px !important;
+  box-shadow: none !important;
+}
+
 
