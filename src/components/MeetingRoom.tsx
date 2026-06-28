@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
   SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings,
-  MoreHorizontal, BarChart3, Smile, Volume2, Info
+  MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -177,7 +177,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isAnnotating, setIsAnnotating] = useState(false);
   const [isColleagueSharing, setIsColleagueSharing] = useState(false);
-  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings' | 'polls' | 'filters' | 'soundboard' | 'info'>('none');
+  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings' | 'polls' | 'filters' | 'soundboard' | 'info' | 'transcript'>('none');
   const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
   const [showMeetingInfo, setShowMeetingInfo] = useState(false);
 
@@ -223,6 +223,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [newPollOptions, setNewPollOptions] = useState(['', '']);
   const [videoFilter, setVideoFilter] = useState('none');
 
+  // New AI/AV Enhancements States
+  const [isAudioEnhanced, setIsAudioEnhanced] = useState(false);
+  const [isStudioLightEnabled, setIsStudioLightEnabled] = useState(false);
+  
+  // New Host Controls States
+  const [isMeetingLocked, setIsMeetingLocked] = useState(false);
+  const [isScreenShareBlockedForGuests, setIsScreenShareBlockedForGuests] = useState(false);
+  const [isMuteOnEntryEnabled, setIsMuteOnEntryEnabled] = useState(false);
+
+  // Live Captions States
+  const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
+  const [transcripts, setTranscripts] = useState<{ name: string; text: string; time: string }[]>([]);
+  const [activeCaption, setActiveCaption] = useState<{ name: string; text: string } | null>(null);
+
   // WebRTC Peer States & Connections
   const myKey = currentUser?.id || 'guest-user-' + Math.random().toString(36).substring(2, 7);
   const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
@@ -236,7 +250,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       isScreenSharing: boolean; 
       isSpeaking: boolean;
       latency?: number; 
-      e2eeStatus?: 'secure' | 'unsupported' 
+      e2eeStatus?: 'secure' | 'unsupported';
+      videoFilter?: string;
+      isStudioLightEnabled?: boolean;
     } 
   }>({});
 
@@ -710,14 +726,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (isAdmin) {
           const data = payload.payload;
           
+          if (isMeetingLocked) {
+            handleAdmitParticipant(data.senderKey, 'Declined');
+            return;
+          }
+          
           const isPreviouslyAdmitted = admittedKeys.has(data.senderKey) || 
             JSON.parse(localStorage.getItem(`admitted_keys_${meetingId}`) || '[]').includes(data.senderKey);
-
+ 
           if (!isWaitingRoomEnabled || isPreviouslyAdmitted) {
             handleAdmitParticipant(data.senderKey, 'Admitted');
             return;
           }
-
+ 
           setWaitingList(prev => {
             if (prev.some(p => p.id === data.senderKey)) return prev;
             return [...prev, { id: data.senderKey, name: data.name }];
@@ -744,6 +765,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
         if (data.isChatLocked !== undefined) {
           setIsChatLocked(data.isChatLocked);
+        }
+        if (data.isMeetingLocked !== undefined) {
+          setIsMeetingLocked(data.isMeetingLocked);
+        }
+        if (data.isScreenShareBlockedForGuests !== undefined) {
+          setIsScreenShareBlockedForGuests(data.isScreenShareBlockedForGuests);
+        }
+        if (data.isMuteOnEntryEnabled !== undefined) {
+          setIsMuteOnEntryEnabled(data.isMuteOnEntryEnabled);
+          if (data.isMuteOnEntryEnabled && !isAdmin) {
+            setIsMuted(true);
+            if (localAudioTrackRef.current) {
+              localAudioTrackRef.current.enabled = false;
+            }
+          }
         }
       })
       .on('broadcast', { event: 'mute-all' }, () => {
@@ -813,9 +849,25 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (!prev[data.senderKey]) return prev;
           return {
             ...prev,
-            [data.senderKey]: { ...prev[data.senderKey], videoFilter: data.filter }
+            [data.senderKey]: { 
+              ...prev[data.senderKey], 
+              videoFilter: data.filter,
+              isStudioLightEnabled: data.isStudioLightEnabled
+            }
           };
         });
+      })
+      .on('broadcast', { event: 'live-caption' }, (payload: any) => {
+        const data = payload.payload;
+        setActiveCaption({ name: data.senderName, text: data.text });
+        
+        if (data.isFinal) {
+          const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          setTranscripts(prev => [...prev, { name: data.senderName, text: data.text, time }]);
+          setTimeout(() => {
+            setActiveCaption(null);
+          }, 4000);
+        }
       })
       .on('broadcast', { event: 'signal' }, (payload: any) => {
         const data = payload.payload;
@@ -1281,6 +1333,83 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
   }, [isVideoOn]);
 
+  // Speech Recognition Live Captions Effect
+  useEffect(() => {
+    let rec: any = null;
+    if (isCaptionsEnabled) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        rec = new SpeechRecognition();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        rec.onresult = (event: any) => {
+          let interimTranscript = '';
+          let finalTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript;
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
+          }
+
+          const currentText = finalTranscript || interimTranscript;
+          if (currentText.trim()) {
+            setActiveCaption({ name: 'You', text: currentText });
+            
+            if (sigChannelRef.current) {
+              sigChannelRef.current.send({
+                type: 'broadcast',
+                event: 'live-caption',
+                payload: {
+                  senderName: currentUser?.name || 'You',
+                  text: currentText,
+                  isFinal: !!finalTranscript
+                }
+              });
+            }
+
+            if (finalTranscript) {
+              const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              setTranscripts(prev => [...prev, { name: currentUser?.name || 'You', text: finalTranscript, time }]);
+              setTimeout(() => {
+                setActiveCaption(null);
+              }, 4000);
+            }
+          }
+        };
+
+        rec.onerror = (e: any) => {
+          console.warn('Speech recognition error:', e);
+        };
+
+        rec.onend = () => {
+          if (isCaptionsEnabled && rec) {
+            try { rec.start(); } catch (err) {}
+          }
+        };
+
+        try {
+          rec.start();
+        } catch (err) {
+          console.error(err);
+        }
+      } else {
+        alert('Speech recognition is not supported in this browser. Try Chrome or Safari.');
+        setIsCaptionsEnabled(false);
+      }
+    }
+
+    return () => {
+      if (rec) {
+        rec.stop();
+      }
+    };
+  }, [isCaptionsEnabled]);
+
   // Toggle buttons
   const toggleMute = () => {
     const nextMuted = !isMuted;
@@ -1375,28 +1504,65 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const handleToggleWaitingRoom = (enabled: boolean) => {
     setIsWaitingRoomEnabled(enabled);
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'settings-update',
-        payload: {
-          isWaitingRoomEnabled: enabled,
-          isChatLocked
-        }
-      });
-    }
+    broadcastSettingsUpdate({
+      isWaitingRoomEnabled: enabled,
+      isChatLocked,
+      isMeetingLocked,
+      isScreenShareBlockedForGuests,
+      isMuteOnEntryEnabled
+    });
   };
 
   const handleToggleChatLock = (locked: boolean) => {
     setIsChatLocked(locked);
+    broadcastSettingsUpdate({
+      isWaitingRoomEnabled,
+      isChatLocked: locked,
+      isMeetingLocked,
+      isScreenShareBlockedForGuests,
+      isMuteOnEntryEnabled
+    });
+  };
+
+  const handleToggleMeetingLock = (locked: boolean) => {
+    setIsMeetingLocked(locked);
+    broadcastSettingsUpdate({
+      isWaitingRoomEnabled,
+      isChatLocked,
+      isMeetingLocked: locked,
+      isScreenShareBlockedForGuests,
+      isMuteOnEntryEnabled
+    });
+  };
+
+  const handleToggleScreenShareBlock = (blocked: boolean) => {
+    setIsScreenShareBlockedForGuests(blocked);
+    broadcastSettingsUpdate({
+      isWaitingRoomEnabled,
+      isChatLocked,
+      isMeetingLocked,
+      isScreenShareBlockedForGuests: blocked,
+      isMuteOnEntryEnabled
+    });
+  };
+
+  const handleToggleMuteOnEntry = (enabled: boolean) => {
+    setIsMuteOnEntryEnabled(enabled);
+    broadcastSettingsUpdate({
+      isWaitingRoomEnabled,
+      isChatLocked,
+      isMeetingLocked,
+      isScreenShareBlockedForGuests,
+      isMuteOnEntryEnabled: enabled
+    });
+  };
+
+  const broadcastSettingsUpdate = (settings: any) => {
     if (sigChannelRef.current) {
       sigChannelRef.current.send({
         type: 'broadcast',
         event: 'settings-update',
-        payload: {
-          isWaitingRoomEnabled,
-          isChatLocked: locked
-        }
+        payload: settings
       });
     }
   };
@@ -1420,6 +1586,99 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         payload: {}
       });
       alert('Disable video request sent.');
+    }
+  };
+
+  const getEnhancedAudioTrack = (rawTrack: MediaStreamTrack): MediaStreamTrack => {
+    try {
+      const ctx = getAudioCtx();
+      const rawStream = new MediaStream([rawTrack]);
+      const source = ctx.createMediaStreamSource(rawStream);
+      
+      const bandpass = ctx.createBiquadFilter();
+      bandpass.type = 'bandpass';
+      bandpass.frequency.value = 1650;
+      bandpass.Q.value = 0.5;
+      
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 150;
+      
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -24;
+      compressor.knee.value = 30;
+      compressor.ratio.value = 12;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.25;
+      
+      const dest = ctx.createMediaStreamDestination();
+      
+      source.connect(highpass);
+      highpass.connect(bandpass);
+      bandpass.connect(compressor);
+      compressor.connect(dest);
+      
+      return dest.stream.getAudioTracks()[0];
+    } catch (e) {
+      console.warn('Failed to initialize Audio Enhancer:', e);
+      return rawTrack;
+    }
+  };
+
+  const toggleAudioEnhancement = async () => {
+    const nextVal = !isAudioEnhanced;
+    setIsAudioEnhanced(nextVal);
+    try {
+      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rawTrack = audioStream.getAudioTracks()[0];
+      let trackToUse = rawTrack;
+      if (nextVal) {
+        trackToUse = getEnhancedAudioTrack(rawTrack);
+      }
+      localAudioTrackRef.current = trackToUse;
+      trackToUse.enabled = !isMuted;
+      
+      setStream(prev => {
+        const newStream = prev || new MediaStream();
+        newStream.getAudioTracks().forEach(t => newStream.removeTrack(t));
+        newStream.addTrack(trackToUse);
+        return newStream;
+      });
+      
+      Object.values(pcsRef.current).forEach(pc => {
+        const senders = pc.getSenders();
+        const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+        if (audioSender) {
+          audioSender.replaceTrack(trackToUse);
+        }
+      });
+    } catch (err) {
+      console.error('Failed to toggle audio enhancement:', err);
+    }
+  };
+
+  const toggleStudioLight = () => {
+    const nextVal = !isStudioLightEnabled;
+    setIsStudioLightEnabled(nextVal);
+    broadcastVideoFilter(videoFilter, nextVal);
+  };
+
+  const changeVideoFilter = (filter: string) => {
+    setVideoFilter(filter);
+    broadcastVideoFilter(filter, isStudioLightEnabled);
+  };
+
+  const broadcastVideoFilter = (filter: string, studioLight: boolean) => {
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'media-filter',
+        payload: {
+          senderKey: myKey,
+          filter,
+          isStudioLightEnabled: studioLight
+        }
+      });
     }
   };
 
@@ -1505,20 +1764,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         type: 'broadcast',
         event: 'play-sound',
         payload: { soundType }
-      });
-    }
-  };
-
-  const changeVideoFilter = (filter: string) => {
-    setVideoFilter(filter);
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'media-filter',
-        payload: {
-          senderKey: myKey,
-          filter
-        }
       });
     }
   };
@@ -1831,6 +2076,34 @@ Securely encrypted under Fintech AES-256 standard.`;
       {/* Main workspace (Grid & Panels) */}
       <div style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}>
         
+        {/* Floating Subtitles Overlay */}
+        {activeCaption && (
+          <div style={{
+            position: 'absolute',
+            bottom: '80px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: 'rgba(7, 9, 14, 0.85)',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            padding: '0.6rem 1.25rem',
+            zIndex: 100,
+            maxWidth: '80%',
+            textAlign: 'center',
+            boxShadow: 'var(--shadow-premium)',
+            pointerEvents: 'none',
+            animation: 'pop-in 0.2s ease'
+          }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-accent)', display: 'block', marginBottom: '0.15rem' }}>
+              {activeCaption.name}
+            </span>
+            <span style={{ fontSize: '0.9rem', color: 'white', fontWeight: 500 }}>
+              {activeCaption.text}
+            </span>
+          </div>
+        )}
+
         {/* Waiting Room Alert Overlay for Hosts */}
         {isAdmin && waitingList.length > 0 && (
           <div style={{
@@ -2133,23 +2406,37 @@ Securely encrypted under Fintech AES-256 standard.`;
                 transition: 'all 0.25s ease'
               }}>
                 {isVideoOn && stream ? (
-                  <video 
-                    ref={el => {
-                      if (el && stream && el.srcObject !== stream) {
-                        el.srcObject = stream;
-                      }
-                    }}
-                    autoPlay 
-                    playsInline 
-                    muted 
-                    style={{ 
-                      width: '100%', 
-                      height: '100%', 
-                      objectFit: 'cover', 
-                      transform: 'scaleX(-1)',
-                      filter: videoFilter === 'blur' ? 'blur(6px)' : videoFilter === 'sepia' ? 'sepia(0.8)' : videoFilter === 'grayscale' ? 'grayscale(1)' : videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'
-                    }} 
-                  />
+                  <>
+                    <video 
+                      ref={el => {
+                        if (el && stream && el.srcObject !== stream) {
+                          el.srcObject = stream;
+                        }
+                      }}
+                      autoPlay 
+                      playsInline 
+                      muted 
+                      style={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        objectFit: 'cover', 
+                        transform: 'scaleX(-1)',
+                        filter: `${videoFilter === 'blur' ? 'blur(6px)' : videoFilter === 'sepia' ? 'sepia(0.8)' : videoFilter === 'grayscale' ? 'grayscale(1)' : videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
+                      }} 
+                    />
+                    {isStudioLightEnabled && (
+                      <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(0,0,0,0.1) 80%)',
+                        pointerEvents: 'none',
+                        zIndex: 2
+                      }} />
+                    )}
+                  </>
                 ) : (
                   <div style={{
                     width: '100%',
@@ -2336,23 +2623,37 @@ Securely encrypted under Fintech AES-256 standard.`;
                 transition: 'all 0.25s ease'
               }}>
                 {isVideoOn && stream ? (
-                  <video 
-                    ref={el => {
-                      if (el && stream && el.srcObject !== stream) {
-                        el.srcObject = stream;
-                      }
-                    }}
-                    autoPlay 
-                    playsInline 
-                    muted 
-                    style={{ 
-                      width: '100%', 
-                      height: '100%', 
-                      objectFit: 'cover', 
-                      transform: 'scaleX(-1)',
-                      filter: videoFilter === 'blur' ? 'blur(6px)' : videoFilter === 'sepia' ? 'sepia(0.8)' : videoFilter === 'grayscale' ? 'grayscale(1)' : videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'
-                    }} 
-                  />
+                  <>
+                    <video 
+                      ref={el => {
+                        if (el && stream && el.srcObject !== stream) {
+                          el.srcObject = stream;
+                        }
+                      }}
+                      autoPlay 
+                      playsInline 
+                      muted 
+                      style={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        objectFit: 'cover', 
+                        transform: 'scaleX(-1)',
+                        filter: `${videoFilter === 'blur' ? 'blur(6px)' : videoFilter === 'sepia' ? 'sepia(0.8)' : videoFilter === 'grayscale' ? 'grayscale(1)' : videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
+                      }} 
+                    />
+                    {isStudioLightEnabled && (
+                      <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(0,0,0,0.1) 80%)',
+                        pointerEvents: 'none',
+                        zIndex: 2
+                      }} />
+                    )}
+                  </>
                 ) : (
                   <div style={{
                     width: '100%',
@@ -2469,24 +2770,39 @@ Securely encrypted under Fintech AES-256 standard.`;
                     transition: 'all 0.25s ease'
                   }}>
                     {hasConnection && peerStreamObj && (
-                      <video
-                        ref={el => {
-                          if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
-                            el.srcObject = peerStreamObj;
-                          }
-                        }}
-                        autoPlay
-                        playsInline
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          zIndex: 1
-                        }}
-                      />
+                      <>
+                        <video
+                          ref={el => {
+                            if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
+                              el.srcObject = peerStreamObj;
+                            }
+                          }}
+                          autoPlay
+                          playsInline
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            zIndex: 1,
+                            filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
+                          }}
+                        />
+                        {pState.isStudioLightEnabled && (
+                          <div style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(0,0,0,0.1) 80%)',
+                            pointerEvents: 'none',
+                            zIndex: 2
+                          }} />
+                        )}
+                      </>
                     )}
                     {(!hasConnection || !peerStreamObj || !pState.isVideoOn) && (
                       <div style={{
@@ -2789,19 +3105,65 @@ Securely encrypted under Fintech AES-256 standard.`;
             </div>
 
             <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {/* Lock Meeting Toggle */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Lock Meeting</span>
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={isMeetingLocked} 
+                      onChange={(e) => handleToggleMeetingLock(e.target.checked)}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: isMeetingLocked ? 'var(--color-accent)' : '#1E293B',
+                      transition: '0.3s', borderRadius: '20px'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                        backgroundColor: isMeetingLocked ? '#07090E' : 'white',
+                        transition: '0.3s', borderRadius: '50%',
+                        transform: isMeetingLocked ? 'translateX(14px)' : 'none'
+                      }} />
+                    </span>
+                  </label>
+                </div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  Prevent any new participants from joining the meeting room.
+                </span>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
               {/* Toggle Waiting Room */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Waiting Room</span>
-                  <input 
-                    type="checkbox" 
-                    checked={isWaitingRoomEnabled} 
-                    onChange={(e) => handleToggleWaitingRoom(e.target.checked)}
-                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                  />
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={isWaitingRoomEnabled} 
+                      onChange={(e) => handleToggleWaitingRoom(e.target.checked)}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: isWaitingRoomEnabled ? 'var(--color-accent)' : '#1E293B',
+                      transition: '0.3s', borderRadius: '20px'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                        backgroundColor: isWaitingRoomEnabled ? '#07090E' : 'white',
+                        transition: '0.3s', borderRadius: '50%',
+                        transform: isWaitingRoomEnabled ? 'translateX(14px)' : 'none'
+                      }} />
+                    </span>
+                  </label>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  When enabled, new participants must be approved by you before entering the meeting.
+                  New participants must be approved by you before entering the meeting.
                 </span>
               </div>
 
@@ -2811,15 +3173,93 @@ Securely encrypted under Fintech AES-256 standard.`;
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Lock In-Call Chat</span>
-                  <input 
-                    type="checkbox" 
-                    checked={isChatLocked} 
-                    onChange={(e) => handleToggleChatLock(e.target.checked)}
-                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                  />
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={isChatLocked} 
+                      onChange={(e) => handleToggleChatLock(e.target.checked)}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: isChatLocked ? 'var(--color-accent)' : '#1E293B',
+                      transition: '0.3s', borderRadius: '20px'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                        backgroundColor: isChatLocked ? '#07090E' : 'white',
+                        transition: '0.3s', borderRadius: '50%',
+                        transform: isChatLocked ? 'translateX(14px)' : 'none'
+                      }} />
+                    </span>
+                  </label>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  When locked, only the host can send messages. Other participants can only view.
+                  When locked, only you can send messages. Other participants can only view.
+                </span>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* Block Screen Sharing for Guests */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Block Guest Screen Share</span>
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={isScreenShareBlockedForGuests} 
+                      onChange={(e) => handleToggleScreenShareBlock(e.target.checked)}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: isScreenShareBlockedForGuests ? 'var(--color-accent)' : '#1E293B',
+                      transition: '0.3s', borderRadius: '20px'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                        backgroundColor: isScreenShareBlockedForGuests ? '#07090E' : 'white',
+                        transition: '0.3s', borderRadius: '50%',
+                        transform: isScreenShareBlockedForGuests ? 'translateX(14px)' : 'none'
+                      }} />
+                    </span>
+                  </label>
+                </div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  Block guests from sharing their screen.
+                </span>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* Mute on Entry */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Mute on Entry</span>
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={isMuteOnEntryEnabled} 
+                      onChange={(e) => handleToggleMuteOnEntry(e.target.checked)}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: isMuteOnEntryEnabled ? 'var(--color-accent)' : '#1E293B',
+                      transition: '0.3s', borderRadius: '20px'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                        backgroundColor: isMuteOnEntryEnabled ? '#07090E' : 'white',
+                        transition: '0.3s', borderRadius: '50%',
+                        transform: isMuteOnEntryEnabled ? 'translateX(14px)' : 'none'
+                      }} />
+                    </span>
+                  </label>
+                </div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  Mute new participants automatically when they join the meeting.
                 </span>
               </div>
 
@@ -2985,43 +3425,193 @@ Securely encrypted under Fintech AES-256 standard.`;
             zIndex: 5
           }}>
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
-              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Camera Filters</h4>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Sliders size={16} color="var(--color-accent)" />
+                <span>AV Enhancements</span>
+              </h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontSize: '1.2rem' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              
+              {/* AI Studio Voice Section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Mic size={14} color={isAudioEnhanced ? 'var(--color-accent)' : '#64748B'} />
+                    STUDIO VOICE
+                  </span>
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={isAudioEnhanced}
+                      onChange={toggleAudioEnhancement}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: isAudioEnhanced ? 'var(--color-accent)' : '#1E293B',
+                      transition: '0.3s', borderRadius: '20px'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                        backgroundColor: isAudioEnhanced ? '#07090E' : 'white',
+                        transition: '0.3s', borderRadius: '50%',
+                        transform: isAudioEnhanced ? 'translateX(14px)' : 'none'
+                      }} />
+                    </span>
+                  </label>
+                </div>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
+                  Real-time DSP noise gate and vocal compressor to filter background hum and boost speech clarity.
+                </p>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* AI Studio Light Section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Sparkles size={14} color={isStudioLightEnabled ? 'var(--color-accent)' : '#64748B'} />
+                    STUDIO LIGHT
+                  </span>
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={isStudioLightEnabled}
+                      onChange={toggleStudioLight}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: isStudioLightEnabled ? 'var(--color-accent)' : '#1E293B',
+                      transition: '0.3s', borderRadius: '20px'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                        backgroundColor: isStudioLightEnabled ? '#07090E' : 'white',
+                        transition: '0.3s', borderRadius: '50%',
+                        transform: isStudioLightEnabled ? 'translateX(14px)' : 'none'
+                      }} />
+                    </span>
+                  </label>
+                </div>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
+                  Brightens your face and adds a warm, professional spotlight glow to counter poor room lighting.
+                </p>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* Camera Filters Section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>CAMERA FILTER</span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                  {[
+                    { id: 'none', label: 'Normal' },
+                    { id: 'blur', label: 'Blur' },
+                    { id: 'sepia', label: 'Sepia' },
+                    { id: 'grayscale', label: 'B&W' },
+                    { id: 'warm', label: 'Warm' },
+                    { id: 'cyberpunk', label: 'Cyberpunk' }
+                  ].map(f => (
+                    <button 
+                      key={f.id}
+                      onClick={() => changeVideoFilter(f.id)}
+                      className="premium-btn"
+                      style={{
+                        justifyContent: 'center',
+                        fontSize: '0.75rem',
+                        height: '40px',
+                        border: videoFilter === f.id ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
+                        backgroundColor: videoFilter === f.id ? 'rgba(250,189,2,0.1)' : 'rgba(255,255,255,0.02)',
+                        color: videoFilter === f.id ? 'var(--color-accent)' : 'white'
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {activePanel === 'transcript' && (
+          <div style={{
+            width: '300px',
+            borderLeft: '1px solid #1E293B',
+            backgroundColor: 'rgba(11, 15, 25, 0.95)',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: 'slide-in 0.2s ease',
+            zIndex: 5
+          }}>
+            <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Languages size={16} color="var(--color-accent)" />
+                <span>Live Transcript</span>
+              </h4>
+              <button 
+                onClick={() => setActivePanel('none')}
+                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontSize: '1.2rem' }}
               >
                 &times;
               </button>
             </div>
 
             <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>CHOOSE A FILTER</span>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                {[
-                  { id: 'none', label: 'Normal' },
-                  { id: 'blur', label: 'Blur' },
-                  { id: 'sepia', label: 'Sepia' },
-                  { id: 'grayscale', label: 'B&W' },
-                  { id: 'warm', label: 'Warm' },
-                  { id: 'cyberpunk', label: 'Cyberpunk' }
-                ].map(f => (
-                  <button 
-                    key={f.id}
-                    onClick={() => changeVideoFilter(f.id)}
-                    className="premium-btn"
-                    style={{
-                      justifyContent: 'center',
-                      fontSize: '0.8rem',
-                      height: '50px',
-                      border: videoFilter === f.id ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
-                      backgroundColor: videoFilter === f.id ? 'rgba(250,189,2,0.1)' : 'rgba(255,255,255,0.02)',
-                      color: videoFilter === f.id ? 'var(--color-accent)' : 'white'
-                    }}
-                  >
-                    {f.label}
-                  </button>
-                ))}
+              <div className="flex-between" style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'white' }}>Enable Speech Captions</span>
+                <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={isCaptionsEnabled}
+                    onChange={(e) => setIsCaptionsEnabled(e.target.checked)}
+                    style={{ opacity: 0, width: 0, height: 0 }}
+                  />
+                  <span style={{
+                    position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: isCaptionsEnabled ? 'var(--color-accent)' : '#1E293B',
+                    transition: '0.3s', borderRadius: '20px'
+                  }}>
+                    <span style={{
+                      position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                      backgroundColor: isCaptionsEnabled ? '#07090E' : 'white',
+                      transition: '0.3s', borderRadius: '50%',
+                      transform: isCaptionsEnabled ? 'translateX(14px)' : 'none'
+                    }} />
+                  </span>
+                </label>
+              </div>
+
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRANSCRIPT HISTORY</span>
+                
+                {transcripts.length === 0 ? (
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', height: '150px', textAlign: 'center' }}>
+                    {isCaptionsEnabled ? 'Listening for speech...' : 'Turn on captions to view live transcription history.'}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    {transcripts.map((t, idx) => (
+                      <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                        <div className="flex-between">
+                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-accent)' }}>{t.name}</span>
+                          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{t.time}</span>
+                        </div>
+                        <p style={{ fontSize: '0.8rem', color: 'white', margin: 0, lineHeight: 1.4 }}>{t.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -3381,6 +3971,10 @@ Securely encrypted under Fintech AES-256 standard.`;
             {/* Screen Share */}
             <button 
               onClick={() => {
+                if (isScreenShareBlockedForGuests && !isAdmin) {
+                  alert('Screen sharing is blocked by the host.');
+                  return;
+                }
                 const nextVal = !isScreenSharing;
                 setIsScreenSharing(nextVal);
                 if (nextVal) {
@@ -3397,10 +3991,11 @@ Securely encrypted under Fintech AES-256 standard.`;
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: isScreenSharing ? 'black' : 'white',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
+                cursor: (isScreenShareBlockedForGuests && !isAdmin) ? 'not-allowed' : 'pointer',
+                transition: 'all var(--transition-fast)',
+                opacity: (isScreenShareBlockedForGuests && !isAdmin) ? 0.5 : 1
               }}
-              title="Toggle Screenshare"
+              title={isScreenShareBlockedForGuests && !isAdmin ? "Screen Sharing Blocked by Host" : "Toggle Screenshare"}
             >
               <Monitor size={18} />
             </button>
@@ -3545,6 +4140,30 @@ Securely encrypted under Fintech AES-256 standard.`;
                     <span>Interactive Polls</span>
                   </button>
 
+                  {/* Live Captions */}
+                  <button 
+                    onClick={() => {
+                      setActivePanel(activePanel === 'transcript' ? 'none' : 'transcript');
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: activePanel === 'transcript' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Languages size={16} />
+                    <span>Live Captions</span>
+                  </button>
+
                   {/* Camera Filters */}
                   <button 
                     onClick={() => {
@@ -3565,8 +4184,8 @@ Securely encrypted under Fintech AES-256 standard.`;
                       textAlign: 'left'
                     }}
                   >
-                    <Smile size={16} />
-                    <span>Camera Filters</span>
+                    <Sliders size={16} />
+                    <span>AV Enhancements</span>
                   </button>
 
                   {/* React Soundboard */}
