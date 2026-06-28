@@ -2142,7 +2142,13 @@ Securely encrypted under Fintech AES-256 standard.`;
                     autoPlay 
                     playsInline 
                     muted 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} 
+                    style={{ 
+                      width: '100%', 
+                      height: '100%', 
+                      objectFit: 'cover', 
+                      transform: 'scaleX(-1)',
+                      filter: videoFilter === 'blur' ? 'blur(6px)' : videoFilter === 'sepia' ? 'sepia(0.8)' : videoFilter === 'grayscale' ? 'grayscale(1)' : videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'
+                    }} 
                   />
                 ) : (
                   <div style={{
@@ -2339,7 +2345,13 @@ Securely encrypted under Fintech AES-256 standard.`;
                     autoPlay 
                     playsInline 
                     muted 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} 
+                    style={{ 
+                      width: '100%', 
+                      height: '100%', 
+                      objectFit: 'cover', 
+                      transform: 'scaleX(-1)',
+                      filter: videoFilter === 'blur' ? 'blur(6px)' : videoFilter === 'sepia' ? 'sepia(0.8)' : videoFilter === 'grayscale' ? 'grayscale(1)' : videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'
+                    }} 
                   />
                 ) : (
                   <div style={{
