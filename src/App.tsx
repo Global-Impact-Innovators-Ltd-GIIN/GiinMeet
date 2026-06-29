@@ -186,9 +186,24 @@ function App() {
   const [guestUser, setGuestUser] = useState<{ id: string; name: string; email: string } | null>(null);
 
   // Chat Center Global State & Sync
-  const [threads, setThreads] = useState<ChatThread[]>([]);
+  // Chat Center Global State & Sync with localStorage caching
+  const [threads, setThreads] = useState<ChatThread[]>(() => {
+    try {
+      const cached = localStorage.getItem('giin_chat_threads');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [activeThreadId, setActiveThreadId] = useState<string>('');
   const [activeNotification, setActiveNotification] = useState<{ sender: string; text: string } | null>(null);
+
+  // Auto-cache threads whenever they change
+  useEffect(() => {
+    if (threads.length > 0) {
+      localStorage.setItem('giin_chat_threads', JSON.stringify(threads));
+    }
+  }, [threads]);
 
   // Real-time call / signaling states
   const [incomingCall, setIncomingCall] = useState<{ meetingId: string; passcode: string; callerName: string; callerId: string } | null>(null);

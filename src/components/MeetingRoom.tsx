@@ -1278,10 +1278,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           alert('You have been muted by the host.');
         }
       })
-      .on('broadcast', { event: 'remove-participant' }, (payload: any) => {
+      .on('broadcast', { event: 'remove-participant' }, async (payload: any) => {
         const data = payload.payload;
         if (data.targetUserId === myKey) {
           alert('You have been removed from the meeting by the host.');
+          // Delete our own row from the database (fully allowed by RLS since it is our own user_id)
+          try {
+            await mockAuth.removeParticipant(meetingId, myKey);
+          } catch (e) {
+            console.warn('Failed to delete own participant row on kick:', e);
+          }
           onEndMeeting();
         }
       })
@@ -4159,6 +4165,9 @@ Securely encrypted under Fintech AES-256 standard.`;
                                   payload: { targetUserId: p.userId }
                                 });
                               }
+                              // Immediately clean up locally for instant UI feedback
+                              cleanupPeer(p.userId!);
+                              // Attempt database delete
                               await mockAuth.removeParticipant(meetingId, p.userId!);
                             }
                           }}
