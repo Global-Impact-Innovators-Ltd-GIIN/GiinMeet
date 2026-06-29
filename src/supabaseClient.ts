@@ -417,37 +417,23 @@ export const mockAuth = {
     }
   },
 
-  // Add participant to Waiting Room (with virtual backup if table is missing)
+  // Add participant to Waiting Room (with virtual backup if table is missing or RLS restricts access)
   joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant', status?: 'Waiting' | 'Admitted' | 'Declined') => {
     const finalStatus = status || (role === 'Admin' ? 'Admitted' : 'Waiting');
-    if (isMeetingParticipantsTableMissing) {
-      return {
-        id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
-        meeting_id: meetingId,
-        user_id: userId || null,
-        name: name,
-        status: finalStatus,
-        role: role
-      };
-    }
-    const { data, error } = await supabase
-      .from('meeting_participants')
-      .insert([{
-        meeting_id: meetingId,
-        user_id: userId || null,
-        name: name,
-        status: finalStatus,
-        role: role
-      }])
-      .select()
-      .maybeSingle();
     
-    if (error) {
-      if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
-        isMeetingParticipantsTableMissing = true;
+    // Check if the user is authenticated. Guests (unauthenticated users) do not have database accounts
+    // and will always trigger 403 RLS violations. We bypass the DB insert for them immediately.
+    let isGuest = !userId;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData?.session) {
+        isGuest = true;
       }
-      console.warn('[Supabase Client] Failed to join waitroom (meeting_participants table might not exist). Falling back to virtual session.', error.message);
-      // Return a virtual participant object so the UI doesn't crash and host auto-admits them
+    } catch (e) {
+      isGuest = true;
+    }
+
+    if (isGuest || isMeetingParticipantsTableMissing) {
       return {
         id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
         meeting_id: meetingId,
@@ -457,7 +443,54 @@ export const mockAuth = {
         role: role
       };
     }
-    return data;
+
+    try {
+      const { data, error } = await supabase
+        .from('meeting_participants')
+        .insert([{
+          meeting_id: meetingId,
+          user_id: userId || null,
+          name: name,
+          status: finalStatus,
+          role: role
+        }])
+        .select()
+        .maybeSingle();
+      
+      if (error) {
+        if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
+          isMeetingParticipantsTableMissing = true;
+        }
+        console.warn('[Supabase Client] Failed to join waitroom. Falling back to virtual session.', error.message);
+        return {
+          id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
+          meeting_id: meetingId,
+          user_id: userId || null,
+          name: name,
+          status: finalStatus,
+          role: role
+        };
+      }
+
+      return data || {
+        id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
+        meeting_id: meetingId,
+        user_id: userId || null,
+        name: name,
+        status: finalStatus,
+        role: role
+      };
+    } catch (err: any) {
+      console.warn('[Supabase Client] Exception in joinMeetingRoom. Falling back to virtual session.', err.message);
+      return {
+        id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
+        meeting_id: meetingId,
+        user_id: userId || null,
+        name: name,
+        status: finalStatus,
+        role: role
+      };
+    }
   },
 
   // Check waiting status for participant (resilient to missing database tables)
