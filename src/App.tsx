@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Home, MessageSquare, Users, Settings as SettingsIcon, HelpCircle, 
   CreditCard, Bell, LogOut, Sun, Moon, CheckCircle2, ChevronDown, User, Shield,
@@ -455,6 +455,23 @@ function App() {
     loadAllThreads();
   }, [user]);
 
+  // Refs to prevent real-time channel teardown/re-subscription on view/thread changes
+  const threadsRef = useRef(threads);
+  const activeThreadIdRef = useRef(activeThreadId);
+  const currentViewRef = useRef(currentView);
+
+  useEffect(() => {
+    threadsRef.current = threads;
+  }, [threads]);
+
+  useEffect(() => {
+    activeThreadIdRef.current = activeThreadId;
+  }, [activeThreadId]);
+
+  useEffect(() => {
+    currentViewRef.current = currentView;
+  }, [currentView]);
+
   // Real-time messages sync and unread/audio notification handler
   useEffect(() => {
     if (!user) return;
@@ -479,15 +496,26 @@ function App() {
             }
           } else if (newMsg.thread_id.startsWith('group_')) {
             isGroup = true;
-            const groupId = newMsg.thread_id.substring(6);
-            const { data: memberRecord } = await supabase
-              .from('group_members')
-              .select('id')
-              .eq('group_id', groupId)
-              .eq('user_id', user.id)
-              .maybeSingle();
-            if (memberRecord) {
+            // Fast local check: if group is already in threads, user is a member
+            const hasThread = threadsRef.current.some((t: ChatThread) => t.id === newMsg.thread_id);
+            if (hasThread) {
               isMember = true;
+            } else {
+              // Fallback to database check in case they were just added to a new group
+              const groupId = newMsg.thread_id.substring(6);
+              try {
+                const { data: memberRecord } = await supabase
+                  .from('group_members')
+                  .select('id')
+                  .eq('group_id', groupId)
+                  .eq('user_id', user.id)
+                  .maybeSingle();
+                if (memberRecord) {
+                  isMember = true;
+                }
+              } catch (e) {
+                console.warn('Failed to verify group membership in real-time listener:', e);
+              }
             }
           }
 
@@ -550,13 +578,16 @@ function App() {
                       avatarBg,
                       isGroup: false,
                       status: 'Online',
-                      unreadCount: activeThreadId !== newMsg.thread_id || currentView !== 'chats' ? 1 : 0,
+                      unreadCount: activeThreadIdRef.current !== newMsg.thread_id || currentViewRef.current !== 'chats' ? 1 : 0,
                       messages: [mappedMsg]
                     };
                     if (newMsg.user_id !== user.id) {
                       triggerInAppNotification(profile.name || 'New Contact', text);
                     }
-                    setThreads(current => [newThread, ...current.filter(t => t.id !== newMsg.thread_id)]);
+                    setThreads(current => {
+                      if (current.some(t => t.id === newMsg.thread_id)) return current;
+                      return [newThread, ...current.filter(t => t.id !== newMsg.thread_id)];
+                    });
                   }
                 } else if (newMsg.thread_id.startsWith('group_')) {
                   const groupId = newMsg.thread_id.substring(6);
@@ -570,7 +601,7 @@ function App() {
                       avatarBg: '#10B981',
                       isGroup: true,
                       status: 'Online',
-                      unreadCount: activeThreadId !== newMsg.thread_id || currentView !== 'chats' ? 1 : 0,
+                      unreadCount: activeThreadIdRef.current !== newMsg.thread_id || currentViewRef.current !== 'chats' ? 1 : 0,
                       messages: [mappedMsg]
                     };
                     if (newMsg.user_id !== user.id) {
@@ -578,7 +609,10 @@ function App() {
                         triggerInAppNotification(`${newMsg.sender_name} (Mentioned You)`, text);
                       }
                     }
-                    setThreads(current => [newThread, ...current.filter(t => t.id !== newMsg.thread_id)]);
+                    setThreads(current => {
+                      if (current.some(t => t.id === newMsg.thread_id)) return current;
+                      return [newThread, ...current.filter(t => t.id !== newMsg.thread_id)];
+                    });
                   }
                 }
               };
@@ -590,7 +624,7 @@ function App() {
               if (t.id === newMsg.thread_id) {
                 if (t.messages.some((m: any) => m.id === mappedMsg.id)) return t;
 
-                const isCurrent = t.id === activeThreadId && currentView === 'chats';
+                const isCurrent = t.id === activeThreadIdRef.current && currentViewRef.current === 'chats';
                 const unreadCount = !isCurrent && newMsg.user_id !== user.id ? (t.unreadCount || 0) + 1 : 0;
 
                 if (!isCurrent && newMsg.user_id !== user.id) {
@@ -621,7 +655,7 @@ function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, activeThreadId, currentView]);
+  }, [user]);
 
   // Clear unread counts for the active thread when activeThreadId changes or currentView switches to chats
   useEffect(() => {
