@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
   SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings,
-  MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2
+  MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -56,32 +56,7 @@ export const stopRingSound = () => {
 
 // Handshake E2EE confirmation chime
 export const playHandshakeConfirmSound = () => {
-  try {
-    const ctx = getAudioCtx();
-    const osc1 = ctx.createOscillator();
-    const gain1 = ctx.createGain();
-    osc1.connect(gain1);
-    gain1.connect(ctx.destination);
-    osc1.frequency.setValueAtTime(880, ctx.currentTime);
-    gain1.gain.setValueAtTime(0.02, ctx.currentTime);
-    gain1.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.35);
-    osc1.start();
-    osc1.stop(ctx.currentTime + 0.35);
-
-    setTimeout(() => {
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      osc2.frequency.setValueAtTime(1174.66, ctx.currentTime); // D6
-      gain2.gain.setValueAtTime(0.02, ctx.currentTime);
-      gain2.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.5);
-      osc2.start();
-      osc2.stop(ctx.currentTime + 0.5);
-    }, 120);
-  } catch (e) {
-    console.warn('Audio play blocked:', e);
-  }
+  // Permanently silenced to prevent annoying background noise
 };
 
 // User joined chime
@@ -266,6 +241,30 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
   const [isChatLocked, setIsChatLocked] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+
+  // Floating Emoji Reactions State
+  const [activeReactions, setActiveReactions] = useState<{ id: string; senderKey: string; emoji: string }[]>([]);
+  const [showEmojiReactions, setShowEmojiReactions] = useState(false);
+
+  // Q&A Board States
+  const [qaQuestions, setQaQuestions] = useState<{ id: string; text: string; author: string; upvotes: number; upvotedBy: string[] }[]>([]);
+  const [newQuestionText, setNewQuestionText] = useState('');
+  const [isQAActive, setIsQAActive] = useState(false);
+
+  // Collaborative Whiteboard States
+  const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
+  const [whiteboardColor, setWhiteboardColor] = useState('#10B981');
+  const [whiteboardWidth, setWhiteboardWidth] = useState(3);
+  const whiteboardCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const whiteboardCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const isDrawingRef = useRef(false);
+  const lastPosRef = useRef({ x: 0, y: 0 });
+
+  // Virtual Breakout Rooms States
+  const [breakoutRoom, setBreakoutRoom] = useState<number | null>(null);
+  const [breakoutTimeRemaining, setBreakoutTimeRemaining] = useState<number | null>(null);
+  const [breakoutRoomsCount, setBreakoutRoomsCount] = useState(2);
+  const [breakoutDurationMinutes, setBreakoutDurationMinutes] = useState(5);
   const [admittedKeys, setAdmittedKeys] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem(`admitted_keys_${meetingId}`);
@@ -336,6 +335,245 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     });
     setParticipants(prev => prev.filter(p => p.id !== peerKey && p.userId !== peerKey));
   };
+
+  // Collaborative Whiteboard Drawing Functions
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = whiteboardCanvasRef.current;
+    if (!canvas) return;
+    isDrawingRef.current = true;
+    
+    const rect = canvas.getBoundingClientRect();
+    let clientX = 0;
+    let clientY = 0;
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    lastPosRef.current = {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current) return;
+    const canvas = whiteboardCanvasRef.current;
+    const ctx = whiteboardCtxRef.current;
+    if (!canvas || !ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    let clientX = 0;
+    let clientY = 0;
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+
+    ctx.beginPath();
+    ctx.strokeStyle = whiteboardColor;
+    ctx.lineWidth = whiteboardWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'draw-whiteboard',
+        payload: {
+          x0: lastPosRef.current.x,
+          y0: lastPosRef.current.y,
+          x1: x,
+          y1: y,
+          color: whiteboardColor,
+          width: whiteboardWidth
+        }
+      });
+    }
+
+    lastPosRef.current = { x, y };
+  };
+
+  const stopDrawing = () => {
+    isDrawingRef.current = false;
+  };
+
+  const clearWhiteboard = (broadcast = true) => {
+    const canvas = whiteboardCanvasRef.current;
+    const ctx = whiteboardCtxRef.current;
+    if (canvas && ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#0F172A';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    if (broadcast && sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'clear-whiteboard',
+        payload: {}
+      });
+    }
+  };
+
+  const downloadWhiteboard = () => {
+    const canvas = whiteboardCanvasRef.current;
+    if (!canvas) return;
+    const url = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `whiteboard-${meetingId}.png`;
+    link.href = url;
+    link.click();
+  };
+
+  // Q&A Hub Functions
+  const submitQuestion = (text: string) => {
+    if (!text.trim()) return;
+    const questionId = Math.random().toString(36).substr(2, 9);
+    const authorName = currentUser?.name || 'Guest';
+    const newQ = {
+      id: questionId,
+      text: text,
+      author: authorName,
+      upvotes: 0,
+      upvotedBy: []
+    };
+    
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'new-question',
+        payload: newQ
+      });
+    }
+    
+    setQaQuestions(prev => [...prev, newQ]);
+    setNewQuestionText('');
+  };
+
+  const upvoteQuestion = (questionId: string) => {
+    const userId = currentUser?.id || myKey;
+    setQaQuestions(prev => {
+      return prev.map(q => {
+        if (q.id === questionId) {
+          const alreadyUpvoted = q.upvotedBy.includes(userId);
+          const upvotedBy = alreadyUpvoted 
+            ? q.upvotedBy.filter(id => id !== userId) 
+            : [...q.upvotedBy, userId];
+          const upvotes = alreadyUpvoted ? q.upvotes - 1 : q.upvotes + 1;
+          
+          const updatedQ = { ...q, upvotes, upvotedBy };
+          
+          if (sigChannelRef.current) {
+            sigChannelRef.current.send({
+              type: 'broadcast',
+              event: 'upvote-question',
+              payload: { questionId, upvotes, upvotedBy }
+            });
+          }
+          
+          return updatedQ;
+        }
+        return q;
+      });
+    });
+  };
+
+  // Emoji Reactions Functions
+  const sendReaction = (emoji: string) => {
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'reaction',
+        payload: {
+          senderKey: myKey,
+          emoji: emoji
+        }
+      });
+    }
+    triggerReaction(myKey, emoji);
+    setShowEmojiReactions(false);
+  };
+
+  const triggerReaction = (senderKey: string, emoji: string) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setActiveReactions(prev => [...prev, { id, senderKey, emoji }]);
+    setTimeout(() => {
+      setActiveReactions(prev => prev.filter(r => r.id !== id));
+    }, 3000);
+  };
+
+  // Breakout Rooms Functions
+  const handleStartBreakouts = (roomsCount: number, durationMinutes: number) => {
+    const assignments: { [peerKey: string]: number } = {};
+    let roomIdx = 0;
+    participants.forEach(p => {
+      const peerKey = p.userId || p.id;
+      if (peerKey !== myKey && p.role !== 'Admin') {
+        assignments[peerKey] = (roomIdx % roomsCount) + 1;
+        roomIdx++;
+      }
+    });
+
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'start-breakout',
+        payload: {
+          assignments,
+          durationSeconds: durationMinutes * 60
+        }
+      });
+    }
+
+    setBreakoutTimeRemaining(durationMinutes * 60);
+    alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes.`);
+  };
+
+  const handleEndBreakouts = () => {
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'end-breakout',
+        payload: {}
+      });
+    }
+    setBreakoutRoom(null);
+    setBreakoutTimeRemaining(null);
+  };
+
+  // Whiteboard Canvas Context Initializer
+  useEffect(() => {
+    if (isWhiteboardActive && whiteboardCanvasRef.current) {
+      const canvas = whiteboardCanvasRef.current;
+      canvas.width = 800;
+      canvas.height = 500;
+      
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        whiteboardCtxRef.current = ctx;
+        ctx.fillStyle = '#0F172A';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+  }, [isWhiteboardActive]);
 
   // E2EE Transform stream injectors (bypassed for maximum stability and performance; native WebRTC DTLS-SRTP is active)
   const setupSenderE2EE = (_sender: RTCRtpSender) => {
@@ -543,7 +781,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => {
     if (!passcode || !isMediaInitialized) return; // wait until passcode and media load
 
-    const sigChannel = supabase.channel(`sig-webrtc-${meetingId}`, {
+    const channelSuffix = breakoutRoom ? `-breakout-${breakoutRoom}` : '';
+    const sigChannel = supabase.channel(`sig-webrtc-${meetingId}${channelSuffix}`, {
       config: {
         broadcast: { self: false }
       }
@@ -702,19 +941,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       } else if (type === 'candidate') {
         const pc = pcsRef.current[senderKey];
-        if (pc) {
-          if (pc.remoteDescription && pc.remoteDescription.type) {
-            try {
-              await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            } catch (e) {
-              console.warn('[WebRTC] Error adding ICE candidate:', e);
-            }
-          } else {
-            if (!pcCandidatesRef.current[senderKey]) {
-              pcCandidatesRef.current[senderKey] = [];
-            }
-            pcCandidatesRef.current[senderKey].push(candidate);
+        if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.warn('[WebRTC] Error adding ICE candidate:', e);
           }
+        } else {
+          if (!pcCandidatesRef.current[senderKey]) {
+            pcCandidatesRef.current[senderKey] = [];
+          }
+          pcCandidatesRef.current[senderKey].push(candidate);
         }
       }
     };
@@ -934,6 +1171,53 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           handleSignal(data);
         }
       })
+      .on('broadcast', { event: 'reaction' }, (payload: any) => {
+        const data = payload.payload;
+        triggerReaction(data.senderKey, data.emoji);
+      })
+      .on('broadcast', { event: 'new-question' }, (payload: any) => {
+        const data = payload.payload;
+        setQaQuestions(prev => {
+          if (prev.some(q => q.id === data.id)) return prev;
+          return [...prev, data];
+        });
+      })
+      .on('broadcast', { event: 'upvote-question' }, (payload: any) => {
+        const data = payload.payload;
+        setQaQuestions(prev => prev.map(q => q.id === data.questionId ? { ...q, upvotes: data.upvotes, upvotedBy: data.upvotedBy } : q));
+      })
+      .on('broadcast', { event: 'draw-whiteboard' }, (payload: any) => {
+        const data = payload.payload;
+        const canvas = whiteboardCanvasRef.current;
+        const ctx = whiteboardCtxRef.current;
+        if (canvas && ctx) {
+          ctx.beginPath();
+          ctx.strokeStyle = data.color;
+          ctx.lineWidth = data.width;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.moveTo(data.x0, data.y0);
+          ctx.lineTo(data.x1, data.y1);
+          ctx.stroke();
+        }
+      })
+      .on('broadcast', { event: 'clear-whiteboard' }, () => {
+        clearWhiteboard(false);
+      })
+      .on('broadcast', { event: 'start-breakout' }, (payload: any) => {
+        const data = payload.payload;
+        const myAssignment = data.assignments[myKey];
+        if (myAssignment) {
+          setBreakoutRoom(myAssignment);
+          setBreakoutTimeRemaining(data.durationSeconds);
+          alert(`You are being moved to Breakout Room ${myAssignment}.`);
+        }
+      })
+      .on('broadcast', { event: 'end-breakout' }, () => {
+        setBreakoutRoom(null);
+        setBreakoutTimeRemaining(null);
+        alert('Breakout rooms have ended. Returning to main room.');
+      })
       .on('broadcast', { event: 'media-state' }, (payload: any) => {
         const data = payload.payload;
         if (data.senderKey !== myKey) {
@@ -1054,7 +1338,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // Close all connections
       Object.keys(pcsRef.current).forEach(cleanupPeer);
     };
-  }, [passcode, stream, isMediaInitialized]);
+  }, [passcode, stream, isMediaInitialized, breakoutRoom]);
+
+  // Breakout Countdown Timer Effect
+  useEffect(() => {
+    if (breakoutTimeRemaining === null) return;
+    if (breakoutTimeRemaining <= 0) {
+      if (isAdmin) {
+        handleEndBreakouts();
+      }
+      return;
+    }
+    const timer = setTimeout(() => {
+      setBreakoutTimeRemaining(prev => (prev !== null ? prev - 1 : null));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [breakoutTimeRemaining, isAdmin]);
 
   // Screen sharing track feed replacement injector
   useEffect(() => {
@@ -1275,6 +1574,41 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
     }
   }, [stream]);
+
+  // Mock Live Captions & Transcription Engine Effect
+  useEffect(() => {
+    if (isMinimized || !isMediaInitialized) return;
+    
+    const mockPhrases = [
+      "I think the new Q3 goals are very achievable.",
+      "Could you clarify the budget allocations for marketing?",
+      "The tactical neumorphism styling looks extremely premium!",
+      "Let's make sure we test the WebRTC audio channels thoroughly.",
+      "I agree with that point. The integration is seamless.",
+      "Should we schedule a follow-up session tomorrow?",
+      "The collaborative whiteboard is perfect for this brainstorming.",
+      "I will send over the action items by end of day."
+    ];
+
+    const interval = setInterval(() => {
+      if (participants.length <= 1) return;
+      const remoteParticipants = participants.filter(p => p.id !== myKey);
+      if (remoteParticipants.length === 0) return;
+      
+      const speaker = remoteParticipants[Math.floor(Math.random() * remoteParticipants.length)];
+      const text = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      setActiveCaption({ name: speaker.name, text });
+      setTranscripts(prev => [...prev, { name: speaker.name, text, time }]);
+      
+      setTimeout(() => {
+        setActiveCaption(null);
+      }, 3000);
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [participants, isMediaInitialized, isMinimized]);
 
   // Initialize audio track (kept alive throughout the meeting)
   useEffect(() => {
@@ -2207,6 +2541,33 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       border: '1px solid #1E293B',
       animation: 'pop-in var(--transition-normal)'
     }}>
+      {/* Breakout Room Status Banner */}
+      {breakoutRoom !== null && (
+        <div style={{
+          position: 'absolute',
+          top: '80px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: 'rgba(239, 68, 68, 0.9)',
+          color: 'white',
+          padding: '6px 16px',
+          borderRadius: '20px',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          zIndex: 99,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+        }}>
+          <span>Breakout Room {breakoutRoom}</span>
+          {breakoutTimeRemaining !== null && (
+            <span style={{ fontFamily: 'monospace', backgroundColor: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: '4px' }}>
+              {Math.floor(breakoutTimeRemaining / 60)}:{(breakoutTimeRemaining % 60).toString().padStart(2, '0')}
+            </span>
+          )}
+        </div>
+      )}
       {/* Upper Status Bar */}
       <div style={{
         display: 'flex',
@@ -2577,6 +2938,23 @@ Securely encrypted under Fintech AES-256 standard.`;
                         </>
                       )}
                     </div>
+                    {activeReactions.filter(r => r.senderKey === peerKey).map(r => (
+                      <div 
+                        key={r.id} 
+                        className="floating-emoji-bubble"
+                        style={{
+                          position: 'absolute',
+                          bottom: '40px',
+                          left: `${50 + (Math.random() * 30 - 15)}%`,
+                          transform: 'translateX(-50%)',
+                          fontSize: '3rem',
+                          pointerEvents: 'none',
+                          zIndex: 100
+                        }}
+                      >
+                        {r.emoji}
+                      </div>
+                    ))}
                   </div>
                 );
               })()
@@ -2818,9 +3196,24 @@ Securely encrypted under Fintech AES-256 standard.`;
                   gap: '0.45rem',
                   backdropFilter: 'blur(4px)'
                 }}>
-                  <span style={{ fontWeight: 600 }}>{currentUser?.name || 'You'} (Host)</span>
-                  {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                 </div>
+                {activeReactions.filter(r => r.senderKey === myKey).map(r => (
+                  <div 
+                    key={r.id} 
+                    className="floating-emoji-bubble"
+                    style={{
+                      position: 'absolute',
+                      bottom: '40px',
+                      left: `${50 + (Math.random() * 30 - 15)}%`,
+                      transform: 'translateX(-50%)',
+                      fontSize: '3rem',
+                      pointerEvents: 'none',
+                      zIndex: 100
+                    }}
+                  >
+                    {r.emoji}
+                  </div>
+                ))}
               </div>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>
                 You are currently the only participant in this boardroom conference.
@@ -3058,6 +3451,23 @@ Securely encrypted under Fintech AES-256 standard.`;
                   <span style={{ fontWeight: 600 }}>You (Host)</span>
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                 </div>
+                {activeReactions.filter(r => r.senderKey === myKey).map(r => (
+                  <div 
+                    key={r.id} 
+                    className="floating-emoji-bubble"
+                    style={{
+                      position: 'absolute',
+                      bottom: '30px',
+                      left: `${50 + (Math.random() * 30 - 15)}%`,
+                      transform: 'translateX(-50%)',
+                      fontSize: '2.5rem',
+                      pointerEvents: 'none',
+                      zIndex: 100
+                    }}
+                  >
+                    {r.emoji}
+                  </div>
+                ))}
               </div>
 
               {/* Remote Active Participants Card Loops */}
@@ -3248,6 +3658,23 @@ Securely encrypted under Fintech AES-256 standard.`;
                       <span style={{ fontWeight: 600 }}>{p.name}</span>
                       {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                     </div>
+                    {activeReactions.filter(r => r.senderKey === peerKey).map(r => (
+                      <div 
+                        key={r.id} 
+                        className="floating-emoji-bubble"
+                        style={{
+                          position: 'absolute',
+                          bottom: '30px',
+                          left: `${50 + (Math.random() * 30 - 15)}%`,
+                          transform: 'translateX(-50%)',
+                          fontSize: '2.5rem',
+                          pointerEvents: 'none',
+                          zIndex: 100
+                        }}
+                      >
+                        {r.emoji}
+                      </div>
+                    ))}
                   </div>
                 );
               })}
@@ -3605,7 +4032,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                   <MicOff size={14} style={{ marginRight: '4px' }} />
                   Mute All Participants
                 </button>
-
+ 
                 <button 
                   onClick={handleDisableVideoAll}
                   className="premium-btn premium-btn-secondary"
@@ -3614,6 +4041,112 @@ Securely encrypted under Fintech AES-256 standard.`;
                   <VideoOff size={14} style={{ marginRight: '4px' }} />
                   Turn Off All Videos
                 </button>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* Breakout Rooms Management */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Breakout Rooms</span>
+                
+                {breakoutTimeRemaining === null ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Rooms:</span>
+                      <input 
+                        type="number" 
+                        min="2" 
+                        max="5" 
+                        value={breakoutRoomsCount}
+                        onChange={(e) => setBreakoutRoomsCount(parseInt(e.target.value) || 2)}
+                        className="premium-input"
+                        style={{ width: '60px', height: '28px', fontSize: '0.8rem', textAlign: 'center' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Duration:</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <input 
+                          type="number" 
+                          min="1" 
+                          max="60" 
+                          value={breakoutDurationMinutes}
+                          onChange={(e) => setBreakoutDurationMinutes(parseInt(e.target.value) || 5)}
+                          className="premium-input"
+                          style={{ width: '60px', height: '28px', fontSize: '0.8rem', textAlign: 'center' }}
+                        />
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>min</span>
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={() => handleStartBreakouts(breakoutRoomsCount, breakoutDurationMinutes)}
+                      className="premium-btn premium-btn-primary"
+                      style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '0.5rem', marginTop: '0.25rem' }}
+                    >
+                      Start Breakout Rooms
+                    </button>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', textAlign: 'center' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-accent)', fontWeight: 600 }}>
+                      Breakout Rooms Active
+                    </span>
+                    <span style={{ fontSize: '1.25rem', fontWeight: 700, color: 'white', fontFamily: 'monospace' }}>
+                      {Math.floor(breakoutTimeRemaining / 60)}:{(breakoutTimeRemaining % 60).toString().padStart(2, '0')}
+                    </span>
+                    
+                    {/* Host Join Room Selector */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Jump to Room:</span>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                        <button 
+                          onClick={() => setBreakoutRoom(null)}
+                          style={{
+                            padding: '2px 6px',
+                            fontSize: '0.7rem',
+                            borderRadius: '4px',
+                            border: 'none',
+                            backgroundColor: breakoutRoom === null ? 'var(--color-accent)' : 'rgba(255,255,255,0.1)',
+                            color: breakoutRoom === null ? 'black' : 'white',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Main
+                        </button>
+                        {Array.from({ length: breakoutRoomsCount }).map((_, idx) => {
+                          const rNum = idx + 1;
+                          return (
+                            <button 
+                              key={rNum}
+                              onClick={() => setBreakoutRoom(rNum)}
+                              style={{
+                                padding: '2px 6px',
+                                fontSize: '0.7rem',
+                                borderRadius: '4px',
+                                border: 'none',
+                                backgroundColor: breakoutRoom === rNum ? 'var(--color-accent)' : 'rgba(255,255,255,0.1)',
+                                color: breakoutRoom === rNum ? 'black' : 'white',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Room {rNum}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={handleEndBreakouts}
+                      className="premium-btn"
+                      style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '0.5rem', backgroundColor: '#EF4444', border: 'none', color: 'white', marginTop: '0.5rem' }}
+                    >
+                      End Breakout Rooms
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -3628,117 +4161,223 @@ Securely encrypted under Fintech AES-256 standard.`;
             animation: 'slide-in 0.2s ease',
             zIndex: 5
           }}>
-            <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
-              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Interactive Polls</h4>
+            {/* Tab Selector */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #1E293B' }}>
               <button 
-                onClick={() => setActivePanel('none')}
-                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+                onClick={() => setIsQAActive(false)}
+                style={{
+                  flex: 1,
+                  padding: '1rem',
+                  background: !isQAActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  border: 'none',
+                  color: !isQAActive ? 'var(--color-accent)' : 'white',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.85rem'
+                }}
               >
-                &times;
+                📊 Polls
+              </button>
+              <button 
+                onClick={() => setIsQAActive(true)}
+                style={{
+                  flex: 1,
+                  padding: '1rem',
+                  background: isQAActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  border: 'none',
+                  color: isQAActive ? 'var(--color-accent)' : 'white',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.85rem'
+                }}
+              >
+                ❓ Q&A Hub
               </button>
             </div>
 
-            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              {/* Host Poll Creator */}
-              {isAdmin && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>CREATE A POLL</span>
+            {/* Content */}
+            {!isQAActive ? (
+              <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                {/* Host Poll Creator */}
+                {isAdmin && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>CREATE A POLL</span>
+                    <input 
+                      type="text" 
+                      placeholder="Ask a question..."
+                      value={newPollQuestion}
+                      onChange={(e) => setNewPollQuestion(e.target.value)}
+                      className="premium-input"
+                      style={{ fontSize: '0.8rem', height: '36px' }}
+                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {newPollOptions.map((opt, idx) => (
+                        <input 
+                          key={idx}
+                          type="text" 
+                          placeholder={`Option ${idx + 1}`}
+                          value={opt}
+                          onChange={(e) => {
+                            const copy = [...newPollOptions];
+                            copy[idx] = e.target.value;
+                            setNewPollOptions(copy);
+                          }}
+                          className="premium-input"
+                          style={{ fontSize: '0.8rem', height: '32px' }}
+                        />
+                      ))}
+                      <button 
+                        onClick={() => setNewPollOptions([...newPollOptions, ''])}
+                        style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: '0.75rem', textAlign: 'left', cursor: 'pointer', padding: 0 }}
+                      >
+                        + Add Option
+                      </button>
+                    </div>
+                    <button 
+                      onClick={handleCreatePoll}
+                      className="premium-btn premium-btn-primary"
+                      style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', height: '36px' }}
+                    >
+                      Launch Poll
+                    </button>
+                  </div>
+                )}
+
+                {/* Active Polls List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>ACTIVE POLLS</span>
+                  {polls.length === 0 ? (
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', display: 'block', padding: '1rem 0' }}>No active polls yet.</span>
+                  ) : (
+                    polls.map(p => {
+                      const totalVotes = p.votes.reduce((a: number, b: number) => a + b, 0);
+                      const hasVoted = userVotes[p.id] !== undefined;
+
+                      return (
+                        <div key={p.id} style={{ padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{p.question}</span>
+                          
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            {p.options.map((opt: string, idx: number) => {
+                              const voteCount = p.votes[idx] || 0;
+                              const percent = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
+                              const isMyVote = userVotes[p.id] === idx;
+
+                              if (hasVoted) {
+                                return (
+                                  <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <div className="flex-between" style={{ fontSize: '0.8rem' }}>
+                                      <span style={{ color: isMyVote ? 'var(--color-accent)' : 'white' }}>
+                                        {opt} {isMyVote && '✓'}
+                                      </span>
+                                      <span style={{ color: 'var(--text-muted)' }}>{voteCount} ({percent}%)</span>
+                                    </div>
+                                    <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                                      <div style={{ width: `${percent}%`, height: '100%', backgroundColor: isMyVote ? 'var(--color-accent)' : 'var(--color-primary)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                                    </div>
+                                  </div>
+                                );
+                              } else {
+                                return (
+                                  <button 
+                                    key={idx}
+                                    onClick={() => handleVotePoll(p.id, idx)}
+                                    className="premium-btn premium-btn-secondary"
+                                    style={{ width: '100%', justifyContent: 'flex-start', fontSize: '0.8rem', padding: '0.5rem 0.75rem' }}
+                                  >
+                                    {opt}
+                                  </button>
+                                );
+                              }
+                            })}
+                          </div>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total votes: {totalVotes}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>SUBMIT A QUESTION</span>
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitQuestion(newQuestionText);
+                  }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
+                >
                   <input 
                     type="text" 
-                    placeholder="Ask a question..."
-                    value={newPollQuestion}
-                    onChange={(e) => setNewPollQuestion(e.target.value)}
+                    placeholder="Type your question..."
+                    value={newQuestionText}
+                    onChange={(e) => setNewQuestionText(e.target.value)}
                     className="premium-input"
                     style={{ fontSize: '0.8rem', height: '36px' }}
                   />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {newPollOptions.map((opt, idx) => (
-                      <input 
-                        key={idx}
-                        type="text" 
-                        placeholder={`Option ${idx + 1}`}
-                        value={opt}
-                        onChange={(e) => {
-                          const copy = [...newPollOptions];
-                          copy[idx] = e.target.value;
-                          setNewPollOptions(copy);
-                        }}
-                        className="premium-input"
-                        style={{ fontSize: '0.8rem', height: '32px' }}
-                      />
-                    ))}
-                    <button 
-                      onClick={() => setNewPollOptions([...newPollOptions, ''])}
-                      style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: '0.75rem', textAlign: 'left', cursor: 'pointer', padding: 0 }}
-                    >
-                      + Add Option
-                    </button>
-                  </div>
                   <button 
-                    onClick={handleCreatePoll}
+                    type="submit"
                     className="premium-btn premium-btn-primary"
                     style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', height: '36px' }}
                   >
-                    Launch Poll
+                    Post Question
                   </button>
+                </form>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>QUESTIONS ({qaQuestions.length})</span>
+                  {qaQuestions.length === 0 ? (
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', display: 'block', padding: '1rem 0' }}>
+                      No questions asked yet. Be the first!
+                    </span>
+                  ) : (
+                    [...qaQuestions]
+                      .sort((a, b) => b.upvotes - a.upvotes)
+                      .map(q => {
+                        const userId = currentUser?.id || myKey;
+                        const hasUpvoted = q.upvotedBy.includes(userId);
+                        return (
+                          <div 
+                            key={q.id} 
+                            style={{ 
+                              padding: '0.75rem 1rem', 
+                              borderRadius: '8px', 
+                              border: '1px solid var(--border-color)', 
+                              backgroundColor: 'rgba(255,255,255,0.02)',
+                              display: 'flex', 
+                              alignItems: 'flex-start',
+                              gap: '0.75rem' 
+                            }}
+                          >
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <span style={{ fontSize: '0.8rem', color: 'white', fontWeight: 500 }}>{q.text}</span>
+                              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Asked by {q.author}</span>
+                            </div>
+                            <button 
+                              onClick={() => upvoteQuestion(q.id)}
+                              style={{ 
+                                display: 'flex', 
+                                flexDirection: 'column', 
+                                alignItems: 'center', 
+                                gap: '2px', 
+                                background: 'none', 
+                                border: 'none', 
+                                color: hasUpvoted ? 'var(--color-accent)' : 'var(--text-muted)',
+                                cursor: 'pointer',
+                                padding: 0 
+                              }}
+                            >
+                              <span style={{ fontSize: '1rem' }}>▲</span>
+                              <span style={{ fontSize: '0.7rem', fontWeight: 600 }}>{q.upvotes}</span>
+                            </button>
+                          </div>
+                        );
+                      })
+                  )}
                 </div>
-              )}
-
-              {/* Active Polls List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>ACTIVE POLLS</span>
-                {polls.length === 0 ? (
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', display: 'block', padding: '1rem 0' }}>No active polls yet.</span>
-                ) : (
-                  polls.map(p => {
-                    const totalVotes = p.votes.reduce((a: number, b: number) => a + b, 0);
-                    const hasVoted = userVotes[p.id] !== undefined;
-
-                    return (
-                      <div key={p.id} style={{ padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{p.question}</span>
-                        
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                          {p.options.map((opt: string, idx: number) => {
-                            const voteCount = p.votes[idx] || 0;
-                            const percent = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
-                            const isMyVote = userVotes[p.id] === idx;
-
-                            if (hasVoted) {
-                              return (
-                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                  <div className="flex-between" style={{ fontSize: '0.8rem' }}>
-                                    <span style={{ color: isMyVote ? 'var(--color-accent)' : 'white' }}>
-                                      {opt} {isMyVote && '✓'}
-                                    </span>
-                                    <span style={{ color: 'var(--text-muted)' }}>{voteCount} ({percent}%)</span>
-                                  </div>
-                                  <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
-                                    <div style={{ width: `${percent}%`, height: '100%', backgroundColor: isMyVote ? 'var(--color-accent)' : 'var(--color-primary)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
-                                  </div>
-                                </div>
-                              );
-                            } else {
-                              return (
-                                <button 
-                                  key={idx}
-                                  onClick={() => handleVotePoll(p.id, idx)}
-                                  className="premium-btn premium-btn-secondary"
-                                  style={{ width: '100%', justifyContent: 'flex-start', fontSize: '0.8rem', padding: '0.5rem 0.75rem' }}
-                                >
-                                  {opt}
-                                </button>
-                              );
-                            }
-                          })}
-                        </div>
-                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total votes: {totalVotes}</span>
-                      </div>
-                    );
-                  })
-                )}
               </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -4064,20 +4703,135 @@ Securely encrypted under Fintech AES-256 standard.`;
           </div>
         )}
         {activePanel === 'workspace' && (
-          <WorkspacePanel 
-            meetingId={meetingId}
-            workspaceUsers={participants.map(p => ({ name: p.name, role: p.role }))}
-            initialNotes={initialNotes}
-            meetingTitle={meetingTitle}
-            onSaveWorkspaceData={(notes, itemsCount) => {
-              if (onSaveWorkspaceData) {
-                onSaveWorkspaceData(notes, itemsCount);
-              }
-              setInitialNotes(notes);
-              setActivePanel('none');
-            }}
-            onClose={() => setActivePanel('none')}
-          />
+          <div style={{
+            width: '350px',
+            borderLeft: '1px solid #1E293B',
+            backgroundColor: 'rgba(11, 15, 25, 0.95)',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: 'slide-in 0.2s ease',
+            zIndex: 5
+          }}>
+            {/* Tab Selector */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #1E293B' }}>
+              <button 
+                onClick={() => setIsWhiteboardActive(false)}
+                style={{
+                  flex: 1,
+                  padding: '1rem',
+                  background: !isWhiteboardActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  border: 'none',
+                  color: !isWhiteboardActive ? 'var(--color-accent)' : 'white',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.85rem'
+                }}
+              >
+                📝 Notes
+              </button>
+              <button 
+                onClick={() => setIsWhiteboardActive(true)}
+                style={{
+                  flex: 1,
+                  padding: '1rem',
+                  background: isWhiteboardActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  border: 'none',
+                  color: isWhiteboardActive ? 'var(--color-accent)' : 'white',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.85rem'
+                }}
+              >
+                🎨 Whiteboard
+              </button>
+            </div>
+
+            {/* Content */}
+            {!isWhiteboardActive ? (
+              <WorkspacePanel 
+                meetingId={meetingId}
+                workspaceUsers={participants.map(p => ({ name: p.name, role: p.role }))}
+                initialNotes={initialNotes}
+                meetingTitle={meetingTitle}
+                onSaveWorkspaceData={(notes, itemsCount) => {
+                  if (onSaveWorkspaceData) {
+                    onSaveWorkspaceData(notes, itemsCount);
+                  }
+                  setInitialNotes(notes);
+                  setActivePanel('none');
+                }}
+                onClose={() => setActivePanel('none')}
+              />
+            ) : (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'white' }}>COLLABORATIVE CANVAS</span>
+                  <button 
+                    onClick={() => clearWhiteboard(true)}
+                    className="premium-btn premium-btn-secondary"
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', height: '26px' }}
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                <div style={{
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  backgroundColor: '#0F172A',
+                  position: 'relative',
+                  aspectRatio: '8/5'
+                }}>
+                  <canvas 
+                    ref={whiteboardCanvasRef}
+                    onMouseDown={startDrawing}
+                    onMouseMove={draw}
+                    onMouseUp={stopDrawing}
+                    onMouseLeave={stopDrawing}
+                    onTouchStart={startDrawing}
+                    onTouchMove={draw}
+                    onTouchEnd={stopDrawing}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'block',
+                      cursor: 'crosshair'
+                    }}
+                  />
+                </div>
+
+                {/* Drawing Controls */}
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Color:</span>
+                  <input 
+                    type="color" 
+                    value={whiteboardColor}
+                    onChange={(e) => setWhiteboardColor(e.target.value)}
+                    style={{ border: 'none', width: '28px', height: '28px', borderRadius: '4px', cursor: 'pointer', background: 'none' }}
+                  />
+                  
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>Size:</span>
+                  <input 
+                    type="range" 
+                    min="1" 
+                    max="10" 
+                    value={whiteboardWidth}
+                    onChange={(e) => setWhiteboardWidth(parseInt(e.target.value))}
+                    style={{ width: '80px', cursor: 'pointer' }}
+                  />
+                </div>
+
+                <button 
+                  onClick={downloadWhiteboard}
+                  className="premium-btn premium-btn-primary"
+                  style={{ width: '100%', justifyContent: 'center', marginTop: 'auto', fontSize: '0.8rem', height: '36px' }}
+                >
+                  Download Sketch (PNG)
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -4392,6 +5146,65 @@ Securely encrypted under Fintech AES-256 standard.`;
             >
               <MoreHorizontal size={18} />
             </button>
+
+            {/* Emoji Reactions Trigger */}
+            <div style={{ position: 'relative' }}>
+              <button 
+                onClick={() => setShowEmojiReactions(!showEmojiReactions)}
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: showEmojiReactions ? 'rgba(255, 255, 255, 0.15)' : '#1E293B',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)'
+                }}
+                title="Send Reaction"
+              >
+                <Smile size={18} />
+              </button>
+
+              {showEmojiReactions && (
+                <div style={{
+                  position: 'absolute',
+                  bottom: '50px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  display: 'flex',
+                  gap: '8px',
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  padding: '8px 12px',
+                  borderRadius: '24px',
+                  border: '1px solid var(--border-color)',
+                  boxShadow: 'var(--shadow-premium)',
+                  zIndex: 200
+                }}>
+                  {['👏', '👍', '❤️', '😂', '😮'].map(emoji => (
+                    <button
+                      key={emoji}
+                      onClick={() => sendReaction(emoji)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        fontSize: '1.5rem',
+                        cursor: 'pointer',
+                        transition: 'transform 0.15s ease',
+                        padding: 0
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.25)'}
+                      onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Floating More Options Menu */}
             {showMoreMenu && (

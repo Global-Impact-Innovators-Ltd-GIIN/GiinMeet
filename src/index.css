@@ -923,4 +923,24 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: none !important;
 }
 
+/* Floating Emoji Reactions */
+@keyframes float-up-fade {
+  0% {
+    transform: translate(-50%, 0) scale(0.5);
+    opacity: 0;
+  }
+  15% {
+    transform: translate(-50%, -30px) scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -180px) scale(0.8);
+    opacity: 0;
+  }
+}
+
+.floating-emoji-bubble {
+  animation: float-up-fade 2.5s cubic-bezier(0.08, 0.82, 0.17, 1) forwards;
+}
+
 
