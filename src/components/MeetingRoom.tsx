@@ -254,11 +254,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
   }, []);
 
-  // Exit Picture-in-Picture on unmount
+  // Exit Picture-in-Picture and release media hardware on unmount
   useEffect(() => {
     return () => {
       if (document.pictureInPictureElement) {
         document.exitPictureInPicture().catch(err => console.warn('Failed to exit PiP on unmount:', err));
+      }
+      // Release camera and microphone hardware
+      if (localVideoTrackRef.current) {
+        localVideoTrackRef.current.stop();
+        localVideoTrackRef.current = null;
+      }
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.stop();
+        localAudioTrackRef.current = null;
       }
     };
   }, []);
@@ -1857,6 +1866,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             }
             const videoTrack = videoStream.getVideoTracks()[0];
             localVideoTrackRef.current = videoTrack;
+            videoTrack.enabled = true;
             
             setStream(prev => {
               const newStream = prev || new MediaStream();
@@ -1884,34 +1894,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           localVideoTrackRef.current.enabled = true;
         }
       } else {
-        // Stop camera track to turn off camera light
+        // Instead of stopping the track and destroying it (which causes long hardware boot delays),
+        // we keep the track alive but set enabled = false. This sends a black stream instantly and
+        // allows resuming the webcam CMT (camera) instantaneously when toggled back on.
         if (localVideoTrackRef.current) {
-          localVideoTrackRef.current.stop();
-          const oldTrack = localVideoTrackRef.current;
-          localVideoTrackRef.current = null;
-
-          setStream(prev => {
-            if (prev) {
-              prev.removeTrack(oldTrack);
-            }
-            return prev;
-          });
-
-          // Replace track with null in peer connections
-          Object.values(pcsRef.current).forEach(pc => {
-            const senders = pc.getSenders();
-            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-            if (videoSender) {
-              videoSender.replaceTrack(null);
-            }
-          });
+          localVideoTrackRef.current.enabled = false;
         }
       }
       setIsMediaInitialized(true);
     }
-
     syncVideo();
-
     return () => {
       active = false;
     };
@@ -5647,24 +5639,26 @@ Securely encrypted under Fintech AES-256 standard.`;
               <>
                 <div 
                   onClick={() => setShowMoreMenu(false)} 
-                  style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 140 }}
+                  style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 14000 }}
                 />
                 <div style={{
-                  position: 'absolute',
-                  bottom: '50px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
+                  position: window.innerWidth < 768 ? 'fixed' : 'absolute',
+                  bottom: window.innerWidth < 768 ? '70px' : '55px',
+                  left: window.innerWidth < 768 ? '16px' : '50%',
+                  right: window.innerWidth < 768 ? '16px' : 'auto',
+                  transform: window.innerWidth < 768 ? 'none' : 'translateX(-50%)',
+                  width: window.innerWidth < 768 ? 'calc(100% - 32px)' : '240px',
                   backgroundColor: 'rgba(15, 23, 42, 0.98)',
                   backdropFilter: 'blur(16px)',
                   border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  padding: '0.5rem',
+                  borderRadius: '12px',
+                  padding: '0.75rem',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '0.25rem',
-                  zIndex: 150,
-                  width: '220px',
-                  boxShadow: 'var(--shadow-premium)'
+                  gap: '0.35rem',
+                  zIndex: 15000,
+                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
+                  animation: 'pop-in 0.2s ease'
                 }}>
                   {/* Meeting Info */}
                   <button 
