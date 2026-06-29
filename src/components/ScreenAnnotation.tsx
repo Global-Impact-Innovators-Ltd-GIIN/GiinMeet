@@ -23,9 +23,18 @@ interface RemoteCursor {
 interface ScreenAnnotationProps {
   isPresenter: boolean;
   onClose: () => void;
+  sigChannelRef?: React.MutableRefObject<any>;
+  myKey: string;
+  userName: string;
 }
 
-export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter: _isPresenter, onClose }) => {
+export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ 
+  isPresenter, 
+  onClose,
+  sigChannelRef,
+  myKey,
+  userName: _userName
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawColor, setDrawColor] = useState('#FABD02'); // Gold accent by default
@@ -33,6 +42,7 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter:
   const [toolMode, setToolMode] = useState<'pen' | 'laser'>('pen');
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
+  const lastPosRef = useRef<Point | null>(null);
 
   // Active remote cursors
   const [remoteCursors] = useState<RemoteCursor[]>([]);
@@ -108,10 +118,34 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter:
     });
   }, [strokes, currentPoints, remoteCursors, drawColor, brushSize]);
 
-  // Remote annotations listener (for future live data sync)
+  // Remote annotations listener
   useEffect(() => {
-    // Sync hooks can be added here for WebRTC datachannel/realtime channel draw updates
-  }, []);
+    if (!sigChannelRef?.current) return;
+
+    const channel = sigChannelRef.current;
+
+    const onDraw = (payload: any) => {
+      const data = payload.payload;
+      if (data.senderKey !== myKey) {
+        setStrokes(prev => [...prev, { points: data.points, color: data.color, size: data.size }]);
+      }
+    };
+
+    const onClear = (payload: any) => {
+      const data = payload.payload;
+      if (data.senderKey !== myKey) {
+        setStrokes([]);
+        setCurrentPoints([]);
+      }
+    };
+
+    channel.on('broadcast', { event: 'draw-annotation' }, onDraw);
+    channel.on('broadcast', { event: 'clear-annotation' }, onClear);
+
+    return () => {
+      // Handled by parent channel teardown
+    };
+  }, [sigChannelRef, myKey]);
 
   const getCoordinates = (e: React.MouseEvent<HTMLCanvasElement>): Point => {
     const canvas = canvasRef.current;
@@ -125,8 +159,10 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter:
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isPresenter) return;
     const coord = getCoordinates(e);
     setIsDrawing(true);
+    lastPosRef.current = coord;
     
     if (toolMode === 'pen') {
       setCurrentPoints([coord]);
@@ -145,17 +181,33 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter:
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
+    if (!isPresenter || !isDrawing || !lastPosRef.current) return;
     const coord = getCoordinates(e);
 
     if (toolMode === 'pen') {
       setCurrentPoints(prev => [...prev, coord]);
+
+      // Broadcast this line segment to other participants
+      if (sigChannelRef?.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'draw-annotation',
+          payload: {
+            points: [lastPosRef.current, coord],
+            color: drawColor,
+            size: brushSize,
+            senderKey: myKey
+          }
+        });
+      }
     }
+    lastPosRef.current = coord;
   };
 
   const handleMouseUp = () => {
-    if (!isDrawing) return;
+    if (!isPresenter || !isDrawing) return;
     setIsDrawing(false);
+    lastPosRef.current = null;
     
     if (toolMode === 'pen' && currentPoints.length > 0) {
       setStrokes(prev => [...prev, { points: currentPoints, color: drawColor, size: brushSize }]);
@@ -166,6 +218,14 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter:
   const handleClear = () => {
     setStrokes([]);
     setCurrentPoints([]);
+
+    if (isPresenter && sigChannelRef?.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'clear-annotation',
+        payload: { senderKey: myKey }
+      });
+    }
   };
 
   return (
@@ -176,7 +236,7 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter:
       width: '100%',
       height: '100%',
       zIndex: 20,
-      pointerEvents: 'none',
+      pointerEvents: isPresenter ? 'auto' : 'none',
       display: 'flex',
       flexDirection: 'column'
     }}>
@@ -191,138 +251,140 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({ isPresenter:
         style={{
           width: '100%',
           height: '100%',
-          cursor: toolMode === 'laser' ? 'crosshair' : 'pencil',
-          pointerEvents: 'auto',
+          cursor: isPresenter ? (toolMode === 'laser' ? 'crosshair' : 'pencil') : 'default',
+          pointerEvents: isPresenter ? 'auto' : 'none',
           backgroundColor: 'transparent'
         }}
       />
 
-      {/* Floating Toolbar panel */}
-      <div className="glass-panel flex-between" style={{
-        position: 'absolute',
-        bottom: '20px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        padding: '0.65rem 1.25rem',
-        backgroundColor: 'rgba(18, 24, 38, 0.95)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 'var(--radius-lg)',
-        pointerEvents: 'auto',
-        gap: '1.5rem',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-        animation: 'pop-in 0.2s ease'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>CO-DRAW:</span>
-          
-          {/* Pen mode */}
-          <button
-            onClick={() => setToolMode('pen')}
-            style={{
-              background: toolMode === 'pen' ? 'var(--color-primary)' : 'transparent',
-              border: '1px solid var(--border-color)',
-              color: 'white',
-              borderRadius: '4px',
-              padding: '0.4rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center'
-            }}
-            title="Pen Drawing Mode"
-          >
-            <Edit2 size={14} color={toolMode === 'pen' ? 'var(--color-accent)' : 'white'} />
-          </button>
+      {/* Floating Toolbar panel (Only visible for the presenter) */}
+      {isPresenter && (
+        <div className="glass-panel flex-between" style={{
+          position: 'absolute',
+          bottom: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          padding: '0.65rem 1.25rem',
+          backgroundColor: 'rgba(18, 24, 38, 0.95)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 'var(--radius-lg)',
+          pointerEvents: 'auto',
+          gap: '1.5rem',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          animation: 'pop-in 0.2s ease'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>CO-DRAW:</span>
+            
+            {/* Pen mode */}
+            <button
+              onClick={() => setToolMode('pen')}
+              style={{
+                background: toolMode === 'pen' ? 'var(--color-primary)' : 'transparent',
+                border: '1px solid var(--border-color)',
+                color: 'white',
+                borderRadius: '4px',
+                padding: '0.4rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+              title="Pen Drawing Mode"
+            >
+              <Edit2 size={14} color={toolMode === 'pen' ? 'var(--color-accent)' : 'white'} />
+            </button>
 
-          {/* Laser mode */}
-          <button
-            onClick={() => setToolMode('laser')}
-            style={{
-              background: toolMode === 'laser' ? 'var(--color-primary)' : 'transparent',
-              border: '1px solid var(--border-color)',
-              color: 'white',
-              borderRadius: '4px',
-              padding: '0.4rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center'
-            }}
-            title="Laser Pointer Spotlight"
-          >
-            <Sparkles size={14} color={toolMode === 'laser' ? 'var(--color-accent)' : 'white'} />
-          </button>
-        </div>
+            {/* Laser mode */}
+            <button
+              onClick={() => setToolMode('laser')}
+              style={{
+                background: toolMode === 'laser' ? 'var(--color-primary)' : 'transparent',
+                border: '1px solid var(--border-color)',
+                color: 'white',
+                borderRadius: '4px',
+                padding: '0.4rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+              title="Laser Pointer Spotlight"
+            >
+              <Sparkles size={14} color={toolMode === 'laser' ? 'var(--color-accent)' : 'white'} />
+            </button>
+          </div>
 
-        {/* Color selectors */}
-        {toolMode === 'pen' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            {['#FABD02', '#EF4444', '#10B981', '#3B82F6', '#FFFFFF'].map(c => (
-              <button
-                key={c}
-                onClick={() => setDrawColor(c)}
-                style={{
-                  width: '16px',
-                  height: '16px',
-                  borderRadius: '50%',
-                  backgroundColor: c,
-                  border: drawColor === c ? '2px solid white' : '1px solid transparent',
-                  cursor: 'pointer',
-                  padding: 0
-                }}
+          {/* Color selectors */}
+          {toolMode === 'pen' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              {['#FABD02', '#EF4444', '#10B981', '#3B82F6', '#FFFFFF'].map(c => (
+                <button
+                  key={c}
+                  onClick={() => setDrawColor(c)}
+                  style={{
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '50%',
+                    backgroundColor: c,
+                    border: drawColor === c ? '2px solid white' : '1px solid transparent',
+                    cursor: 'pointer',
+                    padding: 0
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Brush size slider */}
+          {toolMode === 'pen' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Brush:</span>
+              <input 
+                type="range" 
+                min={1} 
+                max={10} 
+                value={brushSize} 
+                onChange={(e) => setBrushSize(Number(e.target.value))}
+                style={{ width: '60px', cursor: 'pointer' }}
               />
-            ))}
-          </div>
-        )}
+            </div>
+          )}
 
-        {/* Brush size slider */}
-        {toolMode === 'pen' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Brush:</span>
-            <input 
-              type="range" 
-              min={1} 
-              max={10} 
-              value={brushSize} 
-              onChange={(e) => setBrushSize(Number(e.target.value))}
-              style={{ width: '60px', cursor: 'pointer' }}
-            />
+          {/* Actions clear/close */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderLeft: '1px solid #1E293B', paddingLeft: '1rem' }}>
+            <button
+              onClick={handleClear}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#EF4444',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0.25rem'
+              }}
+              title="Clear All Annotations"
+            >
+              <Trash2 size={15} />
+            </button>
+            
+            <button
+              onClick={onClose}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#94A3B8',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0.25rem'
+              }}
+              title="Turn Off Annotation Overlay"
+            >
+              <X size={15} />
+            </button>
           </div>
-        )}
-
-        {/* Actions clear/close */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderLeft: '1px solid #1E293B', paddingLeft: '1rem' }}>
-          <button
-            onClick={handleClear}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#EF4444',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              padding: '0.25rem'
-            }}
-            title="Clear All Annotations"
-          >
-            <Trash2 size={15} />
-          </button>
-          
-          <button
-            onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#94A3B8',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              padding: '0.25rem'
-            }}
-            title="Turn Off Annotation Overlay"
-          >
-            <X size={15} />
-          </button>
         </div>
-      </div>
+      )}
     </div>
   );
 };

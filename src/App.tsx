@@ -117,6 +117,16 @@ function App() {
 
   // Navigation & Theme
   const [currentView, setCurrentView] = useState<string>(() => {
+    const hash = window.location.hash;
+    if (hash.startsWith('#/join')) {
+      return 'join';
+    }
+    if (hash.startsWith('#/')) {
+      const view = hash.substring(2).split('?')[0];
+      if (['dashboard', 'chats', 'contacts', 'private', 'help', 'settings', 'billing', 'superadmin'].includes(view)) {
+        return view;
+      }
+    }
     return localStorage.getItem('giin_view') || 'dashboard';
   });
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -904,10 +914,28 @@ function App() {
     };
   }, [totalUnreadMessages, isWindowFocused]);
 
-  // Sync state changes to storage
+  // Sync state changes to storage and update URL hash
   useEffect(() => {
     localStorage.setItem('giin_view', currentView);
-  }, [currentView]);
+    
+    const hash = window.location.hash;
+    // Don't override if we are loading/joining a meeting from a direct link
+    if (currentView === 'join' && hash.startsWith('#/join')) {
+      return;
+    }
+    if (currentView === 'meeting' && activeMeetingId) {
+      // Keep the join link in hash so they can copy it or rejoin on refresh
+      const passcode = lobbyMeetingData?.passcode || '';
+      window.location.hash = `#/join?id=${activeMeetingId}&passcode=${passcode}`;
+      return;
+    }
+    
+    // For all other views, update the hash
+    const targetHash = `#/${currentView}`;
+    if (window.location.hash !== targetHash) {
+      window.location.hash = targetHash;
+    }
+  }, [currentView, activeMeetingId, lobbyMeetingData]);
 
   useEffect(() => {
     localStorage.setItem('giin_premium', String(isPremium));

@@ -284,6 +284,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const whiteboardCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isDrawingRef = useRef(false);
   const lastPosRef = useRef({ x: 0, y: 0 });
+  const whiteboardStrokesRef = useRef<{x0: number, y0: number, x1: number, y1: number, color: string, width: number}[]>([]);
 
   // Virtual Breakout Rooms States
   const [breakoutRoom, setBreakoutRoom] = useState<number | null>(null);
@@ -425,18 +426,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     ctx.lineTo(x, y);
     ctx.stroke();
 
+    const stroke = {
+      x0: lastPosRef.current.x,
+      y0: lastPosRef.current.y,
+      x1: x,
+      y1: y,
+      color: whiteboardColor,
+      width: whiteboardWidth
+    };
+    whiteboardStrokesRef.current.push(stroke);
+
     if (sigChannelRef.current) {
       sigChannelRef.current.send({
         type: 'broadcast',
         event: 'draw-whiteboard',
-        payload: {
-          x0: lastPosRef.current.x,
-          y0: lastPosRef.current.y,
-          x1: x,
-          y1: y,
-          color: whiteboardColor,
-          width: whiteboardWidth
-        }
+        payload: stroke
       });
     }
 
@@ -450,6 +454,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const clearWhiteboard = (broadcast = true) => {
     const canvas = whiteboardCanvasRef.current;
     const ctx = whiteboardCtxRef.current;
+    whiteboardStrokesRef.current = [];
     if (canvas && ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#0F172A';
@@ -603,6 +608,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         whiteboardCtxRef.current = ctx;
         ctx.fillStyle = '#0F172A';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Redraw all stored strokes!
+        whiteboardStrokesRef.current.forEach(data => {
+          ctx.beginPath();
+          ctx.strokeStyle = data.color;
+          ctx.lineWidth = data.width;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.moveTo(data.x0, data.y0);
+          ctx.lineTo(data.x1, data.y1);
+          ctx.stroke();
+        });
       }
     }
   }, [isWhiteboardActive]);
@@ -1224,6 +1241,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'draw-whiteboard' }, (payload: any) => {
         const data = payload.payload;
+        whiteboardStrokesRef.current.push(data);
         const canvas = whiteboardCanvasRef.current;
         const ctx = whiteboardCtxRef.current;
         if (canvas && ctx) {
@@ -3608,6 +3626,20 @@ Securely encrypted under Fintech AES-256 standard.`;
                       <ScreenAnnotation 
                         isPresenter={true} 
                         onClose={() => setIsAnnotating(false)} 
+                        sigChannelRef={sigChannelRef}
+                        myKey={myKey}
+                        userName={currentUser?.name || 'Presenter'}
+                      />
+                    )}
+                    
+                    {/* Screen Annotation Overlay for Receivers */}
+                    {!isScreenSharing && (
+                      <ScreenAnnotation 
+                        isPresenter={false} 
+                        onClose={() => {}} 
+                        sigChannelRef={sigChannelRef}
+                        myKey={myKey}
+                        userName={currentUser?.name || 'Participant'}
                       />
                     )}
                     

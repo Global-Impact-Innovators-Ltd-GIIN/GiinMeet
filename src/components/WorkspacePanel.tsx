@@ -64,6 +64,12 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
       .on('broadcast', { event: 'clear-canvas' }, () => {
         clearLocalCanvas();
       })
+      .on('broadcast', { event: 'notes-update' }, (payload: any) => {
+        setMinutesText(payload.payload.text);
+      })
+      .on('broadcast', { event: 'tasks-update' }, (payload: any) => {
+        setActionItems(payload.payload.tasks);
+      })
       .subscribe();
 
     wbChannelRef.current = channel;
@@ -233,15 +239,31 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
       completed: false
     };
 
-    setActionItems(prev => [...prev, newTask]);
+    const nextTasks = [...actionItems, newTask];
+    setActionItems(nextTasks);
     setTaskText('');
     setTaskDate('');
+
+    if (wbChannelRef.current) {
+      wbChannelRef.current.send({
+        type: 'broadcast',
+        event: 'tasks-update',
+        payload: { tasks: nextTasks }
+      });
+    }
   };
 
   const toggleTaskCompleted = (id: string) => {
-    setActionItems(prev => 
-      prev.map(task => task.id === id ? { ...task, completed: !task.completed } : task)
-    );
+    const nextTasks = actionItems.map(task => task.id === id ? { ...task, completed: !task.completed } : task);
+    setActionItems(nextTasks);
+
+    if (wbChannelRef.current) {
+      wbChannelRef.current.send({
+        type: 'broadcast',
+        event: 'tasks-update',
+        payload: { tasks: nextTasks }
+      });
+    }
   };
 
   const handleSaveAll = () => {
@@ -414,7 +436,17 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
             
             <textarea
               value={minutesText}
-              onChange={(e) => setMinutesText(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setMinutesText(val);
+                if (wbChannelRef.current) {
+                  wbChannelRef.current.send({
+                    type: 'broadcast',
+                    event: 'notes-update',
+                    payload: { text: val }
+                  });
+                }
+              }}
               style={{
                 flex: 1,
                 minHeight: '280px',
