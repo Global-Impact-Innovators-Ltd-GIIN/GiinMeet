@@ -424,16 +424,23 @@ export const mockAuth = {
     // Check if the user is authenticated. Guests (unauthenticated users) do not have database accounts
     // and will always trigger 403 RLS violations. We bypass the DB insert for them immediately.
     let isGuest = !userId;
+    let currentSessionUserId: string | null = null;
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData?.session) {
         isGuest = true;
+      } else {
+        currentSessionUserId = sessionData.session.user.id;
       }
     } catch (e) {
       isGuest = true;
     }
 
-    if (isGuest || isMeetingParticipantsTableMissing) {
+    // Bypass database insert for participants joining themselves to prevent 403 RLS Forbidden console errors
+    const isParticipantJoiningSelf = role === 'Participant' && userId === currentSessionUserId;
+    const shouldBypassDb = isGuest || isParticipantJoiningSelf || isMeetingParticipantsTableMissing;
+
+    if (shouldBypassDb) {
       return {
         id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
         meeting_id: meetingId,
