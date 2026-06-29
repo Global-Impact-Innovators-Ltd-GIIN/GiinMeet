@@ -148,8 +148,15 @@ function App() {
     return localStorage.getItem('giin_email') || 'user@giinmeet.com';
   });
 
-  // Meeting History State
-  const [meetingHistory, setMeetingHistory] = useState<Meeting[]>([]);
+  // Meeting History State with localStorage hydration
+  const [meetingHistory, setMeetingHistory] = useState<Meeting[]>(() => {
+    try {
+      const cached = localStorage.getItem('giin_meetings');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
   const [lobbyMeetingData, setLobbyMeetingData] = useState<{
     id: string;
@@ -244,10 +251,51 @@ function App() {
     const loadAllThreads = async () => {
       try {
         // Fetch groups the current user belongs to
-        const { data: memberships } = await supabase
+        let { data: memberships } = await supabase
           .from('group_members')
           .select('group_id, groups(id, name)')
           .eq('user_id', user.id);
+
+        // Auto-seed demo group if the user has no groups in the DB
+        if (!memberships || memberships.length === 0) {
+          console.log('[App] No groups found in DB, seeding demo group...');
+          const { data: newGroup, error: groupErr } = await supabase
+            .from('groups')
+            .insert([{ name: 'Global Impact Innovators Official' }])
+            .select()
+            .single();
+
+          if (newGroup && !groupErr) {
+            await supabase
+              .from('group_members')
+              .insert([{ group_id: newGroup.id, user_id: user.id }]);
+
+            const demoMessages = [
+              {
+                thread_id: `group_${newGroup.id}`,
+                sender_name: 'System Assistant',
+                text: 'Welcome to GIIN Meet! This is your official collaborative space.',
+                user_id: 'system'
+              },
+              {
+                thread_id: `group_${newGroup.id}`,
+                sender_name: 'GIIN Bot',
+                text: 'You can start an instant meeting or schedule a team sync using the Dashboard.',
+                user_id: 'system'
+              }
+            ];
+
+            for (const msg of demoMessages) {
+              await supabase.from('messages').insert([msg]);
+            }
+
+            const refetched = await supabase
+              .from('group_members')
+              .select('group_id, groups(id, name)')
+              .eq('user_id', user.id);
+            memberships = refetched.data;
+          }
+        }
 
         const userGroups = memberships?.map((m: any) => m.groups).filter(Boolean) || [];
         const userGroupIds = new Set(userGroups.map(g => g.id));
@@ -777,11 +825,52 @@ function App() {
   }, []);
 
   // Fetch meetings from Supabase database when user updates
+  // Load meetings on startup with auto-seeding and localStorage fallback
   useEffect(() => {
     if (user && user.id) {
       const loadMeetings = async () => {
         try {
-          const data = await mockAuth.getMeetings(user.id);
+          const cachedRaw = localStorage.getItem('giin_meetings');
+          const cached = cachedRaw ? JSON.parse(cachedRaw) : [];
+          if (cached.length > 0) {
+            setMeetingHistory(cached);
+          }
+
+          let data = await mockAuth.getMeetings(user.id);
+          
+          // Auto-seed demo meetings if database has no meetings
+          if (!data || data.length === 0) {
+            console.log('[App] No meetings found in DB, seeding demo meetings...');
+            const demoMeetings = [
+              {
+                title: 'GIIN Meet Official Launch',
+                time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                duration: '45 mins',
+                require_waiting_room: false
+              },
+              {
+                title: 'Weekly Innovation Sync',
+                time: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+                duration: '30 mins',
+                require_waiting_room: true
+              }
+            ];
+
+            for (const m of demoMeetings) {
+              await mockAuth.createMeeting({
+                user_id: user.id,
+                title: m.title,
+                time: m.time,
+                duration: m.duration,
+                status: m.require_waiting_room ? 'Scheduled' : 'In Progress',
+                host: 'You',
+                require_waiting_room: m.require_waiting_room
+              });
+            }
+
+            data = await mockAuth.getMeetings(user.id);
+          }
+
           if (data && data.length > 0) {
             const mapped: Meeting[] = data.map((m: any) => ({
               id: m.id,
@@ -792,9 +881,22 @@ function App() {
               host: m.host || 'You',
               passcode: m.passcode
             }));
-            setMeetingHistory(mapped);
+
+            // Merge with local cache
+            const merged = [...mapped];
+            cached.forEach((cm: any) => {
+              if (!merged.some(m => m.id === cm.id)) {
+                merged.push(cm);
+              }
+            });
+
+            setMeetingHistory(merged);
           } else {
-            setMeetingHistory([]);
+            if (cached.length > 0) {
+              setMeetingHistory(cached);
+            } else {
+              setMeetingHistory([]);
+            }
           }
         } catch (err) {
           console.error('Failed to load meetings from database:', err);

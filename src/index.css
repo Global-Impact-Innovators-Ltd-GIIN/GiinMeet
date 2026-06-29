@@ -798,13 +798,13 @@ h1, h2, h3, h4, h5, h6 {
 [data-ui-style="neumorphism"] .sidebar-btn.active {
   background: rgba(var(--color-primary-rgb), 0.08) !important;
   box-shadow: var(--shadow-neumorphic-in) !important;
-  color: var(--color-primary) !important;
+  color: white !important;
   border-radius: var(--radius-md) !important;
   border: none !important;
 }
 
 [data-ui-style="neumorphism"] .sidebar-btn.active svg {
-  filter: drop-shadow(0 0 3px var(--color-primary));
+  filter: drop-shadow(0 0 3px white);
 }
 
 [data-ui-style="neumorphism"] .sidebar-upgrade-card {
