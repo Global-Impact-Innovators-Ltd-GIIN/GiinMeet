@@ -1455,7 +1455,8 @@ function App() {
     }}>
       
       {/* Sidebar Navigation */}
-      <aside className="sidebar-desktop" style={{
+      {currentView !== 'meeting' && (
+        <aside className="sidebar-desktop" style={{
         width: isSidebarCollapsed ? '72px' : '260px',
         backgroundColor: 'var(--bg-sidebar)',
         display: 'flex',
@@ -1868,6 +1869,7 @@ function App() {
           </button>
         </div>
       </aside>
+      )}
 
       {/* Main Framework Container */}
       <div style={{
@@ -1878,313 +1880,315 @@ function App() {
       }}>
         
         {/* Top Header Row */}
-        <header style={{
-          height: '70px',
-          borderBottom: '1px solid var(--border-color)',
-          backgroundColor: 'var(--bg-card)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 2.5rem',
-          flexShrink: 0,
-          zIndex: 40
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            {/* Mobile Branding Header */}
-            <div 
-              className="mobile-brand-container" 
-              onClick={() => {
-                setTargetContactId(null);
-                setCurrentView('dashboard');
-              }}
-              style={{
-                alignItems: 'center',
-                gap: '0.5rem',
-                cursor: 'pointer'
-              }}
-              title="Go to Dashboard"
-            >
-              <img 
-                src={logoUrl} 
-                alt="GIIN MEET Logo" 
+        {currentView !== 'meeting' && (
+          <header style={{
+            height: '70px',
+            borderBottom: '1px solid var(--border-color)',
+            backgroundColor: 'var(--bg-card)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 2.5rem',
+            flexShrink: 0,
+            zIndex: 40
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              {/* Mobile Branding Header */}
+              <div 
+                className="mobile-brand-container" 
+                onClick={() => {
+                  setTargetContactId(null);
+                  setCurrentView('dashboard');
+                }}
                 style={{
-                  width: '32px',
-                  height: '32px',
-                  objectFit: 'contain',
-                  filter: isDarkMode ? 'brightness(0) invert(1)' : 'none'
-                }} 
-              />
-              <span className="mobile-hidden" style={{
-                fontFamily: 'var(--font-heading)',
-                fontWeight: 800,
-                fontSize: '1.1rem',
-                letterSpacing: '0.03em',
-                color: 'var(--text-main)'
-              }}>
-                {brandName}
-              </span>
-              <span className="mobile-hidden" style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0.25rem' }}>|</span>
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  cursor: 'pointer'
+                }}
+                title="Go to Dashboard"
+              >
+                <img 
+                  src={logoUrl} 
+                  alt="GIIN MEET Logo" 
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    objectFit: 'contain',
+                    filter: isDarkMode ? 'brightness(0) invert(1)' : 'none'
+                  }} 
+                />
+                <span className="mobile-hidden" style={{
+                  fontFamily: 'var(--font-heading)',
+                  fontWeight: 800,
+                  fontSize: '1.1rem',
+                  letterSpacing: '0.03em',
+                  color: 'var(--text-main)'
+                }}>
+                  {brandName}
+                </span>
+                <span className="mobile-hidden" style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0.25rem' }}>|</span>
+              </div>
+
+              <h2 className="header-title" style={{ fontWeight: 700, textTransform: 'capitalize', fontFamily: 'var(--font-heading)' }}>
+                {currentView === 'help' ? 'Help Center & Support' : currentView === 'chats' ? 'Chat Center' : currentView === 'meeting' ? 'Active Call Room' : currentView}
+              </h2>
             </div>
 
-            <h2 className="header-title" style={{ fontWeight: 700, textTransform: 'capitalize', fontFamily: 'var(--font-heading)' }}>
-              {currentView === 'help' ? 'Help Center & Support' : currentView === 'chats' ? 'Chat Center' : currentView === 'meeting' ? 'Active Call Room' : currentView}
-            </h2>
-          </div>
+            <div className="header-actions">
+              {/* Quick Meeting button in Header */}
+              {currentView !== 'meeting' && (
+                <button 
+                  onClick={() => handleStartCall()}
+                  className="premium-btn premium-btn-primary" 
+                  style={{ padding: '0.5rem 1.25rem', fontSize: '0.85rem', borderRadius: '6px' }}
+                >
+                  Start Instant Meeting
+                </button>
+              )}
 
-          <div className="header-actions">
-            {/* Quick Meeting button in Header */}
-            {currentView !== 'meeting' && (
+              {/* Theme quick toggler */}
               <button 
-                onClick={() => handleStartCall()}
-                className="premium-btn premium-btn-primary" 
-                style={{ padding: '0.5rem 1.25rem', fontSize: '0.85rem', borderRadius: '6px' }}
-              >
-                Start Instant Meeting
-              </button>
-            )}
-
-            {/* Theme quick toggler */}
-            <button 
-              onClick={handleToggleTheme}
-              className="header-icon-btn theme-toggle-btn"
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--text-muted)',
-                display: 'flex',
-                alignItems: 'center'
-              }}
-            >
-              {isDarkMode ? <Sun size={20} color="var(--color-accent)" /> : <Moon size={20} color="var(--color-primary)" />}
-            </button>
-
-            {/* Notification Dropper */}
-            <div style={{ position: 'relative' }}>
-              <button 
-                onClick={() => {
-                  setShowNotifDropdown(!showNotifDropdown);
-                  setShowProfileDropdown(false);
-                  markAllNotificationsRead();
-                }}
-                className="header-icon-btn notif-toggle-btn"
+                onClick={handleToggleTheme}
+                className="header-icon-btn theme-toggle-btn"
                 style={{
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
                   color: 'var(--text-muted)',
                   display: 'flex',
-                  alignItems: 'center',
-                  position: 'relative'
+                  alignItems: 'center'
                 }}
               >
-                <Bell size={20} />
-                {unreadNotifCount > 0 && (
-                  <span style={{
+                {isDarkMode ? <Sun size={20} color="var(--color-accent)" /> : <Moon size={20} color="var(--color-primary)" />}
+              </button>
+
+              {/* Notification Dropper */}
+              <div style={{ position: 'relative' }}>
+                <button 
+                  onClick={() => {
+                    setShowNotifDropdown(!showNotifDropdown);
+                    setShowProfileDropdown(false);
+                    markAllNotificationsRead();
+                  }}
+                  className="header-icon-btn notif-toggle-btn"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    position: 'relative'
+                  }}
+                >
+                  <Bell size={20} />
+                  {unreadNotifCount > 0 && (
+                    <span style={{
+                      position: 'absolute',
+                      top: '-6px',
+                      right: '-6px',
+                      backgroundColor: '#EF4444',
+                      color: 'white',
+                      fontSize: '0.65rem',
+                      fontWeight: 700,
+                      width: '16px',
+                      height: '16px',
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      animation: 'pulse-ring 2s infinite'
+                    }}>
+                      {unreadNotifCount}
+                    </span>
+                  )}
+                </button>
+
+                {showNotifDropdown && (
+                  <div className="glass-panel" style={{
                     position: 'absolute',
-                    top: '-6px',
-                    right: '-6px',
-                    backgroundColor: '#EF4444',
-                    color: 'white',
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    width: '16px',
-                    height: '16px',
+                    top: '40px',
+                    right: 0,
+                    width: '320px',
+                    backgroundColor: 'var(--bg-card)',
+                    padding: '1.25rem',
+                    zIndex: 100,
+                    animation: 'pop-in 0.2s ease',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem'
+                  }}>
+                    <div className="flex-between">
+                      <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Alerts & Notifications</span>
+                      <button 
+                        onClick={clearNotifications}
+                        style={{ background: 'none', border: 'none', fontSize: '0.75rem', color: 'var(--color-secondary)', cursor: 'pointer' }}
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                    <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)' }} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '200px', overflowY: 'auto' }}>
+                      {notifications.map((n) => (
+                        <div key={n.id} style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8rem' }}>
+                          <div style={{ marginTop: '0.15rem' }}><CheckCircle2 size={12} color="#10B981" /></div>
+                          <div>
+                            <p style={{ color: 'var(--text-main)' }}>{n.text}</p>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{n.time}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {notifications.length === 0 && (
+                        <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
+                          No new notifications.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Profile Dropper */}
+              <div style={{ position: 'relative' }}>
+                <div 
+                  onClick={() => {
+                    setShowProfileDropdown(!showProfileDropdown);
+                    setShowNotifDropdown(false);
+                  }}
+                  className="header-profile-trigger"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
                     borderRadius: '50%',
+                    backgroundColor: 'var(--color-primary)',
+                    color: 'white',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    animation: 'pulse-ring 2s infinite'
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    overflow: 'hidden'
                   }}>
-                    {unreadNotifCount}
-                  </span>
-                )}
-              </button>
-
-              {showNotifDropdown && (
-                <div className="glass-panel" style={{
-                  position: 'absolute',
-                  top: '40px',
-                  right: 0,
-                  width: '320px',
-                  backgroundColor: 'var(--bg-card)',
-                  padding: '1.25rem',
-                  zIndex: 100,
-                  animation: 'pop-in 0.2s ease',
-                  border: '1px solid var(--border-color)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.75rem'
-                }}>
-                  <div className="flex-between">
-                    <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Alerts & Notifications</span>
-                    <button 
-                      onClick={clearNotifications}
-                      style={{ background: 'none', border: 'none', fontSize: '0.75rem', color: 'var(--color-secondary)', cursor: 'pointer' }}
-                    >
-                      Clear All
-                    </button>
-                  </div>
-                  <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)' }} />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '200px', overflowY: 'auto' }}>
-                    {notifications.map((n) => (
-                      <div key={n.id} style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8rem' }}>
-                        <div style={{ marginTop: '0.15rem' }}><CheckCircle2 size={12} color="#10B981" /></div>
-                        <div>
-                          <p style={{ color: 'var(--text-main)' }}>{n.text}</p>
-                          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{n.time}</span>
-                        </div>
-                      </div>
-                    ))}
-                    {notifications.length === 0 && (
-                      <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
-                        No new notifications.
-                      </div>
+                    {user?.avatar_url ? (
+                      <img 
+                        src={user.avatar_url} 
+                        alt={userName} 
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                      />
+                    ) : (
+                      userName.split(' ').map(n => n[0]).join('')
                     )}
                   </div>
+                  <ChevronDown size={14} color="var(--text-muted)" />
                 </div>
-              )}
-            </div>
 
-            {/* Profile Dropper */}
-            <div style={{ position: 'relative' }}>
-              <div 
-                onClick={() => {
-                  setShowProfileDropdown(!showProfileDropdown);
-                  setShowNotifDropdown(false);
-                }}
-                className="header-profile-trigger"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  cursor: 'pointer'
-                }}
-              >
-                <div style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  backgroundColor: 'var(--color-primary)',
-                  color: 'white',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 700,
-                  fontSize: '0.85rem',
-                  overflow: 'hidden'
-                }}>
-                  {user?.avatar_url ? (
-                    <img 
-                      src={user.avatar_url} 
-                      alt={userName} 
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                    />
-                  ) : (
-                    userName.split(' ').map(n => n[0]).join('')
-                  )}
-                </div>
-                <ChevronDown size={14} color="var(--text-muted)" />
+                {showProfileDropdown && (
+                  <div className="glass-panel" style={{
+                    position: 'absolute',
+                    top: '45px',
+                    right: 0,
+                    width: '240px',
+                    backgroundColor: 'var(--bg-card)',
+                    padding: '1.25rem',
+                    zIndex: 100,
+                    animation: 'pop-in 0.2s ease',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem'
+                  }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.95rem', fontWeight: 700 }}>{userName}</h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{userEmail}</p>
+                    </div>
+                    <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)' }} />
+                    <button 
+                      onClick={() => {
+                        setCurrentView('settings');
+                        setShowProfileDropdown(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-main)',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                        textAlign: 'left'
+                      }}
+                    >
+                      <User size={14} />
+                      <span>My Profile</span>
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setCurrentView('billing');
+                        setShowProfileDropdown(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-main)',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                        textAlign: 'left'
+                      }}
+                    >
+                      <CreditCard size={14} />
+                      <span>Billing & Plans</span>
+                    </button>
+                    <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)', margin: '0.25rem 0' }} />
+                    <button 
+                      onClick={async () => {
+                        try {
+                          await supabase.auth.signOut();
+                        } catch (err) {
+                          console.warn('Signout issue:', err);
+                        }
+                        localStorage.clear();
+                        window.location.reload();
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        background: 'none',
+                        border: 'none',
+                        color: '#EF4444',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontWeight: 600
+                      }}
+                    >
+                      <LogOut size={14} color="#EF4444" />
+                      <span>Log Out</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
-              {showProfileDropdown && (
-                <div className="glass-panel" style={{
-                  position: 'absolute',
-                  top: '45px',
-                  right: 0,
-                  width: '240px',
-                  backgroundColor: 'var(--bg-card)',
-                  padding: '1.25rem',
-                  zIndex: 100,
-                  animation: 'pop-in 0.2s ease',
-                  border: '1px solid var(--border-color)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.75rem'
-                }}>
-                  <div>
-                    <h4 style={{ fontSize: '0.95rem', fontWeight: 700 }}>{userName}</h4>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{userEmail}</p>
-                  </div>
-                  <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)' }} />
-                  <button 
-                    onClick={() => {
-                      setCurrentView('settings');
-                      setShowProfileDropdown(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-main)',
-                      fontSize: '0.85rem',
-                      cursor: 'pointer',
-                      textAlign: 'left'
-                    }}
-                  >
-                    <User size={14} />
-                    <span>My Profile</span>
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setCurrentView('billing');
-                      setShowProfileDropdown(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-main)',
-                      fontSize: '0.85rem',
-                      cursor: 'pointer',
-                      textAlign: 'left'
-                    }}
-                  >
-                    <CreditCard size={14} />
-                    <span>Billing & Plans</span>
-                  </button>
-                  <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)', margin: '0.25rem 0' }} />
-                  <button 
-                    onClick={async () => {
-                      try {
-                        await supabase.auth.signOut();
-                      } catch (err) {
-                        console.warn('Signout issue:', err);
-                      }
-                      localStorage.clear();
-                      window.location.reload();
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      background: 'none',
-                      border: 'none',
-                      color: '#EF4444',
-                      fontSize: '0.85rem',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontWeight: 600
-                    }}
-                  >
-                    <LogOut size={14} color="#EF4444" />
-                    <span>Log Out</span>
-                  </button>
-                </div>
-              )}
             </div>
-
-          </div>
-        </header>
+          </header>
+        )}
 
         {/* Dynamic Inner Panel viewport */}
         <main style={{
           flex: 1,
-          padding: '2.5rem',
+          padding: (currentView === 'meeting' || currentView === 'dashboard') && activeMeetingId ? '0' : '2.5rem',
           overflowY: 'auto',
           backgroundColor: 'transparent'
         }}>

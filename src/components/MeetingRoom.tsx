@@ -3,7 +3,7 @@ import {
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
   SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings,
   MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
-  LogOut, UserCheck, X
+  LogOut, UserCheck, X, Hand
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -272,6 +272,81 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [qaQuestions, setQaQuestions] = useState<{ id: string; text: string; author: string; upvotes: number; upvotedBy: string[] }[]>([]);
   const [newQuestionText, setNewQuestionText] = useState('');
   const [isQAActive, setIsQAActive] = useState(false);
+
+  // Handraise / Speaker Queue States
+  interface HandRaise {
+    userId: string;
+    name: string;
+    timestamp: number;
+    reason?: string;
+  }
+  const [handRaises, setHandRaises] = useState<HandRaise[]>([]);
+  const [localHandRaised, setLocalHandRaised] = useState(false);
+  const [handRaiseReason, setHandRaiseReason] = useState<string | null>(null);
+  const [showHandRaiseMenu, setShowHandRaiseMenu] = useState(false);
+
+  const toggleHandRaise = (reason?: string) => {
+    if (localHandRaised) {
+      // Lower hand
+      setLocalHandRaised(false);
+      setHandRaiseReason(null);
+      setHandRaises(prev => prev.filter(hr => hr.userId !== myKey));
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'lower-hand',
+          payload: { userId: myKey }
+        });
+      }
+    } else {
+      // Raise hand
+      setLocalHandRaised(true);
+      setHandRaiseReason(reason || null);
+      const newRaise = {
+        userId: myKey,
+        name: currentUser?.name || 'You',
+        timestamp: Date.now(),
+        reason
+      };
+      setHandRaises(prev => [...prev.filter(hr => hr.userId !== myKey), newRaise]);
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'hand-raise',
+          payload: newRaise
+        });
+      }
+    }
+    setShowHandRaiseMenu(false);
+  };
+
+  const lowerHand = (userId: string) => {
+    if (userId === myKey) {
+      setLocalHandRaised(false);
+      setHandRaiseReason(null);
+    }
+    setHandRaises(prev => prev.filter(hr => hr.userId !== userId));
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'lower-hand',
+        payload: { userId }
+      });
+    }
+  };
+
+  const clearAllHands = () => {
+    setLocalHandRaised(false);
+    setHandRaiseReason(null);
+    setHandRaises([]);
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'clear-all-hands',
+        payload: {}
+      });
+    }
+  };
 
   // Active peer connection keys state to avoid ref access during render
   const [activePeerKeys, setActivePeerKeys] = useState<string[]>([]);
@@ -1217,6 +1292,23 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             setActiveCaption(null);
           }, 4000);
         }
+      })
+      .on('broadcast', { event: 'hand-raise' }, (payload: any) => {
+        const data = payload.payload;
+        setHandRaises(prev => [...prev.filter(hr => hr.userId !== data.userId), data]);
+      })
+      .on('broadcast', { event: 'lower-hand' }, (payload: any) => {
+        const data = payload.payload;
+        if (data.userId === myKey) {
+          setLocalHandRaised(false);
+          setHandRaiseReason(null);
+        }
+        setHandRaises(prev => prev.filter(hr => hr.userId !== data.userId));
+      })
+      .on('broadcast', { event: 'clear-all-hands' }, () => {
+        setLocalHandRaised(false);
+        setHandRaiseReason(null);
+        setHandRaises([]);
       })
       .on('broadcast', { event: 'signal' }, (payload: any) => {
         const data = payload.payload;
@@ -2587,7 +2679,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     <div ref={meetingRoomRef} style={{
       display: 'flex',
       flexDirection: 'column',
-      height: isFullscreen ? '100vh' : 'calc(100vh - 80px)',
+      height: isFullscreen ? '100vh' : '100%',
       backgroundColor: '#07090E', // Dark screen for immersive meeting
       color: 'white',
       borderRadius: isFullscreen ? '0' : 'var(--radius-lg)',
@@ -3340,6 +3432,28 @@ Securely encrypted under Fintech AES-256 standard.`;
                   </div>
                 )}
                 
+                {localHandRaised && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '12px',
+                    right: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    backgroundColor: 'var(--color-accent)',
+                    color: 'black',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    zIndex: 10,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                  }}>
+                    <Hand size={11} />
+                    <span>{handRaiseReason ? handRaiseReason.split(' ')[1] || handRaiseReason : 'Hand Raised'}</span>
+                  </div>
+                )}
+
                 <div style={{
                   position: 'absolute',
                   bottom: '12px',
@@ -3462,6 +3576,34 @@ Securely encrypted under Fintech AES-256 standard.`;
                       </span>
                     </div>
                   )}
+
+                  {(() => {
+                    const isUserHandRaised = handRaises.some(hr => hr.userId === peerKey);
+                    const userHandRaise = handRaises.find(hr => hr.userId === peerKey);
+                    const handRaiseIndex = handRaises.findIndex(hr => hr.userId === peerKey);
+                    
+                    return isUserHandRaised && userHandRaise && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '12px',
+                        left: pState.latency !== undefined ? '80px' : '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        backgroundColor: 'var(--color-accent)',
+                        color: 'black',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        zIndex: 10,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                      }}>
+                        <Hand size={11} />
+                        <span>#{handRaiseIndex + 1} {userHandRaise.reason ? (userHandRaise.reason.split(' ')[1] || userHandRaise.reason) : 'Raised'}</span>
+                      </div>
+                    );
+                  })()}
 
                   {hasConnection && pState.latency !== undefined && (
                     <div style={{
@@ -3815,6 +3957,86 @@ Securely encrypted under Fintech AES-256 standard.`;
             </div>
 
             <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Speaker Queue (Handraises) */}
+              {handRaises.length > 0 && (
+                <div style={{
+                  padding: '0.75rem',
+                  border: '1px solid var(--color-accent)',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(250, 189, 2, 0.05)',
+                  marginBottom: '1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.65rem'
+                }}>
+                  <div className="flex-between">
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-accent)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      🙋 Speaker Queue ({handRaises.length})
+                    </span>
+                    {isAdmin && (
+                      <button 
+                        onClick={clearAllHands}
+                        style={{ border: 'none', background: 'none', color: '#EF4444', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 600 }}
+                      >
+                        Lower All
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {handRaises.map((hr, index) => {
+                      const waitingSecs = Math.floor((Date.now() - hr.timestamp) / 1000);
+                      const waitingText = waitingSecs < 60 ? `${waitingSecs}s` : `${Math.floor(waitingSecs / 60)}m`;
+                      
+                      return (
+                        <div key={hr.userId} className="flex-between" style={{
+                          padding: '0.45rem 0.6rem',
+                          borderRadius: '4px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                          borderLeft: '3px solid var(--color-accent)'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-accent)', minWidth: '16px' }}>
+                              #{index + 1}
+                            </span>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: '0.85rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {hr.name}
+                              </div>
+                              {hr.reason && (
+                                <div style={{ fontSize: '0.7rem', color: 'var(--color-secondary)', fontStyle: 'italic' }}>
+                                  {hr.reason}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              {waitingText}
+                            </span>
+                            {isAdmin && (
+                              <button 
+                                onClick={() => lowerHand(hr.userId)}
+                                style={{
+                                  border: 'none',
+                                  background: 'rgba(239, 68, 68, 0.15)',
+                                  color: '#EF4444',
+                                  padding: '2px 6px',
+                                  borderRadius: '3px',
+                                  fontSize: '0.65rem',
+                                  cursor: 'pointer',
+                                  fontWeight: 600
+                                }}
+                              >
+                                Lower
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {/* Host */}
               <div className="flex-between">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -5145,6 +5367,100 @@ Securely encrypted under Fintech AES-256 standard.`;
             >
               {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>
+
+            {/* Hand Raise / Lower */}
+            <div style={{ position: 'relative' }}>
+              <button 
+                onClick={() => {
+                  if (localHandRaised) {
+                    toggleHandRaise();
+                  } else {
+                    setShowHandRaiseMenu(!showHandRaiseMenu);
+                  }
+                }}
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: localHandRaised ? 'var(--color-accent)' : '#1E293B',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: localHandRaised ? 'black' : 'white',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)'
+                }}
+                title={localHandRaised ? `Lower Hand (Reason: ${handRaiseReason || 'None'})` : "Raise Hand"}
+              >
+                <Hand size={18} />
+              </button>
+              
+              {showHandRaiseMenu && (
+                <div style={{
+                  position: 'absolute',
+                  bottom: '50px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                  border: '1px solid #1E293B',
+                  borderRadius: '8px',
+                  padding: '0.5rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                  zIndex: 1000,
+                  boxShadow: 'var(--shadow-premium)',
+                  width: '140px',
+                  backdropFilter: 'blur(10px)'
+                }}>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textAlign: 'center', marginBottom: '2px', fontWeight: 600 }}>Select Reason</span>
+                  {[
+                    { label: '🙋 Question', value: 'Question' },
+                    { label: '💬 Comment', value: 'Comment' },
+                    { label: '💡 Idea', value: 'Idea' },
+                    { label: '🚨 Urgent', value: 'Urgent' }
+                  ].map(r => (
+                    <button
+                      key={r.value}
+                      onClick={() => toggleHandRaise(r.label)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'white',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                  <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: '2px 0' }} />
+                  <button
+                    onClick={() => toggleHandRaise()}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--color-accent)',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontWeight: 600
+                    }}
+                  >
+                    ✋ Just Raise Hand
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Annotate Screen */}
             {isScreenSharing && (
