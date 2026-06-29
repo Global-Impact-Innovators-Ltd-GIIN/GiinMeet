@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
   SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings,
-  MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile
+  MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
+  LogOut, UserCheck, X
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -236,6 +237,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [selectedNewAdminId, setSelectedNewAdminId] = useState<string>('');
+  const [leaveOption, setLeaveOption] = useState<'transfer' | 'end' | null>(null);
 
   // Host Meeting Settings States
   const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
@@ -1877,6 +1879,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       });
     }
     setShowLeaveModal(false);
+    setLeaveOption(null);
+    setSelectedNewAdminId('');
     onEndMeeting();
   };
 
@@ -1900,6 +1904,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       
       // 3. Leave the meeting
       setShowLeaveModal(false);
+      setLeaveOption(null);
+      setSelectedNewAdminId('');
       onEndMeeting();
     } catch (err) {
       console.error('Failed to transfer host role:', err);
@@ -5588,103 +5594,316 @@ Securely encrypted under Fintech AES-256 standard.`;
           left: 0,
           width: '100%',
           height: '100%',
-          backgroundColor: 'rgba(0,0,0,0.75)',
+          backgroundColor: 'rgba(5, 7, 12, 0.85)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 300,
-          backdropFilter: 'blur(8px)'
+          zIndex: 9999,
+          backdropFilter: 'blur(16px)',
+          transition: 'all 0.3s ease'
         }}>
           <div className="glass-panel" style={{
-            width: '400px',
-            padding: '2rem',
-            backgroundColor: 'var(--bg-card)',
-            border: '1px solid var(--border-color)',
+            width: '460px',
+            padding: '2.25rem',
+            backgroundColor: '#090D16',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '16px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '1.5rem',
-            boxShadow: 'var(--shadow-premium)',
-            animation: 'pop-in 0.25s ease'
+            gap: '1.75rem',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+            animation: 'pop-in 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+            position: 'relative'
           }}>
-            <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: 'white', fontFamily: 'var(--font-heading)' }}>
-              Leave Meeting
-            </h3>
-            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-              As the host, you cannot leave the meeting without either ending the call for everyone or designating another participant to be the new host.
-            </p>
+            {/* Close Icon Button */}
+            <button
+              onClick={() => {
+                setShowLeaveModal(false);
+                setLeaveOption(null);
+                setSelectedNewAdminId('');
+              }}
+              style={{
+                position: 'absolute',
+                top: '1.25rem',
+                right: '1.25rem',
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: '0.25rem',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                backgroundColor: 'rgba(255, 255, 255, 0.02)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = 'white';
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = 'var(--text-muted)';
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+              }}
+            >
+              <X size={18} />
+            </button>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-                DESIGNATE NEW HOST TO LEAVE
-              </label>
-              <select
-                value={selectedNewAdminId}
-                onChange={(e) => setSelectedNewAdminId(e.target.value)}
-                className="premium-input"
-                style={{
-                  width: '100%',
-                  height: '40px',
-                  backgroundColor: 'rgba(0,0,0,0.2)',
-                  color: 'white',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '6px',
-                  padding: '0 0.5rem',
-                  fontSize: '0.85rem'
-                }}
-              >
-                <option value="">-- Select a participant --</option>
-                {participants.map(p => (
-                  <option key={p.id} value={p.userId || p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)', letterSpacing: '-0.02em' }}>
+                Exit Boardroom
+              </h3>
+              <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                As the meeting host, you must choose how to exit. You cannot leave the meeting orphaned while other participants are present.
+              </p>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
-              <button
-                onClick={handleTransferAndLeave}
-                disabled={!selectedNewAdminId}
-                className="premium-btn premium-btn-primary"
-                style={{
-                  width: '100%',
-                  justifyContent: 'center',
-                  height: '40px',
-                  opacity: selectedNewAdminId ? 1 : 0.5,
-                  cursor: selectedNewAdminId ? 'pointer' : 'not-allowed'
-                }}
-              >
-                Transfer Host & Leave
-              </button>
+            {/* Options List */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               
-              <button
-                onClick={handleEndForAll}
-                className="premium-btn premium-btn-danger"
+              {/* Option 1: Transfer Host & Leave */}
+              <div 
+                onClick={() => setLeaveOption('transfer')}
                 style={{
-                  width: '100%',
-                  justifyContent: 'center',
-                  height: '40px',
-                  backgroundColor: '#EF4444'
+                  cursor: 'pointer',
+                  padding: '1.25rem',
+                  borderRadius: '12px',
+                  border: leaveOption === 'transfer' ? '2px solid var(--color-primary)' : '1px solid rgba(255, 255, 255, 0.08)',
+                  backgroundColor: leaveOption === 'transfer' ? 'rgba(99, 102, 241, 0.06)' : 'rgba(255, 255, 255, 0.01)',
+                  boxShadow: leaveOption === 'transfer' ? '0 0 20px rgba(99, 102, 241, 0.15)' : 'none',
+                  transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem'
+                }}
+                onMouseEnter={(e) => {
+                  if (leaveOption !== 'transfer') {
+                    e.currentTarget.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (leaveOption !== 'transfer') {
+                    e.currentTarget.style.border = '1px solid rgba(255, 255, 255, 0.08)';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.01)';
+                  }
                 }}
               >
-                End Meeting for All
-              </button>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                  <div style={{
+                    padding: '0.65rem',
+                    borderRadius: '8px',
+                    backgroundColor: leaveOption === 'transfer' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                    color: leaveOption === 'transfer' ? 'var(--color-accent)' : 'var(--text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.25s ease'
+                  }}>
+                    <UserCheck size={20} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white', marginBottom: '0.2rem' }}>
+                      Transfer Host & Leave
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                      Designate an active participant to take over as the host. The meeting will continue without you.
+                    </div>
+                  </div>
+                </div>
+
+                {/* Participant Dropdown (rendered inline if selected) */}
+                {leaveOption === 'transfer' && (
+                  <div 
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ 
+                      marginTop: '0.5rem', 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '0.5rem',
+                      animation: 'slide-down 0.2s ease'
+                    }}
+                  >
+                    <label style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Select New Host
+                    </label>
+                    <select
+                      value={selectedNewAdminId}
+                      onChange={(e) => setSelectedNewAdminId(e.target.value)}
+                      className="premium-input"
+                      style={{
+                        width: '100%',
+                        height: '40px',
+                        backgroundColor: '#07090E',
+                        color: 'white',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        borderRadius: '8px',
+                        padding: '0 0.75rem',
+                        fontSize: '0.85rem',
+                        outline: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="">-- Choose from active participants --</option>
+                      {participants.map(p => (
+                        <option key={p.id} value={p.userId || p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Option 2: End Meeting for All */}
+              <div 
+                onClick={() => {
+                  setLeaveOption('end');
+                  setSelectedNewAdminId('');
+                }}
+                style={{
+                  cursor: 'pointer',
+                  padding: '1.25rem',
+                  borderRadius: '12px',
+                  border: leaveOption === 'end' ? '2px solid #EF4444' : '1px solid rgba(255, 255, 255, 0.08)',
+                  backgroundColor: leaveOption === 'end' ? 'rgba(239, 68, 68, 0.06)' : 'rgba(255, 255, 255, 0.01)',
+                  boxShadow: leaveOption === 'end' ? '0 0 20px rgba(239, 68, 68, 0.15)' : 'none',
+                  transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                  display: 'flex',
+                  gap: '1rem',
+                  alignItems: 'flex-start'
+                }}
+                onMouseEnter={(e) => {
+                  if (leaveOption !== 'end') {
+                    e.currentTarget.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (leaveOption !== 'end') {
+                    e.currentTarget.style.border = '1px solid rgba(255, 255, 255, 0.08)';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.01)';
+                  }
+                }}
+              >
+                <div style={{
+                  padding: '0.65rem',
+                  borderRadius: '8px',
+                  backgroundColor: leaveOption === 'end' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                  color: leaveOption === 'end' ? '#EF4444' : 'var(--text-muted)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.25s ease'
+                }}>
+                  <LogOut size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white', marginBottom: '0.2rem' }}>
+                    End Meeting for All
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                    Terminate the boardroom call immediately. All participants will be disconnected.
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Actions Footer */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
+              {leaveOption === 'transfer' && (
+                <button
+                  onClick={handleTransferAndLeave}
+                  disabled={!selectedNewAdminId}
+                  className="premium-btn premium-btn-primary"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'center',
+                    height: '44px',
+                    fontSize: '0.9rem',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    opacity: selectedNewAdminId ? 1 : 0.5,
+                    cursor: selectedNewAdminId ? 'pointer' : 'not-allowed',
+                    boxShadow: selectedNewAdminId ? '0 4px 12px rgba(99, 102, 241, 0.2)' : 'none',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  Confirm Transfer & Exit
+                </button>
+              )}
+
+              {leaveOption === 'end' && (
+                <button
+                  onClick={handleEndForAll}
+                  className="premium-btn premium-btn-danger"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'center',
+                    height: '44px',
+                    fontSize: '0.9rem',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    backgroundColor: '#EF4444',
+                    boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  End Meeting for All
+                </button>
+              )}
+
+              {leaveOption === null && (
+                <button
+                  disabled
+                  className="premium-btn premium-btn-secondary"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'center',
+                    height: '44px',
+                    fontSize: '0.9rem',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    opacity: 0.5,
+                    cursor: 'not-allowed',
+                    border: '1px solid rgba(255,255,255,0.05)',
+                    backgroundColor: 'rgba(255,255,255,0.02)',
+                    color: 'rgba(255,255,255,0.4)'
+                  }}
+                >
+                  Select an Option Above
+                </button>
+              )}
 
               <button
                 onClick={() => {
                   setShowLeaveModal(false);
+                  setLeaveOption(null);
                   setSelectedNewAdminId('');
                 }}
-                className="premium-btn premium-btn-secondary"
                 style={{
                   width: '100%',
+                  height: '40px',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
                   justifyContent: 'center',
-                  height: '40px'
+                  transition: 'all 0.2s ease'
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.color = 'white'}
+                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
               >
-                Cancel
+                Go Back to Meeting
               </button>
             </div>
+
           </div>
         </div>
       )}
