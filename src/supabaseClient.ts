@@ -246,18 +246,22 @@ export const mockAuth = {
   },
 
   // Save new meeting with auto-generated passcode (handles schema differences gracefully)
-  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string }) => {
+  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean }) => {
     // Generate UUID on the client side to avoid race conditions and mismatches
     const meetingId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' 
       ? crypto.randomUUID() 
       : Math.random().toString(36).substring(2, 15) + '-' + Math.random().toString(36).substring(2, 15);
       
     const passcode = getDeterministicPasscode(meetingId);
+    const requireWaitingRoom = meeting.require_waiting_room ?? true;
+    localStorage.setItem(`giin_meeting_settings_${meetingId}`, JSON.stringify({ require_waiting_room: requireWaitingRoom }));
+
     const payload: any = {
       id: meetingId,
       ...meeting,
       passcode,
-      admin_id: meeting.user_id
+      admin_id: meeting.user_id,
+      require_waiting_room: requireWaitingRoom
     };
     
     let { data, error } = await supabase
@@ -378,13 +382,17 @@ export const mockAuth = {
         // Fallback: Generate virtual meeting details so guests can still connect even if the table doesn't exist, has restrictive RLS, or uses a virtual ID
         const passcode = getDeterministicPasscode(safeId);
 
+        const localSettingsRaw = localStorage.getItem(`giin_meeting_settings_${safeId}`);
+        const requireWaitingRoom = localSettingsRaw ? JSON.parse(localSettingsRaw).require_waiting_room : true;
+
         return {
           data: {
             id: safeId,
             title: 'Secure Video Meeting',
             passcode,
             admin_id: null,
-            status: 'In Progress'
+            status: 'In Progress',
+            require_waiting_room: requireWaitingRoom
           },
           error: null
         };
@@ -398,19 +406,28 @@ export const mockAuth = {
         if (!data.admin_id) {
           data.admin_id = data.user_id; // Default host is the creator
         }
+        const localSettingsRaw = localStorage.getItem(`giin_meeting_settings_${safeId}`);
+        if (localSettingsRaw) {
+          data.require_waiting_room = JSON.parse(localSettingsRaw).require_waiting_room;
+        } else {
+          data.require_waiting_room = data.require_waiting_room ?? true;
+        }
       }
       return { data, error: null };
     } catch (err: any) {
       console.warn('[Supabase Client] Exception in getMeetingDetails, falling back to virtual session.', err.message);
       const safeId = meetingId || 'virtual-meeting';
       const passcode = getDeterministicPasscode(safeId);
+      const localSettingsRaw = localStorage.getItem(`giin_meeting_settings_${safeId}`);
+      const requireWaitingRoom = localSettingsRaw ? JSON.parse(localSettingsRaw).require_waiting_room : true;
       return {
         data: {
           id: safeId,
           title: 'Secure Video Meeting',
           passcode,
           admin_id: null,
-          status: 'In Progress'
+          status: 'In Progress',
+          require_waiting_room: requireWaitingRoom
         },
         error: null
       };

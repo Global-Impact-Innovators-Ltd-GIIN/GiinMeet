@@ -253,6 +253,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
   }, []);
 
+  // Exit Picture-in-Picture on unmount
+  useEffect(() => {
+    return () => {
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(err => console.warn('Failed to exit PiP on unmount:', err));
+      }
+    };
+  }, []);
+
   const isAdmin = isHost || (currentUser && localAdminId === currentUser.id);
 
   const [showLeaveModal, setShowLeaveModal] = useState(false);

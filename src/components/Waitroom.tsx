@@ -19,7 +19,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   onDeclined,
   onBack
 }) => {
-  const [meetingDetails, setMeetingDetails] = useState<{ title: string; passcode: string } | null>(null);
+  const [meetingDetails, setMeetingDetails] = useState<{ title: string; passcode: string; require_waiting_room?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   
@@ -52,13 +52,23 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           setErrorMsg('Meeting does not exist or has been deleted.');
         } else {
           setMeetingDetails(data);
-          // If URL passcode matches database, auto-validate
-          if (initialPasscode && data.passcode && initialPasscode.toUpperCase() === data.passcode.toUpperCase()) {
-            setPasscodeValidated(true);
-            // If user is logged in, auto-join waitroom
-            if (user?.name) {
-              joinWaitingRoom(user.name, data.passcode);
-            }
+          // Auto-validate passcode so users never have to manually enter it when joining via link
+          setPasscodeValidated(true);
+
+          // If the meeting allows automatic join (bypass waiting room) and we have a name, admit immediately
+          if (data.require_waiting_room === false && (user?.name || displayName)) {
+            const finalName = user?.name || displayName || 'Participant';
+            setWaitingStatus('Admitted');
+            localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
+            localStorage.setItem(`admitted_meeting_title_${meetingId}`, data.title || 'GIIN MEET Call');
+            localStorage.setItem(`admitted_meeting_name_${meetingId}`, finalName);
+            onAdmitted(data.title || 'GIIN MEET Call', user?.id || guestKey, finalName);
+            return;
+          }
+
+          // If user is logged in, auto-join waitroom
+          if (user?.name) {
+            joinWaitingRoom(user.name, data.passcode);
           }
         }
       } catch (err) {
@@ -170,6 +180,16 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     if (!name.trim()) return;
     setLoading(true);
     try {
+      if (meetingDetails?.require_waiting_room === false) {
+        // Immediately admit!
+        setWaitingStatus('Admitted');
+        localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
+        localStorage.setItem(`admitted_meeting_title_${meetingId}`, meetingDetails.title || 'GIIN MEET Call');
+        localStorage.setItem(`admitted_meeting_name_${meetingId}`, name);
+        onAdmitted(meetingDetails.title || 'GIIN MEET Call', user?.id || guestKey, name);
+        return;
+      }
+
       setWaitingStatus('Waiting');
       const data = await mockAuth.joinMeetingRoom(meetingId, name, user?.id);
       if (data) {

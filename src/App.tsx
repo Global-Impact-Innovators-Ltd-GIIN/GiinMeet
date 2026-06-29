@@ -949,7 +949,7 @@ function App() {
     setIsDarkMode(!isDarkMode);
   };
 
-  const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true, existingMeetingId?: string) => {
+  const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true, existingMeetingId?: string, requireWaitingRoom = true) => {
     const finalTitle = title || 'Instant Call';
     setActiveCallTitle(finalTitle);
     setActiveCallVideoState(isVideo);
@@ -972,7 +972,8 @@ function App() {
               duration: 'Active now',
               status: 'In Progress',
               host: data.host || user.name || 'You',
-              passcode: data.passcode
+              passcode: data.passcode,
+              require_waiting_room: data.require_waiting_room ?? true
             };
           }
         }
@@ -984,7 +985,8 @@ function App() {
             time: new Date().toISOString(),
             duration: 'Active now',
             status: 'In Progress',
-            host: user.name || 'You'
+            host: user.name || 'You',
+            require_waiting_room: requireWaitingRoom
           };
           saved = await mockAuth.createMeeting(newDbMeet);
         }
@@ -1231,7 +1233,7 @@ function App() {
   }, [user]);
 
 
-  const handleAddMeeting = async (meet: { title: string; time: string; duration: string }) => {
+  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean }) => {
     let savedMeet = null;
     if (user && user.id) {
       try {
@@ -1241,7 +1243,8 @@ function App() {
           time: meet.time,
           duration: meet.duration,
           status: 'Scheduled',
-          host: user.name || 'You'
+          host: user.name || 'You',
+          require_waiting_room: meet.requireWaitingRoom ?? true
         };
         savedMeet = await mockAuth.createMeeting(newDbMeet);
       } catch (err) {

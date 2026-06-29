@@ -14,9 +14,9 @@ interface Meeting {
 interface DashboardProps {
   isPremium: boolean;
   onNavigate: (view: string) => void;
-  onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string) => void;
+  onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean) => void;
   meetingHistory: Meeting[];
-  onAddMeeting: (meeting: { title: string; time: string; duration: string }) => Promise<Meeting | null>;
+  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean }) => Promise<Meeting | null>;
   userName: string;
 }
 
@@ -31,6 +31,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showInstantModal, setShowInstantModal] = useState(false);
+  const [instantTitle, setInstantTitle] = useState('Instant Meeting');
+  const [instantRequireWaitingRoom, setInstantRequireWaitingRoom] = useState(true);
+  const [requireWaitingRoom, setRequireWaitingRoom] = useState(true);
   const [scheduledMeetingDetails, setScheduledMeetingDetails] = useState<Meeting | null>(null);
   const [copiedSuccessId, setCopiedSuccessId] = useState<'link' | 'details' | null>(null);
   
@@ -49,13 +53,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const saved = await onAddMeeting({
       title: meetingTitle,
       time: new Date(meetingTime).toISOString(),
-      duration: '40m limit'
+      duration: '40m limit',
+      requireWaitingRoom
     });
 
     if (saved) {
       setScheduledMeetingDetails(saved);
       setMeetingTitle('');
       setMeetingTime('');
+      setRequireWaitingRoom(true);
       setShowScheduleModal(false);
       setShowSuccessModal(true);
     }
@@ -101,7 +107,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }}>
         {/* New Meeting */}
         <div 
-          onClick={() => onStartMeeting('Instant Meeting')}
+          onClick={() => setShowInstantModal(true)}
           className="glass-panel" 
           style={{
             padding: '2rem',
@@ -488,6 +494,38 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 />
               </div>
 
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Security & Admission</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
+                    <input 
+                      type="radio" 
+                      name="requireWaitingRoom" 
+                      checked={requireWaitingRoom} 
+                      onChange={() => setRequireWaitingRoom(true)} 
+                      style={{ marginTop: '3px' }}
+                    />
+                    <div>
+                      <strong style={{ display: 'block' }}>Host Admission (Waiting Room)</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Participants must wait to be admitted by the host.</span>
+                    </div>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
+                    <input 
+                      type="radio" 
+                      name="requireWaitingRoom" 
+                      checked={!requireWaitingRoom} 
+                      onChange={() => setRequireWaitingRoom(false)} 
+                      style={{ marginTop: '3px' }}
+                    />
+                    <div>
+                      <strong style={{ display: 'block' }}>Bypass Waiting Room (Auto-Join)</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Anyone with the meeting link joins automatically.</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
                 <button 
                   type="button" 
@@ -727,6 +765,100 @@ Securely encrypted under Fintech AES-256 standard.`;
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+      {/* Instant Meeting Modal */}
+      {showInstantModal && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          backdropFilter: 'blur(8px)'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '450px',
+            width: '100%',
+            padding: '2.5rem',
+            animation: 'pop-in 0.3s ease',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            border: '1px solid var(--border-color)'
+          }}>
+            <h3 style={{ fontSize: '1.5rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)', color: 'white' }}>Start a New Meeting</h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Configure your instant meeting preferences before launching.</p>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Meeting Title</label>
+                <input 
+                  type="text" 
+                  className="premium-input" 
+                  value={instantTitle}
+                  onChange={(e) => setInstantTitle(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Security & Admission</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
+                    <input 
+                      type="radio" 
+                      name="instantRequireWaitingRoom" 
+                      checked={instantRequireWaitingRoom} 
+                      onChange={() => setInstantRequireWaitingRoom(true)} 
+                      style={{ marginTop: '3px' }}
+                    />
+                    <div>
+                      <strong style={{ display: 'block' }}>Host Admission (Waiting Room)</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Participants must wait to be admitted by the host.</span>
+                    </div>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
+                    <input 
+                      type="radio" 
+                      name="instantRequireWaitingRoom" 
+                      checked={!instantRequireWaitingRoom} 
+                      onChange={() => setInstantRequireWaitingRoom(false)} 
+                      style={{ marginTop: '3px' }}
+                    />
+                    <div>
+                      <strong style={{ display: 'block' }}>Bypass Waiting Room (Auto-Join)</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Anyone with the meeting link joins automatically.</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                <button 
+                  type="button" 
+                  className="premium-btn premium-btn-secondary" 
+                  onClick={() => setShowInstantModal(false)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    onStartMeeting(instantTitle, undefined, true, undefined, instantRequireWaitingRoom);
+                    setShowInstantModal(false);
+                  }}
+                  className="premium-btn premium-btn-primary"
+                >
+                  Start Meeting
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
