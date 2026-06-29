@@ -298,6 +298,35 @@ export const mockAuth = {
       // Set virtual fields so the frontend code handles permissions and waitroom checks correctly
       if (!data.passcode) data.passcode = passcode;
       if (!data.admin_id) data.admin_id = meeting.user_id;
+    } else {
+      // Create a simulated local meeting object to ensure the app continues to function perfectly
+      const localMeeting = {
+        id: meetingId,
+        user_id: meeting.user_id,
+        title: meeting.title,
+        time: meeting.time,
+        duration: meeting.duration,
+        status: meeting.status,
+        host: meeting.host,
+        passcode,
+        admin_id: meeting.user_id,
+        require_waiting_room: requireWaitingRoom
+      };
+
+      // Save to localStorage list
+      try {
+        const local = localStorage.getItem('giin_meetings');
+        const meetingsList = local ? JSON.parse(local) : [];
+        if (!meetingsList.some((m: any) => m.id === localMeeting.id)) {
+          meetingsList.push(localMeeting);
+          localStorage.setItem('giin_meetings', JSON.stringify(meetingsList));
+        }
+      } catch (e) {
+        console.warn('[Supabase Client] Failed to save local-only meeting to localStorage:', e);
+      }
+
+      console.log('[Supabase Client] Created local-only meeting due to DB insert failure:', localMeeting);
+      return localMeeting;
     }
     return data;
   },

@@ -1045,17 +1045,29 @@ export const Chats: React.FC<ChatsProps> = ({
       }
       const groupId = activeThreadId.substring(6);
       try {
-        const { data } = await supabase
+        // Query group_members for user IDs first (resilient to foreign key relationship issues)
+        const { data: memberRows, error: memberErr } = await supabase
           .from('group_members')
-          .select('user_id, profiles(id, name, email, avatar_url)')
+          .select('user_id')
           .eq('group_id', groupId);
-        
-        if (data) {
-          const membersList = data.map((m: any) => m.profiles).filter(Boolean);
-          setActiveGroupMembers(membersList);
+
+        if (memberErr) throw memberErr;
+
+        const userIds = memberRows?.map((m: any) => m.user_id).filter(Boolean) || [];
+        if (userIds.length > 0) {
+          const { data: profiles, error: profileErr } = await supabase
+            .from('profiles')
+            .select('id, name, email, avatar_url')
+            .in('id', userIds);
+            
+          if (profileErr) throw profileErr;
+          setActiveGroupMembers(profiles || []);
+        } else {
+          setActiveGroupMembers([]);
         }
       } catch (err) {
         console.error('Error fetching group members:', err);
+        setActiveGroupMembers([]);
       }
     };
     fetchGroupMembers();
