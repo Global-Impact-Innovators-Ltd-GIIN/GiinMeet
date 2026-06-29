@@ -197,7 +197,19 @@ function App() {
   const [threads, setThreads] = useState<ChatThread[]>(() => {
     try {
       const cached = localStorage.getItem('giin_chat_threads');
-      return cached ? JSON.parse(cached) : [];
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          const unique: ChatThread[] = [];
+          parsed.forEach((t: ChatThread) => {
+            if (t && t.id && !unique.some(u => u.id === t.id)) {
+              unique.push(t);
+            }
+          });
+          return unique;
+        }
+      }
+      return [];
     } catch (e) {
       return [];
     }

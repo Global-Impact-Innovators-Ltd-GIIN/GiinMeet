@@ -952,7 +952,10 @@ export const Chats: React.FC<ChatsProps> = ({
         unreadCount: 0,
         messages: []
       };
-      setThreads(prev => [newThread, ...prev]);
+      setThreads(prev => {
+        if (prev.some(t => t.id === dmId)) return prev;
+        return [newThread, ...prev];
+      });
       setActiveThreadId(dmId);
     }
     setShowAddContactModal(false);
@@ -974,6 +977,11 @@ export const Chats: React.FC<ChatsProps> = ({
   // Handle redirect from Contacts click
   useEffect(() => {
     if (initialTargetContactId && user) {
+      // Clear redirect target immediately to prevent race-condition re-triggers
+      if (onClearTargetContact) {
+        onClearTargetContact();
+      }
+
       const loadRedirect = async () => {
         const dmId = 'dm_' + [user.id, initialTargetContactId].sort().join('_');
         const existingThread = threads.find(t => t.id === dmId);
@@ -1001,13 +1009,13 @@ export const Chats: React.FC<ChatsProps> = ({
               unreadCount: 0,
               messages: []
             };
-            setThreads(prev => [newThread, ...prev]);
+            setThreads(prev => {
+              if (prev.some(t => t.id === dmId)) return prev;
+              return [newThread, ...prev];
+            });
             setActiveThreadId(dmId);
             setShowConversationMobile(true);
           }
-        }
-        if (onClearTargetContact) {
-          onClearTargetContact();
         }
       };
       loadRedirect();
