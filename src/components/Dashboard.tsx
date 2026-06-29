@@ -74,13 +74,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   return (
-    <div className="dashboard-container" style={{ animation: 'slide-in var(--transition-normal)' }}>
+    <div className="dashboard-container" style={{ 
+      animation: 'slide-in var(--transition-normal)',
+      flex: 1,
+      overflowY: 'auto',
+      padding: '1.5rem',
+      display: 'flex',
+      flexDirection: 'column'
+    }}>
       {/* Welcome Banner */}
-      <div style={{ marginBottom: '2rem' }}>
-        <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '0.5rem', fontFamily: 'var(--font-heading)' }}>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h1 className="welcome-heading">
           Welcome back, <span style={{ color: 'var(--color-secondary)' }}>{userName}</span>
         </h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '1.05rem' }}>
+        <p className="welcome-subtext">
           Connect, collaborate, and virtualize with HD audio and video.
         </p>
       </div>

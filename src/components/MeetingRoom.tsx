@@ -60,26 +60,8 @@ export const playHandshakeConfirmSound = () => {
   // Permanently silenced to prevent annoying background noise
 };
 
-// User joined chime
 export const playUserJoinSound = () => {
-  try {
-    const ctx = getAudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(440, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.25); // Sweep to G5
-    gain.gain.setValueAtTime(0.02, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.25);
-    
-    osc.start();
-    osc.stop(ctx.currentTime + 0.25);
-  } catch (e) {
-    console.warn('Audio play blocked:', e);
-  }
+  // Silenced to prevent annoying background chime during reconnects
 };
 
 interface Participant {
@@ -243,6 +225,33 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }, 0);
     }
   }, [meetingAdminId]);
+
+  // Fullscreen State & Logic
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const meetingRoomRef = useRef<HTMLDivElement | null>(null);
+
+  const toggleFullscreen = () => {
+    if (!meetingRoomRef.current) return;
+    if (!document.fullscreenElement) {
+      meetingRoomRef.current.requestFullscreen().catch(err => {
+        console.error(`Error entering fullscreen: ${err.message}`);
+      });
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   const isAdmin = isHost || (currentUser && localAdminId === currentUser.id);
 
@@ -2557,16 +2566,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }
 
   return (
-    <div style={{
+    <div ref={meetingRoomRef} style={{
       display: 'flex',
       flexDirection: 'column',
-      height: 'calc(100vh - 80px)',
+      height: isFullscreen ? '100vh' : 'calc(100vh - 80px)',
       backgroundColor: '#07090E', // Dark screen for immersive meeting
       color: 'white',
-      borderRadius: 'var(--radius-lg)',
+      borderRadius: isFullscreen ? '0' : 'var(--radius-lg)',
       overflow: 'hidden',
       position: 'relative',
-      border: '1px solid #1E293B',
+      border: isFullscreen ? 'none' : '1px solid #1E293B',
       animation: 'pop-in var(--transition-normal)'
     }}>
       {/* Breakout Room Status Banner */}
@@ -3249,114 +3258,18 @@ Securely encrypted under Fintech AES-256 standard.`;
             </div>
           </div>
         ) : (
-          <div className="meeting-grid" style={{
-            flex: 1,
-            display: 'grid',
-            gridTemplateColumns: (isScreenSharing || Object.keys(peerStates).some(k => peerStates[k].isScreenSharing)) 
-              ? '3fr 1fr' 
-              : 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: '1.25rem',
-            padding: '1.5rem',
-            overflowY: 'auto',
-            alignContent: 'center',
-            backgroundColor: '#07090E'
-          }}>
-            {/* Main Large Screen Share Frame */}
-            {(isScreenSharing || Object.keys(peerStates).some(k => peerStates[k].isScreenSharing)) && (
-              <div style={{
-                gridRow: 'span 2',
-                position: 'relative',
-                borderRadius: 'var(--radius-lg)',
-                overflow: 'hidden',
-                border: '2px solid var(--color-accent)',
-                display: 'flex',
-                flexDirection: 'column',
-                backgroundColor: '#0A0D14',
-                boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
-                aspectRatio: '16/9'
-              }}>
-                {isScreenSharing ? (
-                  <video
-                    ref={el => {
-                      if (el && screenStream && el.srcObject !== screenStream) {
-                        el.srcObject = screenStream;
-                      }
-                    }}
-                    autoPlay
-                    playsInline
-                    muted
-                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                  />
-                ) : (
-                  (() => {
-                    const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing);
-                    const screenStreamObj = screenPeerKey ? remoteStreams[screenPeerKey] : null;
-                    const screenPeerName = screenPeerKey ? peerStates[screenPeerKey].name : 'Remote Peer';
-                    return screenStreamObj ? (
-                      <video
-                        ref={el => {
-                          if (el && screenStreamObj && el.srcObject !== screenStreamObj) {
-                            el.srcObject = screenStreamObj;
-                          }
-                        }}
-                        autoPlay
-                        playsInline
-                        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                      />
-                    ) : (
-                      <div className="flex-center" style={{ flex: 1, flexDirection: 'column', gap: '1rem' }}>
-                        <AlertTriangle color="var(--color-accent)" size={32} />
-                        <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Waiting for screen stream from {screenPeerName}...</span>
-                      </div>
-                    );
-                  })()
-                )}
-                
-                {isAnnotating && isScreenSharing && (
-                  <ScreenAnnotation 
-                    isPresenter={true} 
-                    onClose={() => setIsAnnotating(false)} 
-                  />
-                )}
-                
-                <div style={{
-                  position: 'absolute',
-                  bottom: '16px',
-                  left: '16px',
-                  backgroundColor: 'rgba(7, 9, 14, 0.85)',
-                  padding: '0.45rem 0.9rem',
-                  borderRadius: '6px',
-                  border: '1px solid #1E293B',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.6rem',
-                  zIndex: 25,
-                  backdropFilter: 'blur(4px)'
-                }}>
-                  <Monitor size={14} color="var(--color-accent)" />
-                  <span>
-                    {isScreenSharing 
-                      ? 'You are sharing your screen' 
-                      : `${Object.keys(peerStates).find(k => peerStates[k].isScreenSharing) ? peerStates[Object.keys(peerStates).find(k => peerStates[k].isScreenSharing)!].name : 'Participant'} is sharing screen`}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Sidebar / Grid Cards Wrapper (All participants' webcam video elements) */}
-            <div style={{
-              display: 'contents'
-            }}>
-              {/* User local webcam card */}
-              <div style={{
+          (() => {
+            const hasScreenShare = isScreenSharing || Object.keys(peerStates).some(k => peerStates[k].isScreenSharing);
+            
+            // Render local video card
+            const localVideoCard = (
+              <div className={`meeting-card ${isSpeaking && !isMuted ? 'speaking' : ''}`} style={{
                 position: 'relative',
                 borderRadius: 'var(--radius-md)',
                 overflow: 'hidden',
                 backgroundColor: '#111827',
                 aspectRatio: '16/9',
                 border: isSpeaking && !isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
-                boxShadow: isSpeaking && !isMuted ? '0 0 15px rgba(250, 189, 2, 0.45)' : 'none',
                 transition: 'all 0.25s ease'
               }}>
                 {isVideoOn && stream ? (
@@ -3378,18 +3291,6 @@ Securely encrypted under Fintech AES-256 standard.`;
                         filter: `${videoFilter === 'blur' ? 'blur(6px)' : videoFilter === 'sepia' ? 'sepia(0.8)' : videoFilter === 'grayscale' ? 'grayscale(1)' : videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
                       }} 
                     />
-                    {isStudioLightEnabled && (
-                      <div style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(0,0,0,0.1) 80%)',
-                        pointerEvents: 'none',
-                        zIndex: 2
-                      }} />
-                    )}
                   </>
                 ) : (
                   <div style={{
@@ -3410,63 +3311,22 @@ Securely encrypted under Fintech AES-256 standard.`;
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: '1.4rem',
+                      fontSize: '1.5rem',
                       fontWeight: 700,
                       color: 'white',
-                      border: '2px solid rgba(255, 255, 255, 0.1)'
+                      border: '2px solid rgba(255,255,255,0.1)'
                     }}>
-                      {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase() : 'Y'}
+                      {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}
                     </div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Webcam Off</span>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Camera Off</span>
                   </div>
                 )}
-
-                {/* Security Shield Lock Status */}
-                <div style={{
-                  position: 'absolute',
-                  top: '12px',
-                  left: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                  backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                  border: '1px solid rgba(16, 185, 129, 0.4)',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  fontSize: '0.7rem',
-                  color: '#10B981',
-                  fontWeight: 600,
-                  backdropFilter: 'blur(4px)'
-                }}>
-                  <Lock size={10} color="#10B981" />
-                  <span>E2EE LOCKED</span>
-                </div>
-
-                {/* Local Speaking wave overlay if speaking */}
-                {isSpeaking && !isMuted && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '12px',
-                    right: '12px',
-                    display: 'flex',
-                    gap: '3px',
-                    alignItems: 'center',
-                    backgroundColor: 'rgba(0,0,0,0.6)',
-                    padding: '6px',
-                    borderRadius: '6px'
-                  }}>
-                    <span style={{ width: '3px', height: '10px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.8s ease infinite', transformOrigin: 'bottom' }} />
-                    <span style={{ width: '3px', height: '16px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.5s ease infinite', transformOrigin: 'bottom' }} />
-                    <span style={{ width: '3px', height: '8px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.9s ease infinite', transformOrigin: 'bottom' }} />
-                  </div>
-                )}
-
-                {/* Bottom tag info banner */}
+                
                 <div style={{
                   position: 'absolute',
                   bottom: '12px',
                   left: '12px',
-                  backgroundColor: 'rgba(7, 9, 14, 0.8)',
+                  backgroundColor: 'rgba(7, 9, 14, 0.65)',
                   border: '1px solid #1E293B',
                   padding: '0.35rem 0.7rem',
                   borderRadius: '4px',
@@ -3474,7 +3334,8 @@ Securely encrypted under Fintech AES-256 standard.`;
                   display: 'flex',
                   alignItems: 'center',
                   gap: '0.45rem',
-                  backdropFilter: 'blur(4px)'
+                  backdropFilter: 'blur(4px)',
+                  zIndex: 10
                 }}>
                   <span style={{ fontWeight: 600 }}>You (Host)</span>
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
@@ -3485,7 +3346,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                     className="floating-emoji-bubble"
                     style={{
                       position: 'absolute',
-                      bottom: '30px',
+                      bottom: '40px',
                       left: `${50 + (r.offset || 0)}%`,
                       transform: 'translateX(-50%)',
                       fontSize: '2.5rem',
@@ -3497,217 +3358,318 @@ Securely encrypted under Fintech AES-256 standard.`;
                   </div>
                 ))}
               </div>
+            );
 
-              {/* Remote Active Participants Card Loops */}
-              {participants.map(p => {
-                const peerKey = p.userId || p.id;
-                const hasConnection = activePeerKeys.includes(peerKey);
-                const peerStreamObj = remoteStreams[peerKey];
-                const pState = peerStates[peerKey] || {
-                  name: p.name,
-                  isVideoOn: p.isVideoOn,
-                  isMuted: p.isMuted,
-                  isSpeaking: p.isSpeaking,
-                  latency: undefined,
-                  e2eeStatus: undefined
-                };
+            // Render remote video cards
+            const remoteVideoCards = participants.map(p => {
+              const peerKey = p.userId || p.id;
+              const hasConnection = activePeerKeys.includes(peerKey);
+              const peerStreamObj = remoteStreams[peerKey];
+              const pState = peerStates[peerKey] || {
+                name: p.name,
+                isVideoOn: p.isVideoOn,
+                isMuted: p.isMuted,
+                isSpeaking: p.isSpeaking,
+                latency: undefined,
+                e2eeStatus: undefined,
+                videoFilter: undefined,
+                isStudioLightEnabled: false
+              };
 
-                return (
-                  <div key={p.id} style={{
-                    position: 'relative',
-                    borderRadius: 'var(--radius-md)',
-                    overflow: 'hidden',
-                    backgroundColor: '#111827',
-                    aspectRatio: '16/9',
-                    border: pState.isSpeaking && !pState.isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
-                    boxShadow: pState.isSpeaking && !pState.isMuted ? '0 0 15px rgba(250, 189, 2, 0.45)' : 'none',
-                    transition: 'all 0.25s ease'
+              return (
+                <div key={p.id} className={`meeting-card ${pState.isSpeaking && !pState.isMuted ? 'speaking' : ''}`} style={{
+                  position: 'relative',
+                  borderRadius: 'var(--radius-md)',
+                  overflow: 'hidden',
+                  backgroundColor: '#111827',
+                  aspectRatio: '16/9',
+                  border: pState.isSpeaking && !pState.isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
+                  transition: 'all 0.25s ease'
+                }}>
+                  {hasConnection && peerStreamObj && (
+                    <audio
+                      ref={el => {
+                        if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
+                          el.srcObject = peerStreamObj;
+                        }
+                      }}
+                      autoPlay
+                    />
+                  )}
+                  {hasConnection && peerStreamObj && pState.isVideoOn ? (
+                    <video
+                      className="remote-video-feed"
+                      ref={el => {
+                        if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
+                          el.srcObject = peerStreamObj;
+                        }
+                      }}
+                      autoPlay
+                      playsInline
+                      style={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        objectFit: 'cover',
+                        filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '1rem',
+                      backgroundColor: '#090D14'
+                    }}>
+                      <div style={{
+                        width: '64px',
+                        height: '64px',
+                        borderRadius: '50%',
+                        backgroundColor: p.avatarBg || 'var(--color-primary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '1.5rem',
+                        fontWeight: 700,
+                        color: 'white',
+                        border: '2px solid rgba(255,255,255,0.1)'
+                      }}>
+                        {p.avatar || p.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                      </div>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        {!hasConnection ? 'Connecting...' : 'Camera Off'}
+                      </span>
+                    </div>
+                  )}
+
+                  {hasConnection && pState.latency !== undefined && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '12px',
+                      left: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      backgroundColor: 'rgba(7, 9, 14, 0.7)',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '0.65rem',
+                      color: pState.latency < 80 ? '#10B981' : pState.latency < 200 ? '#FBBF24' : '#EF4444',
+                      zIndex: 10
+                    }}>
+                      <Wifi size={10} />
+                      <span>{pState.latency}ms</span>
+                    </div>
+                  )}
+
+                  <div style={{
+                    position: 'absolute',
+                    top: '12px',
+                    right: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    backgroundColor: pState.e2eeStatus === 'secure' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)',
+                    border: pState.e2eeStatus === 'secure' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    fontSize: '0.65rem',
+                    color: pState.e2eeStatus === 'secure' ? '#10B981' : '#EF4444',
+                    fontWeight: 600,
+                    backdropFilter: 'blur(4px)',
+                    zIndex: 10
                   }}>
-                    {hasConnection && peerStreamObj && (
-                      <>
-                        <audio
-                          ref={el => {
-                            if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
-                              el.srcObject = peerStreamObj;
-                            }
-                          }}
-                          autoPlay
-                        />
-                        {pState.isVideoOn && (
+                    {pState.e2eeStatus === 'secure' ? <Lock size={10} /> : <Unlock size={10} />}
+                    <span>{pState.e2eeStatus === 'secure' ? 'E2EE' : 'P2P'}</span>
+                  </div>
+
+                  {pState.isSpeaking && !pState.isMuted && (
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '12px',
+                      right: '12px',
+                      display: 'flex',
+                      gap: '3px',
+                      alignItems: 'center',
+                      backgroundColor: 'rgba(0,0,0,0.65)',
+                      padding: '6px',
+                      borderRadius: '6px',
+                      zIndex: 10
+                    }}>
+                      <span style={{ width: '3px', height: '10px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.7s ease infinite', transformOrigin: 'bottom' }} />
+                      <span style={{ width: '3px', height: '16px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.4s ease infinite', transformOrigin: 'bottom' }} />
+                      <span style={{ width: '3px', height: '8px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.8s ease infinite', transformOrigin: 'bottom' }} />
+                    </div>
+                  )}
+
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '12px',
+                    left: '12px',
+                    backgroundColor: 'rgba(7, 9, 14, 0.8)',
+                    border: '1px solid #1E293B',
+                    padding: '0.35rem 0.7rem',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    backdropFilter: 'blur(4px)',
+                    zIndex: 10
+                  }}>
+                    <span style={{ fontWeight: 600 }}>{p.name}</span>
+                    {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
+                  </div>
+
+                  {activeReactions.filter(r => r.senderKey === peerKey).map(r => (
+                    <div 
+                      key={r.id} 
+                      className="floating-emoji-bubble"
+                      style={{
+                        position: 'absolute',
+                        bottom: '30px',
+                        left: `${50 + (r.offset || 0)}%`,
+                        transform: 'translateX(-50%)',
+                        fontSize: '2.5rem',
+                        pointerEvents: 'none',
+                        zIndex: 100
+                      }}
+                    >
+                      {r.emoji}
+                    </div>
+                  ))}
+                </div>
+              );
+            });
+
+            if (hasScreenShare) {
+              return (
+                <div className="screenshare-layout" style={{
+                  flex: 1,
+                  display: 'flex',
+                  overflow: 'hidden',
+                  backgroundColor: '#07090E'
+                }}>
+                  {/* Main Screen Share Frame */}
+                  <div style={{
+                    flex: 3,
+                    position: 'relative',
+                    borderRadius: 'var(--radius-lg)',
+                    overflow: 'hidden',
+                    border: '2px solid var(--color-accent)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    backgroundColor: '#0A0D14',
+                    boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
+                    aspectRatio: '16/9',
+                    margin: '1.5rem'
+                  }}>
+                    {isScreenSharing ? (
+                      <video
+                        ref={el => {
+                          if (el && screenStream && el.srcObject !== screenStream) {
+                            el.srcObject = screenStream;
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        muted
+                        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                      />
+                    ) : (
+                      (() => {
+                        const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing);
+                        const screenStreamObj = screenPeerKey ? remoteStreams[screenPeerKey] : null;
+                        const screenPeerName = screenPeerKey ? peerStates[screenPeerKey].name : 'Remote Peer';
+                        return screenStreamObj ? (
                           <video
-                            className="remote-video-feed"
                             ref={el => {
-                              if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
-                                el.srcObject = peerStreamObj;
+                              if (el && screenStreamObj && el.srcObject !== screenStreamObj) {
+                                el.srcObject = screenStreamObj;
                               }
                             }}
                             autoPlay
                             playsInline
-                            muted
-                            style={{
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'cover',
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              zIndex: 1,
-                              filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
-                            }}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                           />
-                        )}
-                        {pState.isStudioLightEnabled && pState.isVideoOn && (
-                          <div style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(0,0,0,0.1) 80%)',
-                            pointerEvents: 'none',
-                            zIndex: 2
-                          }} />
-                        )}
-                      </>
+                        ) : (
+                          <div className="flex-center" style={{ flex: 1, flexDirection: 'column', gap: '1rem' }}>
+                            <AlertTriangle color="var(--color-accent)" size={32} />
+                            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Waiting for screen stream from {screenPeerName}...</span>
+                          </div>
+                        );
+                      })()
                     )}
-                    {(!hasConnection || !peerStreamObj || !pState.isVideoOn) && (
-                      <div style={{
-                        width: '100%',
-                        height: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '0.85rem',
-                        backgroundColor: '#090D14',
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        zIndex: 2
-                      }}>
-                        <div style={{
-                          width: '60px',
-                          height: '60px',
-                          borderRadius: '50%',
-                          backgroundColor: p.avatarBg,
-                          color: 'white',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '1.25rem',
-                          fontWeight: 700,
-                          border: '2px solid rgba(255, 255, 255, 0.1)'
-                        }}>
-                          {p.avatar}
-                        </div>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>
-                          {!hasConnection ? 'Connecting secure tunnel...' : 'Camera Off'}
-                        </span>
-                      </div>
+                    
+                    {isAnnotating && isScreenSharing && (
+                      <ScreenAnnotation 
+                        isPresenter={true} 
+                        onClose={() => setIsAnnotating(false)} 
+                      />
                     )}
-
-                    {/* Network Latency Indicator */}
-                    {hasConnection && pState.latency !== undefined && (
-                      <div style={{
-                        position: 'absolute',
-                        top: '12px',
-                        left: '12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.25rem',
-                        backgroundColor: 'rgba(7, 9, 14, 0.7)',
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        fontSize: '0.65rem',
-                        color: pState.latency < 80 ? '#10B981' : pState.latency < 200 ? '#FBBF24' : '#EF4444'
-                      }}>
-                        <Wifi size={10} />
-                        <span>{pState.latency}ms</span>
-                      </div>
-                    )}
-
-                    {/* E2EE Lock badge */}
+                    
                     <div style={{
                       position: 'absolute',
-                      top: '12px',
-                      right: '12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                      backgroundColor: pState.e2eeStatus === 'secure' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)',
-                      border: pState.e2eeStatus === 'secure' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)',
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      fontSize: '0.65rem',
-                      color: pState.e2eeStatus === 'secure' ? '#10B981' : '#EF4444',
-                      fontWeight: 600,
-                      backdropFilter: 'blur(4px)'
-                    }}>
-                      {pState.e2eeStatus === 'secure' ? <Lock size={10} /> : <Unlock size={10} />}
-                      <span>{pState.e2eeStatus === 'secure' ? 'E2EE' : 'P2P'}</span>
-                    </div>
-
-                    {/* Dynamic speaker audio pulse wave */}
-                    {pState.isSpeaking && !pState.isMuted && (
-                      <div style={{
-                        position: 'absolute',
-                        bottom: '12px',
-                        right: '12px',
-                        display: 'flex',
-                        gap: '3px',
-                        alignItems: 'center',
-                        backgroundColor: 'rgba(0,0,0,0.65)',
-                        padding: '6px',
-                        borderRadius: '6px'
-                      }}>
-                        <span style={{ width: '3px', height: '10px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.7s ease infinite', transformOrigin: 'bottom' }} />
-                        <span style={{ width: '3px', height: '16px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.4s ease infinite', transformOrigin: 'bottom' }} />
-                        <span style={{ width: '3px', height: '8px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.8s ease infinite', transformOrigin: 'bottom' }} />
-                      </div>
-                    )}
-
-                    {/* Remote user name card info */}
-                    <div style={{
-                      position: 'absolute',
-                      bottom: '12px',
-                      left: '12px',
-                      backgroundColor: 'rgba(7, 9, 14, 0.8)',
+                      bottom: '16px',
+                      left: '16px',
+                      backgroundColor: 'rgba(7, 9, 14, 0.85)',
+                      padding: '0.45rem 0.9rem',
+                      borderRadius: '6px',
                       border: '1px solid #1E293B',
-                      padding: '0.35rem 0.7rem',
-                      borderRadius: '4px',
-                      fontSize: '0.75rem',
+                      fontSize: '0.8rem',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.45rem',
+                      gap: '0.6rem',
+                      zIndex: 25,
                       backdropFilter: 'blur(4px)'
                     }}>
-                      <span style={{ fontWeight: 600 }}>{p.name}</span>
-                      {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
+                      <Monitor size={14} color="var(--color-accent)" />
+                      <span>
+                        {isScreenSharing 
+                          ? 'You are sharing your screen' 
+                          : `${Object.keys(peerStates).find(k => peerStates[k].isScreenSharing) ? peerStates[Object.keys(peerStates).find(k => peerStates[k].isScreenSharing)!].name : 'Participant'} is sharing screen`}
+                      </span>
                     </div>
-                    {activeReactions.filter(r => r.senderKey === peerKey).map(r => (
-                      <div 
-                        key={r.id} 
-                        className="floating-emoji-bubble"
-                        style={{
-                          position: 'absolute',
-                          bottom: '30px',
-                          left: `${50 + (r.offset || 0)}%`,
-                          transform: 'translateX(-50%)',
-                          fontSize: '2.5rem',
-                          pointerEvents: 'none',
-                          zIndex: 100
-                        }}
-                      >
-                        {r.emoji}
-                      </div>
-                    ))}
                   </div>
-                );
-              })}
-            </div>
-          </div>
+
+                  {/* Participant Sidebar */}
+                  <div className="screenshare-sidebar" style={{
+                    width: '260px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem',
+                    padding: '1.5rem 1.5rem 1.5rem 0',
+                    overflowY: 'auto'
+                  }}>
+                    {localVideoCard}
+                    {remoteVideoCards}
+                  </div>
+                </div>
+              );
+            }
+
+            // No Screen Share: Normal grid tiling
+            return (
+              <div className="meeting-grid" style={{
+                flex: 1,
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '1.25rem',
+                padding: '1.5rem',
+                overflowY: 'auto',
+                alignItems: 'center',
+                justifyContent: 'center',
+                alignContent: 'center',
+                backgroundColor: '#07090E'
+              }}>
+                {localVideoCard}
+                {remoteVideoCards}
+              </div>
+            );
+          })()
         )}
 
         {/* Collapsible Panels */}
@@ -5131,6 +5093,27 @@ Securely encrypted under Fintech AES-256 standard.`;
               <Monitor size={18} />
             </button>
 
+            {/* Full Screen Toggle */}
+            <button 
+              onClick={toggleFullscreen}
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: isFullscreen ? 'var(--color-primary)' : '#1E293B',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)'
+              }}
+              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            >
+              {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            </button>
+
             {/* Annotate Screen */}
             {isScreenSharing && (
               <button 
@@ -5199,18 +5182,19 @@ Securely encrypted under Fintech AES-256 standard.`;
 
               {showEmojiReactions && (
                 <div style={{
-                  position: 'absolute',
-                  bottom: '50px',
+                  position: 'fixed',
+                  bottom: '85px',
                   left: '50%',
                   transform: 'translateX(-50%)',
                   display: 'flex',
-                  gap: '8px',
-                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                  padding: '8px 12px',
-                  borderRadius: '24px',
-                  border: '1px solid var(--border-color)',
-                  boxShadow: 'var(--shadow-premium)',
-                  zIndex: 200
+                  gap: '12px',
+                  backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                  padding: '10px 16px',
+                  borderRadius: '30px',
+                  border: '1px solid #1E293B',
+                  boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
+                  zIndex: 9999,
+                  backdropFilter: 'blur(10px)'
                 }}>
                   {['👏', '👍', '❤️', '😂', '😮'].map(emoji => (
                     <button

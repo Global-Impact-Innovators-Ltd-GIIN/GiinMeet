@@ -943,4 +943,86 @@ h1, h2, h3, h4, h5, h6 {
   animation: float-up-fade 2.5s cubic-bezier(0.08, 0.82, 0.17, 1) forwards;
 }
 
+/* Custom video card styles for no-overlap tiling */
+.meeting-card {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background-color: #111827;
+  aspect-ratio: 16/9;
+  border: 2px solid #1E293B;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  flex: 1 1 280px;
+  max-width: 560px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.meeting-card.speaking {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 20px rgba(250, 189, 2, 0.45) !important;
+}
+
+/* Screen share layout responsive overrides */
+@media (max-width: 768px) {
+  .screenshare-layout {
+    flex-direction: column !important;
+  }
+  .screenshare-sidebar {
+    width: 100% !important;
+    flex-direction: row !important;
+    padding: 1rem !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    height: 140px !important;
+  }
+  .screenshare-sidebar .meeting-card {
+    width: 180px !important;
+    flex-shrink: 0 !important;
+  }
+}
+
+/* Dashboard welcome heading responsive size */
+.welcome-heading {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--text-main);
+  margin-bottom: 0.5rem;
+  font-family: var(--font-heading);
+  line-height: 1.2;
+}
+
+.welcome-subtext {
+  color: var(--text-muted);
+  font-size: 1.05rem;
+}
+
+@media (max-width: 640px) {
+  .welcome-heading {
+    font-size: 1.75rem !important;
+  }
+  .welcome-subtext {
+    font-size: 0.9rem !important;
+  }
+}
+
+/* Responsive header navbar */
+.header-title {
+  font-size: 1.25rem;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .header-title {
+    font-size: 1rem !important;
+  }
+  .header-actions {
+    gap: 0.75rem !important;
+  }
+}
+
 

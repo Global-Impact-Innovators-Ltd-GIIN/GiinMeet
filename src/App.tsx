@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   Home, MessageSquare, Users, Settings as SettingsIcon, HelpCircle, 
   CreditCard, Bell, LogOut, Sun, Moon, CheckCircle2, ChevronDown, User, Shield,
-  Phone, PhoneOff
+  Phone, PhoneOff, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { MeetingRoom, startRingSound, stopRingSound } from './components/MeetingRoom';
@@ -125,6 +125,10 @@ function App() {
   const [isPremium, setIsPremium] = useState<boolean>(() => {
     return localStorage.getItem('giin_premium') === 'true';
   });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('giin_sidebar_collapsed') === 'true';
+  });
+
 
   // Profile
   const [userName, setUserName] = useState<string>(() => {
@@ -1424,17 +1428,51 @@ function App() {
       
       {/* Sidebar Navigation */}
       <aside className="sidebar-desktop" style={{
-        width: '260px',
+        width: isSidebarCollapsed ? '72px' : '260px',
         backgroundColor: 'var(--bg-sidebar)',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        padding: '2rem 1.5rem',
+        padding: isSidebarCollapsed ? '2rem 0.5rem' : '2rem 1.5rem',
         borderRight: '1px solid var(--border-color)',
         zIndex: 50,
         color: 'white',
-        flexShrink: 0
+        flexShrink: 0,
+        position: 'relative',
+        transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
       }}>
+        {/* Collapse/Expand Toggle Button */}
+        <button 
+          onClick={() => {
+            const next = !isSidebarCollapsed;
+            setIsSidebarCollapsed(next);
+            localStorage.setItem('giin_sidebar_collapsed', String(next));
+          }}
+          style={{
+            position: 'absolute',
+            right: '-12px',
+            top: '32px',
+            width: '24px',
+            height: '24px',
+            borderRadius: '50%',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            color: 'var(--text-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            zIndex: 100,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.1)'}
+          onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+          title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+        >
+          {isSidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+        </button>
+
         {/* Upper Logo Section */}
         <div>
           <div 
@@ -1444,11 +1482,13 @@ function App() {
             }}
             style={{
               display: 'flex',
+              flexDirection: isSidebarCollapsed ? 'column' : 'row',
               alignItems: 'center',
-              gap: '0.75rem',
+              gap: isSidebarCollapsed ? '0.5rem' : '0.75rem',
               marginBottom: '3rem',
-              paddingLeft: '0.5rem',
-              cursor: 'pointer'
+              paddingLeft: isSidebarCollapsed ? '0' : '0.5rem',
+              cursor: 'pointer',
+              justifyContent: 'center'
             }}
             title="Go to Dashboard"
           >
@@ -1456,32 +1496,34 @@ function App() {
               src={logoUrl} 
               alt="GIIN MEET Logo" 
               style={{
-                width: '48px',
-                height: '48px',
+                width: isSidebarCollapsed ? '36px' : '48px',
+                height: isSidebarCollapsed ? '36px' : '48px',
                 objectFit: 'contain',
                 borderRadius: '8px',
                 filter: 'brightness(0) invert(1)'
               }} 
             />
-            <div>
-              <span style={{ 
-                fontFamily: 'var(--font-heading)', 
-                fontWeight: 800, 
-                fontSize: '1.25rem', 
-                letterSpacing: '0.05em',
-                color: 'white'
-              }}>
-                {brandName}
-              </span>
-              <span style={{
-                display: 'block',
-                fontSize: '0.65rem',
-                letterSpacing: '0.1em',
-                color: 'var(--color-secondary)'
-              }}>
-                {brandSlogan}
-              </span>
-            </div>
+            {!isSidebarCollapsed && (
+              <div>
+                <span style={{ 
+                  fontFamily: 'var(--font-heading)', 
+                  fontWeight: 800, 
+                  fontSize: '1.25rem', 
+                  letterSpacing: '0.05em',
+                  color: 'white'
+                }}>
+                  {brandName}
+                </span>
+                <span style={{
+                  display: 'block',
+                  fontSize: '0.65rem',
+                  letterSpacing: '0.1em',
+                  color: 'var(--color-secondary)'
+                }}>
+                  {brandSlogan}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Navigation Links */}
@@ -1496,8 +1538,9 @@ function App() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.75rem 1rem',
+                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                gap: isSidebarCollapsed ? '0' : '0.75rem',
+                padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
                 background: currentView === 'dashboard' ? 'var(--color-secondary)' : 'transparent',
@@ -1509,9 +1552,10 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
+              title="Dashboard"
             >
               <Home size={18} />
-              <span>Dashboard</span>
+              {!isSidebarCollapsed && <span>Dashboard</span>}
             </button>
 
             {/* Chats Link */}
@@ -1521,8 +1565,8 @@ function App() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '0.75rem 1rem',
+                justifyContent: isSidebarCollapsed ? 'center' : 'space-between',
+                padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
                 background: currentView === 'chats' ? 'var(--color-secondary)' : 'transparent',
@@ -1534,12 +1578,30 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
+              title="Chat Center"
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isSidebarCollapsed ? '0' : '0.75rem', position: 'relative' }}>
                 <MessageSquare size={18} />
-                <span>Chat Center</span>
+                {!isSidebarCollapsed && <span>Chat Center</span>}
+                {isSidebarCollapsed && totalUnreadMessages > 0 && (
+                  <span style={{
+                    position: 'absolute',
+                    top: '-6px',
+                    right: '-8px',
+                    backgroundColor: '#EF4444',
+                    color: 'white',
+                    fontSize: '0.6rem',
+                    fontWeight: 700,
+                    padding: '0.05rem 0.25rem',
+                    borderRadius: '9999px',
+                    minWidth: '12px',
+                    textAlign: 'center'
+                  }}>
+                    {totalUnreadMessages}
+                  </span>
+                )}
               </div>
-              {totalUnreadMessages > 0 && (
+              {!isSidebarCollapsed && totalUnreadMessages > 0 && (
                 <span className="badge-pulse-red" style={{
                   backgroundColor: '#EF4444',
                   color: 'white',
@@ -1562,8 +1624,9 @@ function App() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.75rem 1rem',
+                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                gap: isSidebarCollapsed ? '0' : '0.75rem',
+                padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
                 background: currentView === 'contacts' ? 'var(--color-secondary)' : 'transparent',
@@ -1575,9 +1638,10 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
+              title="Contacts"
             >
               <Users size={18} />
-              <span>Contacts</span>
+              {!isSidebarCollapsed && <span>Contacts</span>}
             </button>
 
             {/* Private Space E2EE Vault Link */}
@@ -1587,22 +1651,24 @@ function App() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.75rem 1rem',
+                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                gap: isSidebarCollapsed ? '0' : '0.75rem',
+                padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
-                border: currentView === 'private' ? '1px solid #EF4444' : 'none',
-                background: currentView === 'private' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
-                color: currentView === 'private' ? '#EF4444' : 'rgba(255,255,255,0.75)',
+                border: 'none',
+                background: currentView === 'private' ? 'var(--color-secondary)' : 'transparent',
+                color: currentView === 'private' ? 'white' : 'rgba(255,255,255,0.7)',
                 cursor: 'pointer',
                 textAlign: 'left',
-                fontWeight: currentView === 'private' ? 700 : 400,
+                fontWeight: currentView === 'private' ? 600 : 400,
                 fontSize: '0.95rem',
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
+              title="Private Vault"
             >
-              <Shield size={18} color={currentView === 'private' ? '#EF4444' : 'rgba(255,255,255,0.6)'} />
-              <span>Private Vault</span>
+              <Shield size={18} />
+              {!isSidebarCollapsed && <span>Private Vault</span>}
             </button>
 
             {/* Help Center Link */}
@@ -1612,8 +1678,9 @@ function App() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.75rem 1rem',
+                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                gap: isSidebarCollapsed ? '0' : '0.75rem',
+                padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
                 background: currentView === 'help' ? 'var(--color-secondary)' : 'transparent',
@@ -1625,9 +1692,10 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
+              title="Help & Support"
             >
               <HelpCircle size={18} />
-              <span>Help & Support</span>
+              {!isSidebarCollapsed && <span>Help & Support</span>}
             </button>
 
             {/* Superadmin Portal Link */}
@@ -1638,8 +1706,9 @@ function App() {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.75rem',
-                  padding: '0.75rem 1rem',
+                  justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                  gap: isSidebarCollapsed ? '0' : '0.75rem',
+                  padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                   borderRadius: 'var(--radius-md)',
                   border: currentView === 'superadmin' ? '1px solid var(--color-accent)' : 'none',
                   background: currentView === 'superadmin' ? 'rgba(250, 189, 2, 0.15)' : 'transparent',
@@ -1653,7 +1722,7 @@ function App() {
                 }}
               >
                 <Shield size={18} color={currentView === 'superadmin' ? 'var(--color-accent)' : 'rgba(255,255,255,0.6)'} />
-                <span>Superadmin Portal</span>
+                {!isSidebarCollapsed && <span>Superadmin Portal</span>}
               </button>
             )}
 
@@ -1664,8 +1733,9 @@ function App() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.75rem 1rem',
+                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                gap: isSidebarCollapsed ? '0' : '0.75rem',
+                padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
                 background: currentView === 'settings' ? 'var(--color-secondary)' : 'transparent',
@@ -1677,9 +1747,10 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
+              title="Settings"
             >
               <SettingsIcon size={18} />
-              <span>Settings</span>
+              {!isSidebarCollapsed && <span>Settings</span>}
             </button>
           </nav>
         </div>
@@ -1687,31 +1758,55 @@ function App() {
         {/* Lower Sidebar: Upgrade details & logout */}
         <div>
           {/* Plan badge */}
-          <div 
-            onClick={() => setCurrentView('billing')}
-            className="sidebar-upgrade-card"
-            style={{
-              padding: '1rem',
-              borderRadius: 'var(--radius-lg)',
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              marginBottom: '1rem',
-              cursor: 'pointer'
-            }}
-          >
-            <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
-              <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Current Tier</span>
-              {isPremium ? (
-                <span className="badge badge-premium" style={{ border: 'none', scale: '0.85' }}>Pro</span>
-              ) : (
-                <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.15)', color: 'white', scale: '0.85' }}>Free</span>
-              )}
+          {isSidebarCollapsed ? (
+            <div 
+              onClick={() => setCurrentView('billing')}
+              className="sidebar-upgrade-card"
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                marginBottom: '1rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginLeft: 'auto',
+                marginRight: 'auto'
+              }}
+              title="Upgrade Account"
+            >
+              <CreditCard size={18} color="var(--color-accent)" />
             </div>
-            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              {isPremium ? 'Active Access' : 'Upgrade Account'}
-              <CreditCard size={12} color="var(--color-accent)" />
-            </span>
-          </div>
+          ) : (
+            <div 
+              onClick={() => setCurrentView('billing')}
+              className="sidebar-upgrade-card"
+              style={{
+                padding: '1rem',
+                borderRadius: 'var(--radius-lg)',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                marginBottom: '1rem',
+                cursor: 'pointer'
+              }}
+            >
+              <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Current Tier</span>
+                {isPremium ? (
+                  <span className="badge badge-premium" style={{ border: 'none', scale: '0.85' }}>Pro</span>
+                ) : (
+                  <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.15)', color: 'white', scale: '0.85' }}>Free</span>
+                )}
+              </div>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                {isPremium ? 'Active Access' : 'Upgrade Account'}
+                <CreditCard size={12} color="var(--color-accent)" />
+              </span>
+            </div>
+          )}
 
           <button 
             onClick={async () => {
@@ -1727,8 +1822,9 @@ function App() {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.75rem',
-              padding: '0.75rem 1rem',
+              justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+              gap: isSidebarCollapsed ? '0' : '0.75rem',
+              padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
               background: 'none',
               border: 'none',
               color: 'rgba(255,255,255,0.5)',
@@ -1737,9 +1833,10 @@ function App() {
               width: '100%',
               textAlign: 'left'
             }}
+            title="Reset Demo Data"
           >
             <LogOut size={16} />
-            <span>Reset Demo Data</span>
+            {!isSidebarCollapsed && <span>Reset Demo Data</span>}
           </button>
         </div>
       </aside>
@@ -1789,7 +1886,7 @@ function App() {
                   filter: isDarkMode ? 'brightness(0) invert(1)' : 'none'
                 }} 
               />
-              <span style={{
+              <span className="mobile-hidden" style={{
                 fontFamily: 'var(--font-heading)',
                 fontWeight: 800,
                 fontSize: '1.1rem',
@@ -1798,15 +1895,15 @@ function App() {
               }}>
                 {brandName}
               </span>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0.25rem' }}>|</span>
+              <span className="mobile-hidden" style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0.25rem' }}>|</span>
             </div>
 
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, textTransform: 'capitalize', fontFamily: 'var(--font-heading)' }}>
+            <h2 className="header-title" style={{ fontWeight: 700, textTransform: 'capitalize', fontFamily: 'var(--font-heading)' }}>
               {currentView === 'help' ? 'Help Center & Support' : currentView === 'chats' ? 'Chat Center' : currentView === 'meeting' ? 'Active Call Room' : currentView}
             </h2>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+          <div className="header-actions">
             {/* Quick Meeting button in Header */}
             {currentView !== 'meeting' && (
               <button 
