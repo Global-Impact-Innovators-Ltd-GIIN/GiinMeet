@@ -256,65 +256,14 @@ function App() {
           .select('group_id, groups(id, name)')
           .eq('user_id', user.id);
 
-        // Auto-seed demo group if the user has no groups in the DB (resilient to RLS write blocks)
+        // Auto-seed demo group if the user has no groups in the DB (100% local to prevent RLS errors)
         const hasSeededGroup = localStorage.getItem(`giin_seeded_group_${user.id}`) === 'true';
         if ((!memberships || memberships.length === 0) && !hasSeededGroup) {
-          console.log('[App] No groups found in DB, seeding demo group...');
+          console.log('[App] Seeding demo group locally...');
           localStorage.setItem(`giin_seeded_group_${user.id}`, 'true');
-          let groupData = null;
-          try {
-            const { data: newGroup, error: groupErr } = await supabase
-              .from('groups')
-              .insert([{ name: 'Global Impact Innovators Official' }])
-              .select()
-              .single();
-            if (newGroup && !groupErr) {
-              groupData = newGroup;
-            }
-          } catch (e) {
-            console.warn('[App] Failed to insert group in DB, falling back to local seeding:', e);
-          }
 
-          const groupId = groupData?.id || 'demo-group-id-' + Math.random().toString(36).substring(2, 10);
-
-          if (groupData) {
-            try {
-              await supabase
-                .from('group_members')
-                .insert([{ group_id: groupId, user_id: user.id }]);
-
-              const demoMessages = [
-                {
-                  thread_id: `group_${groupId}`,
-                  sender_name: 'System Assistant',
-                  text: 'Welcome to GIIN Meet! This is your official collaborative space.',
-                  user_id: 'system'
-                },
-                {
-                  thread_id: `group_${groupId}`,
-                  sender_name: 'GIIN Bot',
-                  text: 'You can start an instant meeting or schedule a team sync using the Dashboard.',
-                  user_id: 'system'
-                }
-              ];
-
-              for (const msg of demoMessages) {
-                await supabase.from('messages').insert([msg]);
-              }
-
-              const refetched = await supabase
-                .from('group_members')
-                .select('group_id, groups(id, name)')
-                .eq('user_id', user.id);
-              memberships = refetched.data;
-            } catch (e) {
-              console.warn('[App] Failed to insert group members/messages in DB:', e);
-            }
-          }
-
-          // Always construct and append the local thread so it immediately reflects in the UI
           const newThread: ChatThread = {
-            id: `group_${groupId}`,
+            id: 'group_demo-group-id',
             name: 'Global Impact Innovators Official',
             avatar: 'GI',
             avatarBg: '#10B981',
@@ -890,52 +839,34 @@ function App() {
 
           let data = await mockAuth.getMeetings(user.id);
           
-          // Auto-seed demo meetings if database has no meetings
+          // Auto-seed demo meetings if database has no meetings (100% local to prevent RLS errors)
           const hasSeededMeetings = localStorage.getItem(`giin_seeded_meetings_${user.id}`) === 'true';
           if ((!data || data.length === 0) && !hasSeededMeetings) {
-            console.log('[App] No meetings found in DB, seeding demo meetings...');
+            console.log('[App] Seeding demo meetings locally...');
             localStorage.setItem(`giin_seeded_meetings_${user.id}`, 'true');
-            const demoMeetings = [
+            const demoMeetings: Meeting[] = [
               {
+                id: 'demo-meeting-launch',
                 title: 'GIIN Meet Official Launch',
                 time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
                 duration: '45 mins',
-                require_waiting_room: false
+                status: 'Scheduled',
+                host: 'You',
+                passcode: 'ABCD'
               },
               {
+                id: 'demo-meeting-sync',
                 title: 'Weekly Innovation Sync',
                 time: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
                 duration: '30 mins',
-                require_waiting_room: true
+                status: 'Completed',
+                host: 'You',
+                passcode: 'WXYZ'
               }
             ];
 
-            const seeded: Meeting[] = [];
-            for (const m of demoMeetings) {
-              const newMeet = await mockAuth.createMeeting({
-                user_id: user.id,
-                title: m.title,
-                time: m.time,
-                duration: m.duration,
-                status: m.require_waiting_room ? 'Scheduled' : 'In Progress',
-                host: 'You',
-                require_waiting_room: m.require_waiting_room
-              });
-              if (newMeet) {
-                seeded.push({
-                  id: newMeet.id,
-                  title: newMeet.title,
-                  time: newMeet.time,
-                  duration: newMeet.duration,
-                  status: newMeet.status as any,
-                  host: newMeet.host || 'You',
-                  passcode: newMeet.passcode
-                });
-              }
-            }
-
             // Immediately set state and update localStorage, bypassing DB re-query
-            const merged = [...seeded];
+            const merged = [...demoMeetings];
             cached.forEach((cm: any) => {
               if (!merged.some(m => m.id === cm.id)) {
                 merged.push(cm);
