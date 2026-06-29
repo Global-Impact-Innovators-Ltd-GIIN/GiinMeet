@@ -256,45 +256,95 @@ function App() {
           .select('group_id, groups(id, name)')
           .eq('user_id', user.id);
 
-        // Auto-seed demo group if the user has no groups in the DB
+        // Auto-seed demo group if the user has no groups in the DB (resilient to RLS write blocks)
         if (!memberships || memberships.length === 0) {
           console.log('[App] No groups found in DB, seeding demo group...');
-          const { data: newGroup, error: groupErr } = await supabase
-            .from('groups')
-            .insert([{ name: 'Global Impact Innovators Official' }])
-            .select()
-            .single();
+          let groupData = null;
+          try {
+            const { data: newGroup, error: groupErr } = await supabase
+              .from('groups')
+              .insert([{ name: 'Global Impact Innovators Official' }])
+              .select()
+              .single();
+            if (newGroup && !groupErr) {
+              groupData = newGroup;
+            }
+          } catch (e) {
+            console.warn('[App] Failed to insert group in DB, falling back to local seeding:', e);
+          }
 
-          if (newGroup && !groupErr) {
-            await supabase
-              .from('group_members')
-              .insert([{ group_id: newGroup.id, user_id: user.id }]);
+          const groupId = groupData?.id || 'demo-group-id-' + Math.random().toString(36).substring(2, 10);
 
-            const demoMessages = [
+          if (groupData) {
+            try {
+              await supabase
+                .from('group_members')
+                .insert([{ group_id: groupId, user_id: user.id }]);
+
+              const demoMessages = [
+                {
+                  thread_id: `group_${groupId}`,
+                  sender_name: 'System Assistant',
+                  text: 'Welcome to GIIN Meet! This is your official collaborative space.',
+                  user_id: 'system'
+                },
+                {
+                  thread_id: `group_${groupId}`,
+                  sender_name: 'GIIN Bot',
+                  text: 'You can start an instant meeting or schedule a team sync using the Dashboard.',
+                  user_id: 'system'
+                }
+              ];
+
+              for (const msg of demoMessages) {
+                await supabase.from('messages').insert([msg]);
+              }
+
+              const refetched = await supabase
+                .from('group_members')
+                .select('group_id, groups(id, name)')
+                .eq('user_id', user.id);
+              memberships = refetched.data;
+            } catch (e) {
+              console.warn('[App] Failed to insert group members/messages in DB:', e);
+            }
+          }
+
+          // Always construct and append the local thread so it immediately reflects in the UI
+          const newThread: ChatThread = {
+            id: `group_${groupId}`,
+            name: 'Global Impact Innovators Official',
+            avatar: 'GI',
+            avatarBg: '#10B981',
+            isGroup: true,
+            status: 'Online',
+            unreadCount: 0,
+            messages: [
               {
-                thread_id: `group_${newGroup.id}`,
-                sender_name: 'System Assistant',
+                id: 'demo-msg-1',
+                sender: 'System Assistant',
                 text: 'Welcome to GIIN Meet! This is your official collaborative space.',
-                user_id: 'system'
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                self: false
               },
               {
-                thread_id: `group_${newGroup.id}`,
-                sender_name: 'GIIN Bot',
+                id: 'demo-msg-2',
+                sender: 'GIIN Bot',
                 text: 'You can start an instant meeting or schedule a team sync using the Dashboard.',
-                user_id: 'system'
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                self: false
               }
-            ];
+            ]
+          };
 
-            for (const msg of demoMessages) {
-              await supabase.from('messages').insert([msg]);
+          setThreads(prev => {
+            if (!prev.some(t => t.id === newThread.id)) {
+              const updated = [newThread, ...prev];
+              localStorage.setItem('giin_chat_threads', JSON.stringify(updated));
+              return updated;
             }
-
-            const refetched = await supabase
-              .from('group_members')
-              .select('group_id, groups(id, name)')
-              .eq('user_id', user.id);
-            memberships = refetched.data;
-          }
+            return prev;
+          });
         }
 
         const userGroups = memberships?.map((m: any) => m.groups).filter(Boolean) || [];
@@ -856,8 +906,9 @@ function App() {
               }
             ];
 
+            const seeded: Meeting[] = [];
             for (const m of demoMeetings) {
-              await mockAuth.createMeeting({
+              const newMeet = await mockAuth.createMeeting({
                 user_id: user.id,
                 title: m.title,
                 time: m.time,
@@ -866,9 +917,29 @@ function App() {
                 host: 'You',
                 require_waiting_room: m.require_waiting_room
               });
+              if (newMeet) {
+                seeded.push({
+                  id: newMeet.id,
+                  title: newMeet.title,
+                  time: newMeet.time,
+                  duration: newMeet.duration,
+                  status: newMeet.status as any,
+                  host: newMeet.host || 'You',
+                  passcode: newMeet.passcode
+                });
+              }
             }
 
-            data = await mockAuth.getMeetings(user.id);
+            // Immediately set state and update localStorage, bypassing DB re-query
+            const merged = [...seeded];
+            cached.forEach((cm: any) => {
+              if (!merged.some(m => m.id === cm.id)) {
+                merged.push(cm);
+              }
+            });
+            setMeetingHistory(merged);
+            localStorage.setItem('giin_meetings', JSON.stringify(merged));
+            return;
           }
 
           if (data && data.length > 0) {
