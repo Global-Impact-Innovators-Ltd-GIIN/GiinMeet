@@ -739,10 +739,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           setParticipants(prev => {
             const merged = [...mapped];
             prev.forEach(p => {
-              // If it's a dynamic participant (we have an active peer connection with them), keep them!
-              const isDynamic = p.id.startsWith('guest-') || p.id.startsWith('mock-') || p.id.startsWith('virtual-') || !mapped.some(m => m.id === p.id || m.userId === p.userId);
-              if (isDynamic && (pcsRef.current[p.id] || pcsRef.current[p.userId || ''])) {
-                merged.push(p);
+              // If it's a dynamic/virtual participant, preserve them so they are not wiped out by the database sync
+              const isDynamic = p.id.startsWith('guest-') || p.id.startsWith('mock-') || p.id.startsWith('virtual-') || p.id.startsWith('user-signals-') || !mapped.some(m => m.id === p.id || m.userId === p.userId);
+              const isStillActive = !!(pcsRef.current[p.id] || pcsRef.current[p.userId || ''] || peerStates[p.id] || peerStates[p.userId || ''] || p.id.startsWith('user-signals-') || p.id.startsWith('virtual-'));
+              if (isDynamic && isStillActive) {
+                if (!merged.some(m => m.id === p.id || m.userId === p.userId)) {
+                  merged.push(p);
+                }
               }
             });
             return merged;
