@@ -2095,7 +2095,7 @@ function App() {
             />
           )}
 
-          {currentView === 'meeting' && activeMeetingId && (
+          {activeMeetingId && (
             <MeetingRoom 
               meetingId={activeMeetingId}
               meetingTitle={activeCallTitle || 'GIIN MEET Video Room'}
@@ -2105,6 +2105,10 @@ function App() {
               initialVideoState={activeCallVideoState}
               isP2PCall={isP2PCall}
               isHost={meetingHistory.some(m => m.id === activeMeetingId && (m.host === 'You' || m.host === user?.name))}
+              isMinimized={currentView !== 'meeting'}
+              onMinimizeToggle={(minimized) => {
+                setCurrentView(minimized ? 'dashboard' : 'meeting');
+              }}
             />
           )}
 
