@@ -346,31 +346,98 @@ export const mockAuth = {
     return { data, error };
   },
 
-  // Fetch chat messages
+  // Fetch chat messages with local cache fallback
   getMessages: async (threadId: string) => {
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('thread_id', threadId)
-      .order('created_at', { ascending: true });
-    if (error) {
-      console.warn('[Supabase Client] Failed to fetch messages.', error.message);
-      return [];
+    let localMsgs: any[] = [];
+    try {
+      const localMsgsRaw = localStorage.getItem(`giin_chat_messages_${threadId}`);
+      localMsgs = localMsgsRaw ? JSON.parse(localMsgsRaw) : [];
+    } catch (e) {
+      console.warn('[Supabase Client] Failed to parse local messages:', e);
     }
-    return data || [];
+
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('thread_id', threadId)
+        .order('created_at', { ascending: true });
+        
+      if (error) {
+        console.warn('[Supabase Client] Failed to fetch messages from DB. Using local fallback.', error.message);
+        return localMsgs;
+      }
+      
+      // Merge and deduplicate DB messages with local messages
+      const dbMsgs = data || [];
+      const merged = [...dbMsgs];
+      localMsgs.forEach((lm: any) => {
+        const isDuplicate = merged.some(dm => 
+          dm.id === lm.id || 
+          (dm.text === lm.text && dm.sender_name === lm.sender_name && Math.abs(new Date(dm.created_at).getTime() - new Date(lm.created_at).getTime()) < 10000)
+        );
+        if (!isDuplicate) {
+          merged.push(lm);
+        }
+      });
+      
+      // Sort by created_at
+      merged.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      return merged;
+    } catch (err: any) {
+      console.warn('[Supabase Client] Exception in getMessages. Using local fallback.', err.message);
+      return localMsgs;
+    }
   },
 
-  // Send message
+  // Send message with local cache fallback
   sendMessage: async (message: { thread_id: string; sender_name: string; text: string; user_id?: string }) => {
-    const { data, error } = await supabase
-      .from('messages')
-      .insert([message])
-      .select()
-      .single();
-    if (error) {
-      console.warn('[Supabase Client] Failed to send message.', error.message);
+    const tempId = 'msg_' + Math.random().toString(36).substring(2, 11);
+    const localMsg = {
+      id: tempId,
+      created_at: new Date().toISOString(),
+      ...message
+    };
+
+    // Save to localStorage immediately (optimistic local persistence)
+    try {
+      const localMsgsRaw = localStorage.getItem(`giin_chat_messages_${message.thread_id}`);
+      const localMsgs = localMsgsRaw ? JSON.parse(localMsgsRaw) : [];
+      localMsgs.push(localMsg);
+      localStorage.setItem(`giin_chat_messages_${message.thread_id}`, JSON.stringify(localMsgs));
+    } catch (e) {
+      console.warn('[Supabase Client] Failed to save message to localStorage:', e);
     }
-    return data;
+
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .insert([message])
+        .select()
+        .single();
+        
+      if (error) {
+        console.warn('[Supabase Client] Failed to send message to DB. Retaining in local storage.', error.message);
+        return localMsg;
+      }
+      
+      // Replace the temp local message with the real database message if successful
+      if (data) {
+        try {
+          const localMsgsRaw = localStorage.getItem(`giin_chat_messages_${message.thread_id}`);
+          const localMsgs = localMsgsRaw ? JSON.parse(localMsgsRaw) : [];
+          const updated = localMsgs.map((lm: any) => lm.id === tempId ? data : lm);
+          localStorage.setItem(`giin_chat_messages_${message.thread_id}`, JSON.stringify(updated));
+        } catch (e) {
+          console.warn('[Supabase Client] Failed to update local storage with DB message:', e);
+        }
+        return data;
+      }
+      return localMsg;
+    } catch (err: any) {
+      console.warn('[Supabase Client] Exception in sendMessage. Retaining in local storage.', err.message);
+      return localMsg;
+    }
   },
 
   // Fetch directory contacts belonging to the same workspace domain
