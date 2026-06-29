@@ -243,13 +243,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   // Floating Emoji Reactions State
-  const [activeReactions, setActiveReactions] = useState<{ id: string; senderKey: string; emoji: string }[]>([]);
+  const [activeReactions, setActiveReactions] = useState<{ id: string; senderKey: string; emoji: string; offset: number }[]>([]);
   const [showEmojiReactions, setShowEmojiReactions] = useState(false);
 
   // Q&A Board States
   const [qaQuestions, setQaQuestions] = useState<{ id: string; text: string; author: string; upvotes: number; upvotedBy: string[] }[]>([]);
   const [newQuestionText, setNewQuestionText] = useState('');
   const [isQAActive, setIsQAActive] = useState(false);
+
+  // Active peer connection keys state to avoid ref access during render
+  const [activePeerKeys, setActivePeerKeys] = useState<string[]>([]);
 
   // Collaborative Whiteboard States
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
@@ -323,6 +326,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (pcCandidatesRef.current[peerKey]) {
       delete pcCandidatesRef.current[peerKey];
     }
+    setActivePeerKeys(prev => prev.filter(k => k !== peerKey));
     setRemoteStreams(prev => {
       const copy = { ...prev };
       delete copy[peerKey];
@@ -514,7 +518,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const triggerReaction = (senderKey: string, emoji: string) => {
     const id = Math.random().toString(36).substr(2, 9);
-    setActiveReactions(prev => [...prev, { id, senderKey, emoji }]);
+    const offset = Math.floor(Math.random() * 30 - 15);
+    setActiveReactions(prev => [...prev, { id, senderKey, emoji, offset }]);
     setTimeout(() => {
       setActiveReactions(prev => prev.filter(r => r.id !== id));
     }, 3000);
@@ -815,6 +820,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
 
       pcsRef.current[peerKey] = pc;
+      setActivePeerKeys(prev => [...new Set([...prev, peerKey])]);
 
       // Add local media tracks
       if (stream) {
@@ -2828,7 +2834,7 @@ Securely encrypted under Fintech AES-256 standard.`;
               (() => {
                 const p = participants[0];
                 const peerKey = p.userId || p.id;
-                const hasConnection = !!pcsRef.current[peerKey];
+                const hasConnection = activePeerKeys.includes(peerKey);
                 const peerStreamObj = remoteStreams[peerKey];
                 const pState = peerStates[peerKey] || {
                   name: p.name,
@@ -2948,7 +2954,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                         style={{
                           position: 'absolute',
                           bottom: '40px',
-                          left: `${50 + (Math.random() * 30 - 15)}%`,
+                          left: `${50 + (r.offset || 0)}%`,
                           transform: 'translateX(-50%)',
                           fontSize: '3rem',
                           pointerEvents: 'none',
@@ -3207,7 +3213,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                     style={{
                       position: 'absolute',
                       bottom: '40px',
-                      left: `${50 + (Math.random() * 30 - 15)}%`,
+                      left: `${50 + (r.offset || 0)}%`,
                       transform: 'translateX(-50%)',
                       fontSize: '3rem',
                       pointerEvents: 'none',
@@ -3461,7 +3467,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                     style={{
                       position: 'absolute',
                       bottom: '30px',
-                      left: `${50 + (Math.random() * 30 - 15)}%`,
+                      left: `${50 + (r.offset || 0)}%`,
                       transform: 'translateX(-50%)',
                       fontSize: '2.5rem',
                       pointerEvents: 'none',
@@ -3476,7 +3482,7 @@ Securely encrypted under Fintech AES-256 standard.`;
               {/* Remote Active Participants Card Loops */}
               {participants.map(p => {
                 const peerKey = p.userId || p.id;
-                const hasConnection = !!pcsRef.current[peerKey];
+                const hasConnection = activePeerKeys.includes(peerKey);
                 const peerStreamObj = remoteStreams[peerKey];
                 const pState = peerStates[peerKey] || {
                   name: p.name,
@@ -3668,7 +3674,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                         style={{
                           position: 'absolute',
                           bottom: '30px',
-                          left: `${50 + (Math.random() * 30 - 15)}%`,
+                          left: `${50 + (r.offset || 0)}%`,
                           transform: 'translateX(-50%)',
                           fontSize: '2.5rem',
                           pointerEvents: 'none',
