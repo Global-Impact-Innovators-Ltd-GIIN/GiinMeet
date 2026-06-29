@@ -1268,6 +1268,23 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           alert('The host has muted everyone.');
         }
       })
+      .on('broadcast', { event: 'mute-participant' }, (payload: any) => {
+        const data = payload.payload;
+        if (data.targetUserId === myKey && !isAdmin) {
+          setIsMuted(true);
+          if (localAudioTrackRef.current) {
+            localAudioTrackRef.current.enabled = false;
+          }
+          alert('You have been muted by the host.');
+        }
+      })
+      .on('broadcast', { event: 'remove-participant' }, (payload: any) => {
+        const data = payload.payload;
+        if (data.targetUserId === myKey) {
+          alert('You have been removed from the meeting by the host.');
+          onEndMeeting();
+        }
+      })
       .on('broadcast', { event: 'disable-video-all' }, () => {
         if (!isAdmin) {
           setIsVideoOn(false);
@@ -4082,28 +4099,88 @@ Securely encrypted under Fintech AES-256 standard.`;
 
               {/* Other participants */}
               {participants.map(p => (
-                <div key={p.id} className="flex-between">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: p.avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '0.85rem', color: 'white' }}>
+                <div key={p.id} className="flex-between" style={{ padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: p.avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '0.85rem', color: 'white', flexShrink: 0 }}>
                       {p.avatar}
                     </div>
-                    <div>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{p.name}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{p.role}</div>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
                     {p.isSpeaking && !p.isMuted && <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', animation: 'pulse-ring 2s infinite' }} />}
+                    
                     {isAdmin && p.userId && (
-                      <button 
-                        onClick={() => handleDesignateAdmin(p.userId!)}
-                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, marginRight: '6px' }}
-                        title="Designate Admin"
-                      >
-                        Make Admin
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button 
+                          onClick={() => handleDesignateAdmin(p.userId!)}
+                          style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
+                          title="Designate Admin"
+                        >
+                          Make Admin
+                        </button>
+                        
+                        {!p.isMuted && (
+                          <button 
+                            onClick={() => {
+                              if (sigChannelRef.current) {
+                                sigChannelRef.current.send({
+                                  type: 'broadcast',
+                                  event: 'mute-participant',
+                                  payload: { targetUserId: p.userId }
+                                });
+                              }
+                            }}
+                            style={{
+                              border: 'none',
+                              background: 'none',
+                              cursor: 'pointer',
+                              color: '#EF4444',
+                              display: 'flex',
+                              alignItems: 'center',
+                              padding: '4px',
+                              borderRadius: '4px'
+                            }}
+                            title="Mute Participant"
+                          >
+                            <MicOff size={13} />
+                          </button>
+                        )}
+
+                        <button 
+                          onClick={async () => {
+                            if (confirm(`Are you sure you want to remove ${p.name} from the meeting?`)) {
+                              if (sigChannelRef.current) {
+                                sigChannelRef.current.send({
+                                  type: 'broadcast',
+                                  event: 'remove-participant',
+                                  payload: { targetUserId: p.userId }
+                                });
+                              }
+                              await mockAuth.removeParticipant(meetingId, p.userId!);
+                            }
+                          }}
+                          style={{
+                            border: 'none',
+                            background: 'rgba(239, 68, 68, 0.1)',
+                            cursor: 'pointer',
+                            color: '#EF4444',
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            padding: '3px 6px',
+                            borderRadius: '4px'
+                          }}
+                          title="Remove Participant"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     )}
-                    {p.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />}
+                    
+                    {!isAdmin && (p.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />)}
+                    {isAdmin && p.isMuted && <MicOff size={14} color="#EF4444" style={{ marginLeft: '4px' }} />}
                   </div>
                 </div>
               ))}

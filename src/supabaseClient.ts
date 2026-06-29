@@ -624,6 +624,21 @@ export const mockAuth = {
     return { data, error };
   },
 
+  // Remove a participant from the meeting (resilient to database errors)
+  removeParticipant: async (meetingId: string, userId: string) => {
+    try {
+      const { error } = await supabase
+        .from('meeting_participants')
+        .delete()
+        .eq('meeting_id', meetingId)
+        .eq('user_id', userId);
+      return { success: !error };
+    } catch (err: any) {
+      console.warn('[Supabase Client] Failed to delete participant from database:', err.message);
+      return { success: false };
+    }
+  },
+
   // Get all users in the system (for Superadmin)
   getAllProfiles: async () => {
     const { data } = await supabase
