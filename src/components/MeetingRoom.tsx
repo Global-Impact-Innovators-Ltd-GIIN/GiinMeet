@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
   SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings,
-  MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders
+  MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -140,6 +140,8 @@ interface MeetingRoomProps {
   initialVideoState?: boolean;
   isP2PCall?: boolean;
   isHost?: boolean;
+  isMinimized?: boolean;
+  onMinimizeToggle?: (minimized: boolean) => void;
 }
 
 export const MeetingRoom: React.FC<MeetingRoomProps> = ({ 
@@ -150,12 +152,69 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   currentUser,
   initialVideoState = true,
   isP2PCall = false,
-  isHost = false
+  isHost = false,
+  isMinimized = false,
+  onMinimizeToggle
 }) => {
   const [showE2EEPannel, setShowE2EEPannel] = useState(false);
   const sigChannelRef = useRef<any>(null);
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
+
+  // Minimized floating window dragging state
+  const [position, setPosition] = useState({ x: window.innerWidth - 350, y: window.innerHeight - 220 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    setIsDragging(true);
+    dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      let newX = e.clientX - dragStart.current.x;
+      let newY = e.clientY - dragStart.current.y;
+      
+      newX = Math.max(10, Math.min(window.innerWidth - 340, newX));
+      newY = Math.max(10, Math.min(window.innerHeight - 200, newY));
+      
+      setPosition({ x: newX, y: newY });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
+
+  // Picture-in-Picture API helper
+  const handleTogglePictureInPicture = async () => {
+    try {
+      const videoEl = document.querySelector('.remote-video-feed') as HTMLVideoElement || document.querySelector('video') as HTMLVideoElement;
+      if (!videoEl) {
+        alert('No active video stream found to pop out.');
+        return;
+      }
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await videoEl.requestPictureInPicture();
+      }
+    } catch (error) {
+      console.warn('Picture-in-Picture API failed:', error);
+    }
+  };
 
   const deriveE2EESeal = (id: string) => {
     let hashVal = 5381;
@@ -1910,6 +1969,231 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const isDirectCall = isP2PCall && participants.length <= 1 && !isScreenSharing && !Object.keys(peerStates).some(k => peerStates[k].isScreenSharing);
 
+  if (isMinimized) {
+    // Determine which stream to display in the mini window
+    const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing);
+    const activeRemoteKey = Object.keys(peerStates).find(k => peerStates[k].isSpeaking) || Object.keys(remoteStreams)[0];
+    
+    const showStream = screenPeerKey ? remoteStreams[screenPeerKey] : (activeRemoteKey ? remoteStreams[activeRemoteKey] : stream);
+    const isLocalStream = !screenPeerKey && !activeRemoteKey;
+    
+    let label = 'You';
+    let isVideoActive = isVideoOn;
+    let avatarName = currentUser?.name || 'You';
+    
+    if (screenPeerKey) {
+      label = `${peerStates[screenPeerKey]?.name || 'Someone'}'s Screen`;
+      isVideoActive = true;
+    } else if (activeRemoteKey) {
+      label = peerStates[activeRemoteKey]?.name || 'Participant';
+      isVideoActive = peerStates[activeRemoteKey]?.isVideoOn;
+      avatarName = label;
+    }
+
+    const initials = avatarName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+
+    return (
+      <div 
+        onMouseDown={handleMouseDown}
+        style={{
+          position: 'fixed',
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          width: '320px',
+          height: '180px',
+          zIndex: 9999,
+          borderRadius: '12px',
+          overflow: 'hidden',
+          backgroundColor: '#0F172A',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1)',
+          display: 'flex',
+          flexDirection: 'column',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          userSelect: 'none',
+          animation: 'pop-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+        }}
+      >
+        <div style={{ flex: 1, position: 'relative', backgroundColor: '#020617' }}>
+          {showStream && isVideoActive && (
+            <video
+              className="remote-video-feed"
+              ref={el => {
+                if (el && showStream && el.srcObject !== showStream) {
+                  el.srcObject = showStream;
+                }
+              }}
+              autoPlay
+              playsInline
+              muted={isLocalStream}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover'
+              }}
+            />
+          )}
+
+          {(!showStream || !isVideoActive) && (
+            <div style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#0B0F19'
+            }}>
+              <div style={{
+                width: '50px',
+                height: '50px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--color-primary)',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 700,
+                fontSize: '1.1rem',
+                border: '2px solid rgba(255, 255, 255, 0.1)',
+                marginBottom: '0.25rem'
+              }}>
+                {initials}
+              </div>
+              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                {isLocalStream ? 'Camera Off' : `${label} (Camera Off)`}
+              </span>
+            </div>
+          )}
+
+          {/* Mini Header overlay */}
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            padding: '8px 12px',
+            background: 'linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            pointerEvents: 'none',
+            zIndex: 10
+          }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+              {label}
+            </span>
+            <div style={{ display: 'flex', gap: '4px', pointerEvents: 'auto' }}>
+              <button 
+                onClick={() => onMinimizeToggle?.(false)}
+                title="Restore to full screen"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: 'white',
+                  padding: '4px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <Maximize2 size={12} />
+              </button>
+            </div>
+          </div>
+
+          {/* Mini Controls overlay */}
+          <div style={{
+            position: 'absolute',
+            bottom: '8px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            display: 'flex',
+            gap: '8px',
+            backgroundColor: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(4px)',
+            padding: '6px 12px',
+            borderRadius: '20px',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3)',
+            zIndex: 10,
+            alignItems: 'center'
+          }}>
+            <button 
+              onClick={() => {
+                setIsMuted(!isMuted);
+                if (localAudioTrackRef.current) {
+                  localAudioTrackRef.current.enabled = isMuted;
+                }
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: isMuted ? '#EF4444' : '#10B981',
+                cursor: 'pointer',
+                padding: '2px',
+                display: 'flex'
+              }}
+            >
+              {isMuted ? <MicOff size={14} /> : <Mic size={14} />}
+            </button>
+            
+            <button 
+              onClick={() => {
+                setIsVideoOn(!isVideoOn);
+                if (localVideoTrackRef.current) {
+                  localVideoTrackRef.current.enabled = !isVideoOn;
+                }
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: !isVideoOn ? '#EF4444' : '#10B981',
+                cursor: 'pointer',
+                padding: '2px',
+                display: 'flex'
+              }}
+            >
+              {!isVideoOn ? <VideoOff size={14} /> : <VideoIcon size={14} />}
+            </button>
+
+            <button 
+              onClick={handleTogglePictureInPicture}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'white',
+                cursor: 'pointer',
+                padding: '2px',
+                display: 'flex'
+              }}
+              title="Pop out Picture-in-Picture"
+            >
+              <Monitor size={14} />
+            </button>
+
+            <div style={{ width: '1px', height: '12px', backgroundColor: 'rgba(255,255,255,0.2)' }} />
+
+            <button 
+              onClick={onEndMeeting}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#EF4444',
+                cursor: 'pointer',
+                padding: '2px',
+                display: 'flex'
+              }}
+              title="Leave Call"
+            >
+              <PhoneOff size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       display: 'flex',
@@ -1942,6 +2226,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </h3>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem' }}>
+          <button 
+            onClick={() => onMinimizeToggle?.(true)}
+            className="premium-btn premium-btn-secondary"
+            style={{
+              padding: '0.35rem 0.75rem',
+              fontSize: '0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              border: '1px solid var(--border-color)',
+              borderRadius: '4px'
+            }}
+            title="Minimize to Floating Window"
+          >
+            <Minimize2 size={14} />
+            <span>Minimize</span>
+          </button>
+
           {!isP2PCall && (
             <button 
               onClick={() => setShowMeetingInfo(!showMeetingInfo)}
@@ -2187,6 +2489,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                     )}
                     {hasConnection && peerStreamObj && pState.isVideoOn && (
                       <video
+                        className="remote-video-feed"
                         ref={el => {
                           if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
                             el.srcObject = peerStreamObj;
@@ -2794,6 +3097,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                         />
                         {pState.isVideoOn && (
                           <video
+                            className="remote-video-feed"
                             ref={el => {
                               if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
                                 el.srcObject = peerStreamObj;
@@ -3866,6 +4170,27 @@ Securely encrypted under Fintech AES-256 standard.`;
             title="Share Screen"
           >
             <Monitor size={20} />
+          </button>
+
+          {/* Picture-in-Picture Popout Button */}
+          <button 
+            onClick={handleTogglePictureInPicture}
+            style={{
+              width: '52px',
+              height: '52px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            title="Pop out Floating Video (Picture-in-Picture)"
+          >
+            <Maximize2 size={20} />
           </button>
 
           {/* Toggle Chat Panel */}
