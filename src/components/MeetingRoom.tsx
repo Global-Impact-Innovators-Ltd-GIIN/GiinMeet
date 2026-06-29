@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
-  SendHorizontal, Edit2, ShieldCheck, Lock, Unlock, Wifi, AlertTriangle, Copy, Check, Settings,
+  SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
   MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
   LogOut, UserCheck, X, Hand
 } from 'lucide-react';
@@ -127,6 +127,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const sigChannelRef = useRef<any>(null);
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
+  const reconnectTimersRef = useRef<{[key: string]: any}>({});
 
   // Minimized floating window dragging state
   const [position, setPosition] = useState({ x: window.innerWidth - 350, y: window.innerHeight - 220 });
@@ -426,6 +427,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       e2eeStatus?: 'secure' | 'unsupported';
       videoFilter?: string;
       isStudioLightEnabled?: boolean;
+      isReconnecting?: boolean;
     } 
   }>({});
 
@@ -975,7 +977,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       pc.ontrack = (event) => {
         const remoteStream = event.streams[0] || new MediaStream([event.track]);
-        const newStream = new MediaStream(remoteStream.getTracks());
+        const tracks = remoteStream.getTracks().map(track => {
+          if (track.kind === 'audio') {
+            return getFeedbackSuppressedAudioTrack(track);
+          }
+          return track;
+        });
+        const newStream = new MediaStream(tracks);
         setRemoteStreams(prev => ({
           ...prev,
           [peerKey]: newStream
@@ -987,16 +995,43 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'connected') {
+          if (reconnectTimersRef.current[peerKey]) {
+            clearTimeout(reconnectTimersRef.current[peerKey]);
+            delete reconnectTimersRef.current[peerKey];
+          }
           stopRingSound();
           playHandshakeConfirmSound();
           setPeerStates(prev => ({
             ...prev,
             [peerKey]: {
               ...prev[peerKey],
-              e2eeStatus: 'secure'
+              e2eeStatus: 'secure',
+              isReconnecting: false
             }
           }));
-        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        } else if (pc.connectionState === 'disconnected') {
+          setPeerStates(prev => ({
+            ...prev,
+            [peerKey]: {
+              ...prev[peerKey],
+              isReconnecting: true
+            }
+          }));
+          
+          // Trigger ICE restart automatically to heal connection
+          try {
+            pc.restartIce();
+          } catch (e) {
+            console.warn('ICE restart failed:', e);
+          }
+          
+          const timerId = setTimeout(() => {
+            if (pcsRef.current[peerKey] && pcsRef.current[peerKey].connectionState === 'disconnected') {
+              cleanupPeer(peerKey);
+            }
+          }, 10000);
+          reconnectTimersRef.current[peerKey] = timerId;
+        } else if (pc.connectionState === 'failed') {
           cleanupPeer(peerKey);
         }
       };
@@ -1762,7 +1797,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => {
     async function initAudio() {
       try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
+        });
         const audioTrack = audioStream.getAudioTracks()[0];
         localAudioTrackRef.current = audioTrack;
         audioTrack.enabled = !isMuted;
@@ -2133,6 +2174,51 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  const getFeedbackSuppressedAudioTrack = (rawTrack: MediaStreamTrack): MediaStreamTrack => {
+    try {
+      const ctx = getAudioCtx();
+      const rawStream = new MediaStream([rawTrack]);
+      const source = ctx.createMediaStreamSource(rawStream);
+      
+      // 1. High-pass filter to cut out low-end room resonances and rumble (common feedback frequencies)
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 180;
+      
+      // 2. Notch filters to target typical howling frequencies
+      const notch1 = ctx.createBiquadFilter();
+      notch1.type = 'notch';
+      notch1.frequency.value = 1000;
+      notch1.Q.value = 2.0;
+
+      const notch2 = ctx.createBiquadFilter();
+      notch2.type = 'notch';
+      notch2.frequency.value = 3000;
+      notch2.Q.value = 2.0;
+      
+      // 3. Dynamics Compressor to act as a limiter preventing runaway gain feedback loops
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -30;
+      compressor.knee.value = 15;
+      compressor.ratio.value = 16;
+      compressor.attack.value = 0.001;
+      compressor.release.value = 0.15;
+      
+      const dest = ctx.createMediaStreamDestination();
+      
+      source.connect(highpass);
+      highpass.connect(notch1);
+      notch1.connect(notch2);
+      notch2.connect(compressor);
+      compressor.connect(dest);
+      
+      return dest.stream.getAudioTracks()[0];
+    } catch (e) {
+      console.warn('Failed to initialize Feedback Suppressor:', e);
+      return rawTrack;
+    }
+  };
+
   const handleDisableVideoAll = () => {
     if (sigChannelRef.current) {
       sigChannelRef.current.send({
@@ -2184,7 +2270,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const nextVal = !isAudioEnhanced;
     setIsAudioEnhanced(nextVal);
     try {
-      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioStream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
       const rawTrack = audioStream.getAudioTracks()[0];
       let trackToUse = rawTrack;
       if (nextVal) {
@@ -2779,24 +2871,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <span>Invite & Info</span>
             </button>
           )}
-          <button 
-            onClick={() => setShowE2EEPannel(true)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#10B981',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem',
-              fontWeight: 600
-            }}
-          >
-            <ShieldCheck size={16} />
-            <span>E2EE Active</span>
-          </button>
-          <span style={{ color: 'var(--text-muted)' }}>&bull;</span>
-          <span style={{ color: 'var(--color-secondary)' }}>HD Call</span>
+          {/* Security details hidden to run silently in the background */}
         </div>
       </div>
 
@@ -3084,15 +3159,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                     }}>
                       <span style={{ fontWeight: 600 }}>{p.name}</span>
                       {pState.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />}
-                      {hasConnection && pState.latency !== undefined && (
-                        <>
-                          <span style={{ color: 'rgba(255,255,255,0.2)' }}>|</span>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: pState.latency < 80 ? '#10B981' : '#FBBF24' }}>
-                            <Wifi size={12} />
-                            <span>{pState.latency}ms</span>
-                          </span>
-                        </>
-                      )}
+                      {/* Latency badge removed to run in the background */}
                     </div>
                     {activeReactions.filter(r => r.senderKey === peerKey).map(r => (
                       <div 
@@ -3317,26 +3384,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                   </div>
                 )}
 
-                {/* E2EE secure emblem overlay */}
-                <div style={{
-                  position: 'absolute',
-                  top: '12px',
-                  left: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                  backgroundColor: 'rgba(16, 185, 129, 0.25)',
-                  border: '1px solid rgba(16, 185, 129, 0.4)',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  fontSize: '0.7rem',
-                  color: '#10B981',
-                  fontWeight: 600,
-                  backdropFilter: 'blur(4px)'
-                }}>
-                  <Lock size={10} color="#10B981" />
-                  <span>E2EE SECURE ROOM</span>
-                </div>
+                {/* E2EE secure emblem removed to run silently in the background */}
 
                 <div style={{
                   position: 'absolute',
@@ -3514,7 +3562,8 @@ Securely encrypted under Fintech AES-256 standard.`;
                 latency: undefined,
                 e2eeStatus: undefined,
                 videoFilter: undefined,
-                isStudioLightEnabled: false
+                isStudioLightEnabled: false,
+                isReconnecting: false
               };
 
               return (
@@ -3595,7 +3644,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                       <div style={{
                         position: 'absolute',
                         top: '12px',
-                        left: pState.latency !== undefined ? '80px' : '12px',
+                        left: '12px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '0.35rem',
@@ -3614,46 +3663,23 @@ Securely encrypted under Fintech AES-256 standard.`;
                     );
                   })()}
 
-                  {hasConnection && pState.latency !== undefined && (
+                  {/* Reconnecting overlay status */}
+                  {pState.isReconnecting && (
                     <div style={{
                       position: 'absolute',
-                      top: '12px',
-                      left: '12px',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: '100%',
+                      backgroundColor: 'rgba(0, 0, 0, 0.7)',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.25rem',
-                      backgroundColor: 'rgba(7, 9, 14, 0.7)',
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      fontSize: '0.65rem',
-                      color: pState.latency < 80 ? '#10B981' : pState.latency < 200 ? '#FBBF24' : '#EF4444',
-                      zIndex: 10
+                      justifyContent: 'center',
+                      zIndex: 15
                     }}>
-                      <Wifi size={10} />
-                      <span>{pState.latency}ms</span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-accent)', fontWeight: 600 }}>Reconnecting...</span>
                     </div>
                   )}
-
-                  <div style={{
-                    position: 'absolute',
-                    top: '12px',
-                    right: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem',
-                    backgroundColor: pState.e2eeStatus === 'secure' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)',
-                    border: pState.e2eeStatus === 'secure' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)',
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    fontSize: '0.65rem',
-                    color: pState.e2eeStatus === 'secure' ? '#10B981' : '#EF4444',
-                    fontWeight: 600,
-                    backdropFilter: 'blur(4px)',
-                    zIndex: 10
-                  }}>
-                    {pState.e2eeStatus === 'secure' ? <Lock size={10} /> : <Unlock size={10} />}
-                    <span>{pState.e2eeStatus === 'secure' ? 'E2EE' : 'P2P'}</span>
-                  </div>
 
                   {pState.isSpeaking && !pState.isMuted && (
                     <div style={{
@@ -5406,64 +5432,105 @@ Securely encrypted under Fintech AES-256 standard.`;
               </button>
               
               {showHandRaiseMenu && (
-                <div style={{
-                  position: 'absolute',
-                  bottom: '50px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  backgroundColor: 'rgba(15, 23, 42, 0.98)',
-                  border: '1px solid #1E293B',
-                  borderRadius: '8px',
-                  padding: '0.5rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '4px',
-                  zIndex: 1000,
-                  boxShadow: 'var(--shadow-premium)',
-                  width: '140px',
-                  backdropFilter: 'blur(10px)'
-                }}>
-                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textAlign: 'center', marginBottom: '2px', fontWeight: 600 }}>Select Reason</span>
-                  {[
-                    { label: '🙋 Question', value: 'Question' },
-                    { label: '💬 Comment', value: 'Comment' },
-                    { label: '💡 Idea', value: 'Idea' },
-                    { label: '🚨 Urgent', value: 'Urgent' }
-                  ].map(r => (
-                    <button
-                      key={r.value}
-                      onClick={() => toggleHandRaise(r.label)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'white',
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        fontSize: '0.75rem',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'background 0.15s ease'
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                <div 
+                  className="hand-raise-menu-container"
+                  style={{
+                    position: window.innerWidth < 768 ? 'fixed' : 'absolute',
+                    bottom: window.innerWidth < 768 ? '0' : '55px',
+                    left: window.innerWidth < 768 ? '0' : '50%',
+                    right: window.innerWidth < 768 ? '0' : 'auto',
+                    transform: window.innerWidth < 768 ? 'none' : 'translateX(-50%)',
+                    width: window.innerWidth < 768 ? '100%' : '320px',
+                    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                    border: window.innerWidth < 768 ? 'none' : '1px solid #1E293B',
+                    borderTop: window.innerWidth < 768 ? '1px solid #1E293B' : '1px solid #1E293B',
+                    borderRadius: window.innerWidth < 768 ? '20px 20px 0 0' : '12px',
+                    padding: '1.5rem',
+                    zIndex: 10000,
+                    boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
+                    backdropFilter: 'blur(20px)',
+                    animation: window.innerWidth < 768 ? 'slide-up 0.3s ease-out' : 'pop-in 0.2s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem'
+                  }}
+                >
+                  {window.innerWidth < 768 && (
+                    <div style={{ width: '40px', height: '4px', backgroundColor: '#475569', borderRadius: '2px', margin: '0 auto' }} />
+                  )}
+                  
+                  <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>
+                      Raise Hand
+                    </span>
+                    <button 
+                      onClick={() => setShowHandRaiseMenu(false)}
+                      style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontSize: '1.25rem' }}
                     >
-                      {r.label}
+                      &times;
                     </button>
-                  ))}
-                  <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: '2px 0' }} />
+                  </div>
+
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '0.75rem'
+                  }}>
+                    {[
+                      { label: '🙋 Question', value: 'Question', desc: 'Ask a question', color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.12)' },
+                      { label: '💬 Comment', value: 'Comment', desc: 'Share a thought', color: '#10B981', bg: 'rgba(16, 185, 129, 0.12)' },
+                      { label: '💡 Idea', value: 'Idea', desc: 'Suggest an idea', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.12)' },
+                      { label: '🚨 Urgent', value: 'Urgent', desc: 'Interrupt host', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.12)' }
+                    ].map(r => (
+                      <button
+                        key={r.value}
+                        onClick={() => toggleHandRaise(r.label)}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-start',
+                          padding: '0.75rem',
+                          borderRadius: '8px',
+                          border: `1px solid rgba(255, 255, 255, 0.05)`,
+                          backgroundColor: r.bg,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'scale(1.03)';
+                          e.currentTarget.style.borderColor = r.color;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'scale(1)';
+                          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)';
+                        }}
+                      >
+                        <span style={{ fontSize: '1.2rem', marginBottom: '0.25rem' }}>{r.label.split(' ')[0]}</span>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>{r.label.split(' ')[1]}</span>
+                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '2px' }}>{r.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: '0.25rem 0' }} />
+
                   <button
                     onClick={() => toggleHandRaise()}
                     style={{
-                      background: 'none',
-                      border: 'none',
+                      width: '100%',
+                      padding: '0.75rem',
+                      borderRadius: '8px',
+                      border: '1px dashed var(--color-accent)',
+                      background: 'rgba(250, 189, 2, 0.05)',
                       color: 'var(--color-accent)',
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      fontSize: '0.75rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
                       cursor: 'pointer',
-                      textAlign: 'left',
-                      fontWeight: 600
+                      transition: 'all 0.15s ease'
                     }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
                   >
                     ✋ Just Raise Hand
                   </button>
