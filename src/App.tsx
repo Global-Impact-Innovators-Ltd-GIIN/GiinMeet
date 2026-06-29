@@ -216,6 +216,44 @@ function App() {
   });
   const [activeThreadId, setActiveThreadId] = useState<string>('');
   const [activeNotification, setActiveNotification] = useState<{ sender: string; text: string } | null>(null);
+  
+  // Real-time typing indicators state
+  const [typingStatuses, setTypingStatuses] = useState<{ [key: string]: { userName: string; timestamp: number } }>({});
+  const channelRef = useRef<any>(null);
+
+  const handleSendTypingStatus = (threadId: string, isTyping: boolean) => {
+    if (user && channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: {
+          userId: user.id,
+          userName: user.name,
+          threadId,
+          isTyping
+        }
+      });
+    }
+  };
+
+  // Clean up stale typing statuses (older than 4 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTypingStatuses(prev => {
+        const now = Date.now();
+        const updated = { ...prev };
+        let changed = false;
+        Object.keys(updated).forEach(key => {
+          if (now - updated[key].timestamp > 4000) {
+            delete updated[key];
+            changed = true;
+          }
+        });
+        return changed ? updated : prev;
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Auto-cache threads whenever they change
   useEffect(() => {
@@ -648,12 +686,34 @@ function App() {
           });
         }
       )
+      .on(
+        'broadcast',
+        { event: 'typing' },
+        (payload: any) => {
+          const data = payload.payload;
+          if (data && data.userId !== user.id) {
+            const key = `${data.threadId}_${data.userId}`;
+            setTypingStatuses(prev => {
+              if (data.isTyping) {
+                return { ...prev, [key]: { userName: data.userName, timestamp: Date.now() } };
+              } else {
+                const updated = { ...prev };
+                delete updated[key];
+                return updated;
+              }
+            });
+          }
+        }
+      )
       .subscribe((status, err) => {
         console.log(`[Realtime] Messages channel status: ${status}`, err || '');
       });
 
+    channelRef.current = channel;
+
     return () => {
       supabase.removeChannel(channel);
+      channelRef.current = null;
     };
   }, [user]);
 
@@ -2452,6 +2512,8 @@ function App() {
               setThreads={setThreads}
               activeThreadId={activeThreadId}
               setActiveThreadId={setActiveThreadId}
+              typingStatuses={typingStatuses}
+              onSendTypingStatus={handleSendTypingStatus}
             />
           )}
 

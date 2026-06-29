@@ -431,6 +431,8 @@ interface ChatsProps {
   setThreads: React.Dispatch<React.SetStateAction<ChatThread[]>>;
   activeThreadId: string;
   setActiveThreadId: React.Dispatch<React.SetStateAction<string>>;
+  typingStatuses?: { [key: string]: { userName: string; timestamp: number } };
+  onSendTypingStatus?: (threadId: string, isTyping: boolean) => void;
 }
 
 const getSmartReplies = (text: string): string[] => {
@@ -443,25 +445,9 @@ const getSmartReplies = (text: string): string[] => {
     return ["Thanks for sending the file!", "I'll review this now.", "Looks good!"];
   }
   if (txt.includes("call_invite:")) {
-    return ["Joining now!", "Give me 2 minutes.", "Can we schedule for later?"];
+    return ["I'll join the video call now.", "Give me a minute.", "Can we do audio only?"];
   }
-  if (txt.includes("meeting") || txt.includes("align")) {
-    return ["Let's schedule a call.", "Sounds good, I'll join.", "Send me the invite link."];
-  }
-  if (txt.includes("help") || txt.includes("issue") || txt.includes("error")) {
-    return ["Let's debug it together.", "What error do you see?", "I can help with that."];
-  }
-  if (txt.includes("perfect") || txt.includes("great") || txt.includes("awesome")) {
-    return ["Awesome!", "Glad to hear that.", "Let's proceed."];
-  }
-  if (txt.includes("thank") || txt.includes("thanks")) {
-    return ["You're welcome!", "Anytime.", "No problem!"];
-  }
-  if (txt.includes("hello") || txt.includes("hi") || txt.includes("hey")) {
-    return ["Hey there!", "Hello! How can I help?", "Hi, good to connect!"];
-  }
-  
-  return ["Understood.", "Sounds good!", "I will check and let you know."];
+  return ["Got it, thanks!", "Perfect, I agree.", "Let me check and get back to you."];
 };
 
 export const Chats: React.FC<ChatsProps> = ({ 
@@ -473,7 +459,9 @@ export const Chats: React.FC<ChatsProps> = ({
   threads,
   setThreads,
   activeThreadId,
-  setActiveThreadId
+  setActiveThreadId,
+  typingStatuses = {},
+  onSendTypingStatus
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [chatInput, setChatInput] = useState('');
@@ -484,6 +472,32 @@ export const Chats: React.FC<ChatsProps> = ({
   
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const typingTimeoutRef = useRef<any>(null);
+  const isCurrentlyTypingRef = useRef(false);
+
+  const handleTypingInputChange = () => {
+    if (!onSendTypingStatus || !activeThreadId) return;
+
+    if (!isCurrentlyTypingRef.current) {
+      isCurrentlyTypingRef.current = true;
+      onSendTypingStatus(activeThreadId, true);
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      isCurrentlyTypingRef.current = false;
+      onSendTypingStatus(activeThreadId, false);
+    }, 3000);
+  };
+
+  const getTypingUsersInThread = (threadId: string) => {
+    return Object.keys(typingStatuses)
+      .filter(key => key.startsWith(`${threadId}_`))
+      .map(key => typingStatuses[key].userName);
+  };
 
   // Add Contact states
   const [showAddContactModal, setShowAddContactModal] = useState(false);
@@ -1146,6 +1160,15 @@ export const Chats: React.FC<ChatsProps> = ({
     e.preventDefault();
     if (!chatInput.trim() || !activeThreadId) return;
 
+    // Immediately clear typing status on send
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    isCurrentlyTypingRef.current = false;
+    if (onSendTypingStatus && activeThreadId) {
+      onSendTypingStatus(activeThreadId, false);
+    }
+
     const currentText = chatInput;
     setChatInput('');
 
@@ -1663,6 +1686,9 @@ export const Chats: React.FC<ChatsProps> = ({
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {filteredThreads.map(t => {
             const lastMsg = t.messages[t.messages.length - 1];
+            const typingUsers = getTypingUsersInThread(t.id);
+            const isTyping = typingUsers.length > 0;
+            
             return (
               <div 
                 key={t.id}
@@ -1715,13 +1741,24 @@ export const Chats: React.FC<ChatsProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
                     <p style={{ 
                       fontSize: '0.8rem', 
-                      color: 'var(--text-muted)', 
+                      color: isTyping ? '#10B981' : 'var(--text-muted)', 
+                      fontWeight: isTyping ? 600 : 400,
                       whiteSpace: 'nowrap', 
                       overflow: 'hidden', 
                       textOverflow: 'ellipsis',
-                      flex: 1
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '2px'
                     }}>
-                      {lastMsg ? `${lastMsg.sender}: ${lastMsg.text}` : 'No messages'}
+                      {isTyping ? (
+                        <>
+                          <span>typing</span>
+                          <span className="typing-dots-slow">...</span>
+                        </>
+                      ) : (
+                        lastMsg ? `${lastMsg.sender}: ${lastMsg.text}` : 'No messages'
+                      )}
                     </p>
                     {t.unreadCount && t.unreadCount > 0 ? (
                       <span className="badge-pulse-red" style={{
@@ -2098,7 +2135,38 @@ export const Chats: React.FC<ChatsProps> = ({
                 </div>
               ))}
 
-
+              {/* Animated Typing Indicator */}
+              {(() => {
+                const activeTypingUsers = getTypingUsersInThread(activeThread.id);
+                if (activeTypingUsers.length === 0) return null;
+                return (
+                  <div style={{
+                    alignSelf: 'flex-start',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.5rem 0.85rem',
+                    borderRadius: '16px 16px 16px 2px',
+                    backgroundColor: 'var(--bg-app)',
+                    border: '1px solid var(--border-color)',
+                    boxShadow: 'var(--shadow-sm)',
+                    fontSize: '0.8rem',
+                    color: 'var(--text-muted)',
+                    animation: 'fadeIn 0.25s ease',
+                    marginTop: '0.25rem',
+                    marginBottom: '0.25rem'
+                  }}>
+                    <span style={{ fontWeight: 600, color: 'var(--color-secondary)' }}>
+                      {activeTypingUsers.join(', ')} {activeTypingUsers.length === 1 ? 'is' : 'are'} typing
+                    </span>
+                    <div style={{ display: 'flex', gap: '3px', alignItems: 'center', height: '8px' }}>
+                      <span className="typing-dot-bounce" style={{ width: '4px', height: '4px', backgroundColor: 'var(--color-secondary)', borderRadius: '50%', display: 'inline-block' }}></span>
+                      <span className="typing-dot-bounce" style={{ width: '4px', height: '4px', backgroundColor: 'var(--color-secondary)', borderRadius: '50%', display: 'inline-block', animationDelay: '0.2s' }}></span>
+                      <span className="typing-dot-bounce" style={{ width: '4px', height: '4px', backgroundColor: 'var(--color-secondary)', borderRadius: '50%', display: 'inline-block', animationDelay: '0.4s' }}></span>
+                    </div>
+                  </div>
+                );
+              })()}
               
               <div ref={messagesEndRef} />
             </div>
@@ -2546,11 +2614,11 @@ export const Chats: React.FC<ChatsProps> = ({
                     : `Write your message to ${activeThread.name}...`}
                   value={chatInput}
                   onChange={(e) => {
-                    const val = e.target.value;
-                    setChatInput(val);
+                    setChatInput(e.target.value);
+                    handleTypingInputChange();
                     if (activeThread.isGroup) {
                       const selectionStart = e.target.selectionStart || 0;
-                      const textBeforeCursor = val.slice(0, selectionStart);
+                      const textBeforeCursor = e.target.value.slice(0, selectionStart);
                       const lastAtIdx = textBeforeCursor.lastIndexOf('@');
                       if (lastAtIdx !== -1 && !textBeforeCursor.slice(lastAtIdx).includes(' ')) {
                         const search = textBeforeCursor.slice(lastAtIdx + 1);
@@ -3563,6 +3631,38 @@ export const Chats: React.FC<ChatsProps> = ({
                     </div>
                   ))}
                   
+                  {/* Animated Typing Indicator (Mobile) */}
+                  {(() => {
+                    const activeTypingUsers = getTypingUsersInThread(activeThread.id);
+                    if (activeTypingUsers.length === 0) return null;
+                    return (
+                      <div style={{
+                        alignSelf: 'flex-start',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        padding: '0.4rem 0.75rem',
+                        borderRadius: '12px 12px 12px 2px',
+                        backgroundColor: 'var(--bg-app)',
+                        border: '1px solid var(--border-color)',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-muted)',
+                        animation: 'fadeIn 0.25s ease',
+                        marginTop: '0.2rem',
+                        marginBottom: '0.2rem'
+                      }}>
+                        <span style={{ fontWeight: 600, color: 'var(--color-secondary)' }}>
+                          {activeTypingUsers.join(', ')} typing
+                        </span>
+                        <div style={{ display: 'flex', gap: '3px', alignItems: 'center', height: '6px' }}>
+                          <span className="typing-dot-bounce" style={{ width: '3px', height: '3px', backgroundColor: 'var(--color-secondary)', borderRadius: '50%', display: 'inline-block' }}></span>
+                          <span className="typing-dot-bounce" style={{ width: '3px', height: '3px', backgroundColor: 'var(--color-secondary)', borderRadius: '50%', display: 'inline-block', animationDelay: '0.2s' }}></span>
+                          <span className="typing-dot-bounce" style={{ width: '3px', height: '3px', backgroundColor: 'var(--color-secondary)', borderRadius: '50%', display: 'inline-block', animationDelay: '0.4s' }}></span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
                   <div ref={messagesEndRef} />
                 </div>
 
@@ -3821,7 +3921,10 @@ export const Chats: React.FC<ChatsProps> = ({
                         ? `Whisper secretly to ${activeGroupMembers.find(m => m.id === whisperTargetUserId)?.name}...` 
                         : `Write message...`}
                       value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
+                      onChange={(e) => {
+                        setChatInput(e.target.value);
+                        handleTypingInputChange();
+                      }}
                       className="premium-input"
                       style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.8rem', borderRadius: '9999px', border: whisperTargetUserId ? '1.5px dashed #6366F1' : '1px solid var(--border-color)' }}
                     />
