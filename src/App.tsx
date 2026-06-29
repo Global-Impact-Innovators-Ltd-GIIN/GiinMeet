@@ -257,8 +257,10 @@ function App() {
           .eq('user_id', user.id);
 
         // Auto-seed demo group if the user has no groups in the DB (resilient to RLS write blocks)
-        if (!memberships || memberships.length === 0) {
+        const hasSeededGroup = localStorage.getItem(`giin_seeded_group_${user.id}`) === 'true';
+        if ((!memberships || memberships.length === 0) && !hasSeededGroup) {
           console.log('[App] No groups found in DB, seeding demo group...');
+          localStorage.setItem(`giin_seeded_group_${user.id}`, 'true');
           let groupData = null;
           try {
             const { data: newGroup, error: groupErr } = await supabase
@@ -889,8 +891,10 @@ function App() {
           let data = await mockAuth.getMeetings(user.id);
           
           // Auto-seed demo meetings if database has no meetings
-          if (!data || data.length === 0) {
+          const hasSeededMeetings = localStorage.getItem(`giin_seeded_meetings_${user.id}`) === 'true';
+          if ((!data || data.length === 0) && !hasSeededMeetings) {
             console.log('[App] No meetings found in DB, seeding demo meetings...');
+            localStorage.setItem(`giin_seeded_meetings_${user.id}`, 'true');
             const demoMeetings = [
               {
                 title: 'GIIN Meet Official Launch',
