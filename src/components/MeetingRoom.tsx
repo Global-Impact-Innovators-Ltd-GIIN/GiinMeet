@@ -107,6 +107,15 @@ export const getWebRTCScreenshareConstraints = () => {
 
 import { mockAuth, supabase, getDeterministicPasscode } from '../supabaseClient';
 
+// Helper functions defined outside the component to satisfy purity rules
+const generateRandomId = () => {
+  return Math.random().toString(36).substr(2, 9);
+};
+
+const generateRandomOffset = () => {
+  return Math.floor(Math.random() * 30 - 15);
+};
+
 interface MeetingRoomProps {
   meetingId: string;
   meetingTitle: string;
@@ -229,7 +238,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   useEffect(() => {
     if (meetingAdminId) {
-      setLocalAdminId(meetingAdminId);
+      setTimeout(() => {
+        setLocalAdminId(meetingAdminId);
+      }, 0);
     }
   }, [meetingAdminId]);
 
@@ -300,8 +311,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [transcripts, setTranscripts] = useState<{ name: string; text: string; time: string }[]>([]);
   const [activeCaption, setActiveCaption] = useState<{ name: string; text: string } | null>(null);
 
+  // Relocated state variables to prevent accessed-before-declaration errors
+  const [messages, setMessages] = useState<{ sender: string; text: string; time: string; self: boolean }[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [participants, setParticipants] = useState<Participant[]>([]);
+
   // WebRTC Peer States & Connections
-  const myKey = currentUser?.id || 'guest-user-' + Math.random().toString(36).substring(2, 7);
+  const [myKey] = useState(() => currentUser?.id || 'guest-user-' + generateRandomId());
   const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
   const pcCandidatesRef = useRef<{ [peerKey: string]: any[] }>({});
   const [remoteStreams, setRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
@@ -452,7 +468,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Q&A Hub Functions
   const submitQuestion = (text: string) => {
     if (!text.trim()) return;
-    const questionId = Math.random().toString(36).substr(2, 9);
+    const questionId = generateRandomId();
     const authorName = currentUser?.name || 'Guest';
     const newQ = {
       id: questionId,
@@ -519,8 +535,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const triggerReaction = (senderKey: string, emoji: string) => {
-    const id = Math.random().toString(36).substr(2, 9);
-    const offset = Math.floor(Math.random() * 30 - 15);
+    const id = generateRandomId();
+    const offset = generateRandomOffset();
     setActiveReactions(prev => [...prev, { id, senderKey, emoji, offset }]);
     setTimeout(() => {
       setActiveReactions(prev => prev.filter(r => r.id !== id));
@@ -1566,16 +1582,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   
   const colleagueCanvasRef = useRef<HTMLCanvasElement | null>(null);
   
-  // Chat state
-  const [messages, setMessages] = useState<{ sender: string; text: string; time: string; self: boolean }[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  
   // Camera video ref
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  // Initial participants list from DB
-  const [participants, setParticipants] = useState<Participant[]>([]);
 
   // Set srcObject for local video element when stream changes
   useEffect(() => {
@@ -1805,7 +1814,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       } else {
         alert('Speech recognition is not supported in this browser. Try Chrome or Safari.');
-        setIsCaptionsEnabled(false);
+        setTimeout(() => {
+          setIsCaptionsEnabled(false);
+        }, 0);
       }
     }
 
@@ -1967,7 +1978,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     });
   };
 
-  const broadcastSettingsUpdate = (settings: any) => {
+  const broadcastSettingsUpdate = (settings: {
+    isWaitingRoomEnabled: boolean;
+    isChatLocked: boolean;
+    isMeetingLocked: boolean;
+    isScreenShareBlockedForGuests: boolean;
+    isMuteOnEntryEnabled: boolean;
+  }) => {
     if (sigChannelRef.current) {
       sigChannelRef.current.send({
         type: 'broadcast',
@@ -2239,9 +2256,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (isScreenSharing && canvas) {
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        let frame = 0;
         const draw = () => {
-          frame++;
           if (screenVideoRef.current && screenVideoRef.current.readyState >= 2) {
             ctx.drawImage(screenVideoRef.current, 0, 0, canvas.width, canvas.height);
           } else {
@@ -2265,9 +2280,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (isColleagueSharing && canvas) {
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        let frame = 0;
         const draw = () => {
-          frame++;
           ctx.fillStyle = '#1E1E1E';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           animationId = requestAnimationFrame(draw);
@@ -2300,7 +2313,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       
       const list = await mockAuth.getMessages(meetingId);
       if (list) {
-        const mapped = list.map((msg: any) => {
+        const mapped = list.map((msg: { user_id: string; sender_name: string; text: string; created_at: string }) => {
           const isSelf = currentUser ? (msg.user_id === currentUser.id) : false;
           return {
             sender: msg.sender_name,
