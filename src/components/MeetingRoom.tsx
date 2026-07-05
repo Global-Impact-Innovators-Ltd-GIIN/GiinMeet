@@ -737,6 +737,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       analyser.fftSize = 128;
       source.connect(analyser);
       
+      // Fix WebRTC silent remote stream issue on iOS Safari / Chrome:
+      // Connecting a remote WebRTC MediaStream to a Web Audio source without connecting it
+      // to the destination speakers can silence the stream entirely. We route it through a
+      // zero-gain node to the destination to satisfy the browser's audio graph requirement
+      // without creating duplicate double-audio / echo.
+      if (!isLocal) {
+        const silentGain = ctx.createGain();
+        silentGain.gain.value = 0;
+        analyser.connect(silentGain);
+        silentGain.connect(ctx.destination);
+      }
+      
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
       
@@ -988,7 +1000,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const remoteStream = event.streams[0] || new MediaStream([event.track]);
         const tracks = remoteStream.getTracks().map(track => {
           if (track.kind === 'audio') {
-            return getFeedbackSuppressedAudioTrack(track);
+            // Return raw audio track directly to bypass Chrome's remote-stream Web Audio silence bug
+            // and preserve WebRTC's native hardware echo cancellation / noise suppression.
+            return track;
           }
           return track;
         });
@@ -2189,50 +2203,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  const getFeedbackSuppressedAudioTrack = (rawTrack: MediaStreamTrack): MediaStreamTrack => {
-    try {
-      const ctx = getAudioCtx();
-      const rawStream = new MediaStream([rawTrack]);
-      const source = ctx.createMediaStreamSource(rawStream);
-      
-      // 1. High-pass filter to cut out low-end room resonances and rumble (common feedback frequencies)
-      const highpass = ctx.createBiquadFilter();
-      highpass.type = 'highpass';
-      highpass.frequency.value = 180;
-      
-      // 2. Notch filters to target typical howling frequencies
-      const notch1 = ctx.createBiquadFilter();
-      notch1.type = 'notch';
-      notch1.frequency.value = 1000;
-      notch1.Q.value = 2.0;
-
-      const notch2 = ctx.createBiquadFilter();
-      notch2.type = 'notch';
-      notch2.frequency.value = 3000;
-      notch2.Q.value = 2.0;
-      
-      // 3. Dynamics Compressor to act as a limiter preventing runaway gain feedback loops
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -30;
-      compressor.knee.value = 15;
-      compressor.ratio.value = 16;
-      compressor.attack.value = 0.001;
-      compressor.release.value = 0.15;
-      
-      const dest = ctx.createMediaStreamDestination();
-      
-      source.connect(highpass);
-      highpass.connect(notch1);
-      notch1.connect(notch2);
-      notch2.connect(compressor);
-      compressor.connect(dest);
-      
-      return dest.stream.getAudioTracks()[0];
-    } catch (e) {
-      console.warn('Failed to initialize Feedback Suppressor:', e);
-      return rawTrack;
-    }
-  };
 
   const handleDisableVideoAll = () => {
     if (sigChannelRef.current) {
@@ -3611,6 +3581,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                       }}
                       autoPlay
                       playsInline
+                      muted
                       style={{ 
                         width: '100%', 
                         height: '100%', 
