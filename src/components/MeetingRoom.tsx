@@ -1728,76 +1728,90 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     return () => clearTimeout(timer);
   }, [breakoutTimeRemaining, isAdmin]);
 
-  // Screen sharing track feed replacement injector
-  useEffect(() => {
-    async function startScreenShare() {
-      try {
-        const constraints = getWebRTCScreenshareConstraints();
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({
-          video: constraints.video,
-          audio: false
+  // Screen sharing track feed replacement injector (User gesture compliant)
+  const startScreenShare = async (): Promise<boolean> => {
+    try {
+      const constraints = getWebRTCScreenshareConstraints();
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: constraints.video,
+        audio: false
+      });
+      
+      setScreenStream(displayStream);
+      
+      const video = document.createElement('video');
+      video.srcObject = displayStream;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+      
+      video.onloadedmetadata = () => {
+        video.play();
+        screenVideoRef.current = video;
+      };
+
+      // Swap webcam video tracks with screen share tracks in all active peer connections
+      const screenTrack = displayStream.getVideoTracks()[0];
+      
+      screenSendersRef.current = {};
+      Object.keys(pcsRef.current).forEach(peerKey => {
+        const pc = pcsRef.current[peerKey];
+        const sender = pc.addTrack(screenTrack, displayStream);
+        setupSenderE2EE(sender);
+        screenSendersRef.current[peerKey] = sender;
+      });
+
+      // Broadcast screenshare media state changes
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'media-state',
+          payload: {
+            senderKey: myKey,
+            isVideoOn,
+            isMuted,
+            isScreenSharing: true
+          }
         });
-        
-        setScreenStream(displayStream);
-        
-        const video = document.createElement('video');
-        video.srcObject = displayStream;
-        video.autoplay = true;
-        video.playsInline = true;
-        video.muted = true;
-        
-        video.onloadedmetadata = () => {
-          video.play();
-          screenVideoRef.current = video;
-        };
-
-        // Swap webcam video tracks with screen share tracks in all active peer connections
-        const screenTrack = displayStream.getVideoTracks()[0];
-        
-        screenSendersRef.current = {};
-        Object.keys(pcsRef.current).forEach(peerKey => {
-          const pc = pcsRef.current[peerKey];
-          const sender = pc.addTrack(screenTrack, displayStream);
-          setupSenderE2EE(sender);
-          screenSendersRef.current[peerKey] = sender;
-        });
-
-        // Broadcast screenshare media state changes
-        if (sigChannelRef.current) {
-          sigChannelRef.current.send({
-            type: 'broadcast',
-            event: 'media-state',
-            payload: {
-              senderKey: myKey,
-              isVideoOn,
-              isMuted,
-              isScreenSharing: true
-            }
-          });
-        }
-
-        screenTrack.onended = () => {
-          stopScreenShare();
-          setIsScreenSharing(false);
-        };
-
-      } catch (err) {
-        console.warn('[Screen Share] Permission denied or failed.', err);
-        screenVideoRef.current = null;
-        setIsScreenSharing(false);
       }
-    }
 
-    if (isScreenSharing) {
-      startScreenShare();
+      screenTrack.onended = () => {
+        stopScreenShare();
+        setIsScreenSharing(false);
+      };
+
+      return true;
+    } catch (err) {
+      console.warn('[Screen Share] Permission denied or failed.', err);
+      screenVideoRef.current = null;
+      setIsScreenSharing(false);
+      return false;
+    }
+  };
+
+  const handleToggleScreenShare = async () => {
+    if (isScreenShareBlockedForGuests && !isAdmin) {
+      alert('Screen sharing is blocked by the host.');
+      return;
+    }
+    const nextVal = !isScreenSharing;
+    if (nextVal) {
+      const success = await startScreenShare();
+      if (success) {
+        setIsScreenSharing(true);
+        setIsColleagueSharing(false);
+      }
     } else {
       stopScreenShare();
+      setIsScreenSharing(false);
     }
+  };
 
+  useEffect(() => {
     return () => {
       stopScreenShare();
     };
-  }, [isScreenSharing]);
+  }, []);
 
   const stopScreenShare = () => {
     if (screenStream) {
@@ -3901,7 +3915,8 @@ Securely encrypted under Fintech AES-256 standard.`;
                     backgroundColor: '#0A0D14',
                     boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
                     aspectRatio: '16/9',
-                    margin: '1.5rem'
+                    margin: window.innerWidth < 768 ? '0.5rem' : '1.5rem',
+                    minHeight: window.innerWidth < 768 ? '220px' : 'auto'
                   }}>
                     {isScreenSharing ? (
                       <video
@@ -5416,13 +5431,7 @@ Securely encrypted under Fintech AES-256 standard.`;
 
           {/* Toggle Screen Share */}
           <button 
-            onClick={() => {
-              const nextVal = !isScreenSharing;
-              setIsScreenSharing(nextVal);
-              if (nextVal) {
-                setIsColleagueSharing(false);
-              }
-            }}
+            onClick={handleToggleScreenShare}
             style={{
               width: '52px',
               height: '52px',
@@ -5588,17 +5597,7 @@ Securely encrypted under Fintech AES-256 standard.`;
 
             {/* Screen Share */}
             <button 
-              onClick={() => {
-                if (isScreenShareBlockedForGuests && !isAdmin) {
-                  alert('Screen sharing is blocked by the host.');
-                  return;
-                }
-                const nextVal = !isScreenSharing;
-                setIsScreenSharing(nextVal);
-                if (nextVal) {
-                  setIsColleagueSharing(false);
-                }
-              }}
+              onClick={handleToggleScreenShare}
               style={{
                 width: '40px',
                 height: '40px',

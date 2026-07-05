@@ -966,17 +966,20 @@ h1, h2, h3, h4, h5, h6 {
 @media (max-width: 768px) {
   .screenshare-layout {
     flex-direction: column !important;
+    height: calc(100vh - 120px) !important;
+    overflow-y: auto !important;
   }
   .screenshare-sidebar {
     width: 100% !important;
     flex-direction: row !important;
-    padding: 1rem !important;
+    padding: 0.5rem !important;
     overflow-x: auto !important;
     overflow-y: hidden !important;
-    height: 140px !important;
+    height: 100px !important;
   }
   .screenshare-sidebar .meeting-card {
-    width: 180px !important;
+    width: 120px !important;
+    height: 68px !important;
     flex-shrink: 0 !important;
   }
 }
