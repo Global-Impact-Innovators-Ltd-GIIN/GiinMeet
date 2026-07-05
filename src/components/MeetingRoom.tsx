@@ -483,20 +483,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setStream(prev => {
           const newStream = prev || new MediaStream();
           newStream.getVideoTracks().forEach(t => newStream.removeTrack(t));
-          if (!isScreenSharing) {
-            newStream.addTrack(videoTrack);
-          }
+          newStream.addTrack(videoTrack);
           return newStream;
         });
 
-        if (!isScreenSharing) {
-          Object.values(pcsRef.current).forEach(pc => {
-            const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-            if (videoSender) {
-              videoSender.replaceTrack(videoTrack);
-            }
-          });
-        }
+        Object.values(pcsRef.current).forEach(pc => {
+          const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+          if (videoSender) {
+            videoSender.replaceTrack(videoTrack);
+          }
+        });
       } catch (err) {
         console.error('Failed to change camera:', err);
       }
@@ -549,17 +545,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     localStorage.setItem('giin_selected_speaker', deviceId);
   };
 
+  const screenSendersRef = useRef<{ [peerKey: string]: RTCRtpSender }>({});
+  const [remoteScreenStreams, setRemoteScreenStreams] = useState<{ [peerKey: string]: MediaStream }>({});
+
   // Clean up a single peer connection
   const cleanupPeer = (peerKey: string) => {
     if (pcsRef.current[peerKey]) {
       pcsRef.current[peerKey].close();
       delete pcsRef.current[peerKey];
     }
+    if (screenSendersRef.current[peerKey]) {
+      delete screenSendersRef.current[peerKey];
+    }
     if (pcCandidatesRef.current[peerKey]) {
       delete pcCandidatesRef.current[peerKey];
     }
     setActivePeerKeys(prev => prev.filter(k => k !== peerKey));
     setRemoteStreams(prev => {
+      const copy = { ...prev };
+      delete copy[peerKey];
+      return copy;
+    });
+    setRemoteScreenStreams(prev => {
       const copy = { ...prev };
       delete copy[peerKey];
       return copy;
@@ -1089,6 +1096,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           setupSenderE2EE(sender);
         });
       }
+      // If we are currently screensharing, we must also add the screen track!
+      if (isScreenSharing && screenStream) {
+        const screenTrack = screenStream.getVideoTracks()[0];
+        if (screenTrack) {
+          const sender = pc.addTrack(screenTrack, screenStream);
+          setupSenderE2EE(sender);
+          screenSendersRef.current[peerKey] = sender;
+        }
+      }
 
       pc.onicecandidate = (event) => {
         if (event.candidate && sigChannelRef.current) {
@@ -1107,22 +1123,30 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       pc.ontrack = (event) => {
         const remoteStream = event.streams[0] || new MediaStream([event.track]);
-        const tracks = remoteStream.getTracks().map(track => {
-          if (track.kind === 'audio') {
-            // Return raw audio track directly to bypass Chrome's remote-stream Web Audio silence bug
-            // and preserve WebRTC's native hardware echo cancellation / noise suppression.
+        
+        // Distinguish screen share stream from webcam/audio stream
+        const hasExistingVideo = remoteStreams[peerKey] && remoteStreams[peerKey].getVideoTracks().length > 0;
+        const isNewVideo = event.track.kind === 'video';
+        
+        if (hasExistingVideo && isNewVideo) {
+          setRemoteScreenStreams(prev => ({
+            ...prev,
+            [peerKey]: remoteStream
+          }));
+        } else {
+          const tracks = remoteStream.getTracks().map(track => {
+            if (track.kind === 'audio') return track;
             return track;
-          }
-          return track;
-        });
-        const newStream = new MediaStream(tracks);
-        setRemoteStreams(prev => ({
-          ...prev,
-          [peerKey]: newStream
-        }));
+          });
+          const newStream = new MediaStream(tracks);
+          setRemoteStreams(prev => ({
+            ...prev,
+            [peerKey]: newStream
+          }));
 
-        setupReceiverE2EE(event.receiver);
-        setupSpeakingDetection(newStream, peerKey, false);
+          setupReceiverE2EE(event.receiver);
+          setupSpeakingDetection(newStream, peerKey, false);
+        }
       };
 
       pc.onconnectionstatechange = () => {
@@ -1198,7 +1222,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       const { type, senderKey, sdp, candidate } = data;
 
       if (type === 'offer') {
-        const pc = initPeerConnection(senderKey, false);
+        let pc = pcsRef.current[senderKey];
+        const pcExists = !!pc && pc.signalingState !== 'closed';
+        if (!pcExists) {
+          pc = initPeerConnection(senderKey, false);
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -1726,22 +1754,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // Swap webcam video tracks with screen share tracks in all active peer connections
         const screenTrack = displayStream.getVideoTracks()[0];
         
-        // Update local stream to contain the screenshare track
-        setStream(prev => {
-          if (!prev) return new MediaStream([screenTrack]);
-          const newStream = new MediaStream();
-          prev.getAudioTracks().forEach(t => newStream.addTrack(t));
-          newStream.addTrack(screenTrack);
-          return newStream;
-        });
-
-        Object.values(pcsRef.current).forEach(pc => {
-          const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-          if (videoSender) {
-            videoSender.replaceTrack(screenTrack);
-          } else {
-            pc.addTrack(screenTrack, stream || new MediaStream([screenTrack]));
-          }
+        screenSendersRef.current = {};
+        Object.keys(pcsRef.current).forEach(peerKey => {
+          const pc = pcsRef.current[peerKey];
+          const sender = pc.addTrack(screenTrack, displayStream);
+          setupSenderE2EE(sender);
+          screenSendersRef.current[peerKey] = sender;
         });
 
         // Broadcast screenshare media state changes
@@ -1788,35 +1806,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     screenVideoRef.current = null;
 
-    const webcamTrack = localVideoTrackRef.current; // Use the actual webcam track reference
-    
-    // Update local stream to restore the webcam track (if camera is on)
-    setStream(prev => {
-      if (!prev) return null;
-      const newStream = new MediaStream();
-      prev.getAudioTracks().forEach(t => newStream.addTrack(t));
-      if (webcamTrack && isVideoOn) {
-        newStream.addTrack(webcamTrack);
-      }
-      return newStream;
-    });
-
-    Object.values(pcsRef.current).forEach(pc => {
-      const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-      if (videoSender) {
-        if (webcamTrack && isVideoOn) {
-          videoSender.replaceTrack(webcamTrack);
-        } else {
-          try {
-            pc.removeTrack(videoSender);
-          } catch (e) {
-            console.warn(e);
-          }
+    // Remove screenshare track senders from all peer connections
+    Object.keys(screenSendersRef.current).forEach(peerKey => {
+      const sender = screenSendersRef.current[peerKey];
+      const pc = pcsRef.current[peerKey];
+      if (pc && sender) {
+        try {
+          pc.removeTrack(sender);
+        } catch (e) {
+          console.warn(e);
         }
-      } else if (webcamTrack && isVideoOn) {
-        pc.addTrack(webcamTrack, stream || new MediaStream([webcamTrack]));
       }
     });
+    screenSendersRef.current = {};
 
     // Broadcast screenshare media state changes
     if (sigChannelRef.current) {
@@ -3917,7 +3919,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                     ) : (
                       (() => {
                         const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing);
-                        const screenStreamObj = screenPeerKey ? remoteStreams[screenPeerKey] : null;
+                        const screenStreamObj = screenPeerKey ? remoteScreenStreams[screenPeerKey] : null;
                         const screenPeerName = screenPeerKey ? peerStates[screenPeerKey].name : 'Remote Peer';
                         return screenStreamObj ? (
                           <video
