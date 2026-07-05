@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
+import { DeviceSettingsModal } from './DeviceSettingsModal';
 
 // Web Audio API Synthesized sound effects
 let audioCtx: AudioContext | null = null;
@@ -128,6 +129,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const reconnectTimersRef = useRef<{[key: string]: any}>({});
+
+
 
   // Minimized floating window dragging state
   const [position, setPosition] = useState({ x: window.innerWidth - 350, y: window.innerHeight - 220 });
@@ -439,6 +442,112 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       isReconnecting?: boolean;
     } 
   }>({});
+
+  // Device Selection States
+  const [selectedCamera, setSelectedCamera] = useState(() => localStorage.getItem('giin_selected_camera') || '');
+  const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('giin_selected_mic') || '');
+  const [selectedSpeaker, setSelectedSpeaker] = useState(() => localStorage.getItem('giin_selected_speaker') || '');
+  const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
+
+  // Apply chosen speaker device to remote audio elements
+  useEffect(() => {
+    if (selectedSpeaker) {
+      const mediaEls = document.querySelectorAll('audio, video.remote-video-feed');
+      mediaEls.forEach((el: any) => {
+        if (typeof el.setSinkId === 'function') {
+          el.setSinkId(selectedSpeaker).catch((err: any) => 
+            console.warn('[Speakers] Failed to set sink ID:', err)
+          );
+        }
+      });
+    }
+  }, [selectedSpeaker, remoteStreams, activePeerKeys]);
+
+  const changeCamera = async (deviceId: string) => {
+    setSelectedCamera(deviceId);
+    localStorage.setItem('giin_selected_camera', deviceId);
+    
+    if (isVideoOn) {
+      try {
+        if (localVideoTrackRef.current) {
+          localVideoTrackRef.current.stop();
+        }
+        
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: deviceId }, width: 640, height: 480 }
+        });
+        const videoTrack = videoStream.getVideoTracks()[0];
+        localVideoTrackRef.current = videoTrack;
+        videoTrack.enabled = true;
+        
+        setStream(prev => {
+          const newStream = prev || new MediaStream();
+          newStream.getVideoTracks().forEach(t => newStream.removeTrack(t));
+          if (!isScreenSharing) {
+            newStream.addTrack(videoTrack);
+          }
+          return newStream;
+        });
+
+        if (!isScreenSharing) {
+          Object.values(pcsRef.current).forEach(pc => {
+            const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (videoSender) {
+              videoSender.replaceTrack(videoTrack);
+            }
+          });
+        }
+      } catch (err) {
+        console.error('Failed to change camera:', err);
+      }
+    }
+  };
+
+  const changeMicrophone = async (deviceId: string) => {
+    setSelectedMic(deviceId);
+    localStorage.setItem('giin_selected_mic', deviceId);
+    
+    try {
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.stop();
+      }
+      
+      const audioStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: deviceId },
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      const audioTrack = audioStream.getAudioTracks()[0];
+      localAudioTrackRef.current = audioTrack;
+      audioTrack.enabled = !isMuted;
+      
+      setStream(prev => {
+        const newStream = prev || new MediaStream();
+        newStream.getAudioTracks().forEach(t => newStream.removeTrack(t));
+        newStream.addTrack(audioTrack);
+        return newStream;
+      });
+
+      Object.values(pcsRef.current).forEach(pc => {
+        const audioSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+        if (audioSender) {
+          audioSender.replaceTrack(audioTrack);
+        }
+      });
+      
+      setupSpeakingDetection(new MediaStream([audioTrack]), myKey, true);
+    } catch (err) {
+      console.error('Failed to change microphone:', err);
+    }
+  };
+
+  const changeSpeaker = (deviceId: string) => {
+    setSelectedSpeaker(deviceId);
+    localStorage.setItem('giin_selected_speaker', deviceId);
+  };
 
   // Clean up a single peer connection
   const cleanupPeer = (peerKey: string) => {
@@ -1616,10 +1725,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
         // Swap webcam video tracks with screen share tracks in all active peer connections
         const screenTrack = displayStream.getVideoTracks()[0];
+        
+        // Update local stream to contain the screenshare track
+        setStream(prev => {
+          if (!prev) return new MediaStream([screenTrack]);
+          const newStream = new MediaStream();
+          prev.getAudioTracks().forEach(t => newStream.addTrack(t));
+          newStream.addTrack(screenTrack);
+          return newStream;
+        });
+
         Object.values(pcsRef.current).forEach(pc => {
-          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-          if (sender) {
-            sender.replaceTrack(screenTrack);
+          const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+          if (videoSender) {
+            videoSender.replaceTrack(screenTrack);
+          } else {
+            pc.addTrack(screenTrack, stream || new MediaStream([screenTrack]));
           }
         });
 
@@ -1666,18 +1787,35 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     screenVideoRef.current = null;
 
-    // Swap back webcam video track
-    if (stream) {
-      const webcamTrack = stream.getVideoTracks()[0];
-      if (webcamTrack) {
-        Object.values(pcsRef.current).forEach(pc => {
-          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-          if (sender) {
-            sender.replaceTrack(webcamTrack);
-          }
-        });
+    const webcamTrack = localVideoTrackRef.current; // Use the actual webcam track reference
+    
+    // Update local stream to restore the webcam track (if camera is on)
+    setStream(prev => {
+      if (!prev) return null;
+      const newStream = new MediaStream();
+      prev.getAudioTracks().forEach(t => newStream.addTrack(t));
+      if (webcamTrack && isVideoOn) {
+        newStream.addTrack(webcamTrack);
       }
-    }
+      return newStream;
+    });
+
+    Object.values(pcsRef.current).forEach(pc => {
+      const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (videoSender) {
+        if (webcamTrack && isVideoOn) {
+          videoSender.replaceTrack(webcamTrack);
+        } else {
+          try {
+            pc.removeTrack(videoSender);
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      } else if (webcamTrack && isVideoOn) {
+        pc.addTrack(webcamTrack, stream || new MediaStream([webcamTrack]));
+      }
+    });
 
     // Broadcast screenshare media state changes
     if (sigChannelRef.current) {
@@ -1843,8 +1981,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => {
     async function initAudio() {
       try {
+        const savedMic = localStorage.getItem('giin_selected_mic');
         const audioStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
+          audio: savedMic ? {
+            deviceId: { exact: savedMic },
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } : {
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true
@@ -1894,8 +2038,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (isVideoOn) {
         if (!localVideoTrackRef.current) {
           try {
+            const savedCam = localStorage.getItem('giin_selected_camera');
             const videoStream = await navigator.mediaDevices.getUserMedia({
-              video: { width: 640, height: 480 }
+              video: savedCam ? {
+                deviceId: { exact: savedCam },
+                width: 640,
+                height: 480
+              } : {
+                width: 640,
+                height: 480
+              }
             });
             if (!active) {
               videoStream.getTracks().forEach(t => t.stop());
@@ -3750,6 +3902,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                   }}>
                     {isScreenSharing ? (
                       <video
+                        key={screenStream?.id || 'local-screen'}
                         ref={el => {
                           if (el && screenStream && el.srcObject !== screenStream) {
                             el.srcObject = screenStream;
@@ -3767,6 +3920,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                         const screenPeerName = screenPeerKey ? peerStates[screenPeerKey].name : 'Remote Peer';
                         return screenStreamObj ? (
                           <video
+                            key={screenStreamObj?.id || 'remote-screen'}
                             ref={el => {
                               if (el && screenStreamObj && el.srcObject !== screenStreamObj) {
                                 el.srcObject = screenStreamObj;
@@ -5431,6 +5585,27 @@ Securely encrypted under Fintech AES-256 standard.`;
               <Monitor size={18} />
             </button>
 
+            {/* Device Settings Toggle */}
+            <button 
+              onClick={() => setIsDeviceModalOpen(true)}
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: isDeviceModalOpen ? 'var(--color-primary)' : '#1E293B',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)'
+              }}
+              title="Device Settings"
+            >
+              <Settings size={18} />
+            </button>
+
             {/* Full Screen Toggle */}
             <button 
               onClick={toggleFullscreen}
@@ -6379,6 +6554,17 @@ Securely encrypted under Fintech AES-256 standard.`;
           </div>
         </div>
       )}
+
+      <DeviceSettingsModal
+        isOpen={isDeviceModalOpen}
+        onClose={() => setIsDeviceModalOpen(false)}
+        selectedCamera={selectedCamera}
+        selectedMic={selectedMic}
+        selectedSpeaker={selectedSpeaker}
+        onCameraChange={changeCamera}
+        onMicChange={changeMicrophone}
+        onSpeakerChange={changeSpeaker}
+      />
     </div>
   );
 };

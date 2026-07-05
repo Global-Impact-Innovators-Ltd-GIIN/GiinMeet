@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { 
   Video, VideoOff, Mic, MicOff, Copy, Check, ShieldCheck, 
-  Sparkles, ArrowRight, ArrowLeft 
+  Sparkles, ArrowRight, ArrowLeft, Sliders
 } from 'lucide-react';
+import { DeviceSettingsModal } from './DeviceSettingsModal';
 
 interface MeetingLobbyProps {
   meetingId: string;
@@ -28,6 +29,10 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
   const [copied, setCopied] = useState(false);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [selectedCamera, setSelectedCamera] = useState(() => localStorage.getItem('giin_selected_camera') || '');
+  const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('giin_selected_mic') || '');
+  const [selectedSpeaker, setSelectedSpeaker] = useState(() => localStorage.getItem('giin_selected_speaker') || '');
+  const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
 
   // Get shareable join link
   const shareableLink = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
@@ -41,7 +46,11 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
   // Manage camera preview stream
   useEffect(() => {
     if (isVideoOn) {
-      navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false })
+      const constraints = {
+        video: selectedCamera ? { deviceId: { exact: selectedCamera }, width: 640, height: 480 } : { width: 640, height: 480 },
+        audio: false
+      };
+      navigator.mediaDevices.getUserMedia(constraints)
         .then(stream => {
           setLocalStream(stream);
           if (videoRef.current) {
@@ -64,7 +73,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
         localStream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [isVideoOn]);
+  }, [isVideoOn, selectedCamera]);
 
   const handleJoinClick = () => {
     // Stop local preview stream before entering the room to release the camera
@@ -220,6 +229,29 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
               >
                 {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
               </button>
+
+              <button
+                type="button"
+                onClick={() => setIsDeviceModalOpen(true)}
+                style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '50%',
+                  border: 'none',
+                  backgroundColor: 'rgba(255, 255, 255, 0.15)',
+                  color: 'white',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                  backdropFilter: 'blur(8px)',
+                  transition: 'all 0.2s'
+                }}
+                title="Device Settings"
+              >
+                <Sliders size={20} />
+              </button>
             </div>
 
             {/* Premium Seal Emblem */}
@@ -355,6 +387,26 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
         </div>
 
       </div>
+      
+      <DeviceSettingsModal
+        isOpen={isDeviceModalOpen}
+        onClose={() => setIsDeviceModalOpen(false)}
+        selectedCamera={selectedCamera}
+        selectedMic={selectedMic}
+        selectedSpeaker={selectedSpeaker}
+        onCameraChange={(id) => {
+          setSelectedCamera(id);
+          localStorage.setItem('giin_selected_camera', id);
+        }}
+        onMicChange={(id) => {
+          setSelectedMic(id);
+          localStorage.setItem('giin_selected_mic', id);
+        }}
+        onSpeakerChange={(id) => {
+          setSelectedSpeaker(id);
+          localStorage.setItem('giin_selected_speaker', id);
+        }}
+      />
     </div>
   );
 };
