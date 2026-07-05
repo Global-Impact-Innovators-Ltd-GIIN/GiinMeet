@@ -1179,6 +1179,10 @@ function App() {
   };
 
   const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true, existingMeetingId?: string, requireWaitingRoom = true) => {
+    if (existingMeetingId && activeMeetingId === existingMeetingId) {
+      setCurrentView('meeting');
+      return;
+    }
     const finalTitle = title || 'Instant Call';
     setActiveCallTitle(finalTitle);
     setActiveCallVideoState(isVideo);
@@ -1660,7 +1664,7 @@ function App() {
   // Outer routing bypass: Render meeting room for unauthenticated guest users
   if (currentView === 'meeting' && activeMeetingId && !user && guestUser) {
     return (
-      <div style={{ width: '100vw', height: '100vh', backgroundColor: 'var(--bg-app)' }}>
+      <div style={{ width: '100vw', height: '100dvh', backgroundColor: 'var(--bg-app)' }}>
         <MeetingRoom 
           meetingId={activeMeetingId}
           meetingTitle={activeCallTitle || 'GIIN MEET Video Room'}
@@ -1681,7 +1685,7 @@ function App() {
     <div style={{
       display: 'flex',
       width: '100vw',
-      height: '100vh',
+      height: '100dvh',
       overflow: 'hidden',
       backgroundColor: 'var(--bg-app)'
     }}>

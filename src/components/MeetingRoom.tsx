@@ -2942,7 +2942,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     <div ref={meetingRoomRef} style={{
       display: 'flex',
       flexDirection: 'column',
-      height: isFullscreen ? '100vh' : '100%',
+      height: isFullscreen ? '100dvh' : '100%',
       backgroundColor: '#07090E', // Dark screen for immersive meeting
       color: 'white',
       borderRadius: isFullscreen ? '0' : 'var(--radius-lg)',
