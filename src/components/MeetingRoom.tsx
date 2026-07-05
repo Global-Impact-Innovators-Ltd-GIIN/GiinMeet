@@ -78,10 +78,10 @@ interface Participant {
 }
 
 export const getWebRTCScreenshareConstraints = () => {
+  // Relax constraints to prevent mobile browsers (iOS/Android) from falling back
+  // to the webcam or throwing OverconstrainedError when trying to capture screen display media.
   return {
     video: {
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
       frameRate: { max: 15 }
     },
     audio: false
@@ -1764,8 +1764,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         };
 
       } catch (err) {
-        console.warn('[Screen Share] Permission denied or failed. Fallback simulation.', err);
+        console.warn('[Screen Share] Permission denied or failed.', err);
         screenVideoRef.current = null;
+        setIsScreenSharing(false);
       }
     }
 
@@ -3938,6 +3939,36 @@ Securely encrypted under Fintech AES-256 standard.`;
                         );
                       })()
                     )}
+
+                    {/* Secure Fintech Watermark Overlay */}
+                    <div style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      pointerEvents: 'none',
+                      zIndex: 20,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                      opacity: 0.08,
+                      userSelect: 'none'
+                    }}>
+                      <div style={{
+                        transform: 'rotate(-25deg)',
+                        fontSize: '1.8rem',
+                        fontWeight: 800,
+                        color: 'white',
+                        textAlign: 'center',
+                        whiteSpace: 'nowrap',
+                        fontFamily: 'monospace',
+                        letterSpacing: '3px'
+                      }}>
+                        {`CONFIDENTIAL • GIIN SECURE SYSTEM • ${currentUser?.email || 'GUEST'} • ${new Date().toLocaleDateString()}`}
+                      </div>
+                    </div>
                     
                     {isAnnotating && isScreenSharing && (
                       <ScreenAnnotation 
