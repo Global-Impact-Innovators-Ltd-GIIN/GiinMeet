@@ -2421,7 +2421,7 @@ function App() {
         <main style={{
           flex: 1,
           padding: (currentView === 'meeting' || currentView === 'dashboard') && activeMeetingId ? '0' : '2.5rem',
-          overflowY: 'auto',
+          overflowY: currentView === 'meeting' ? 'hidden' : 'auto',
           backgroundColor: 'transparent'
         }}>
           {currentView === 'dashboard' && (

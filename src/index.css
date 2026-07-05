@@ -68,6 +68,11 @@
 }
 
 /* Global Reset & Base Styling */
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -79,7 +84,6 @@ body {
   background-color: var(--bg-app);
   color: var(--text-main);
   line-height: 1.5;
-  overflow-x: hidden;
   transition: background-color var(--transition-normal), color var(--transition-normal);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
