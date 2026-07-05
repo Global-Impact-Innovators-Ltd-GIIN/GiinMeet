@@ -1124,11 +1124,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       pc.ontrack = (event) => {
         const remoteStream = event.streams[0] || new MediaStream([event.track]);
         
-        // Distinguish screen share stream from webcam/audio stream
-        const hasExistingVideo = remoteStreams[peerKey] && remoteStreams[peerKey].getVideoTracks().length > 0;
-        const isNewVideo = event.track.kind === 'video';
+        const isVideo = event.track.kind === 'video';
+        const hasWebcamTrack = remoteStreams[peerKey] && remoteStreams[peerKey].getVideoTracks().length > 0;
         
-        if (hasExistingVideo && isNewVideo) {
+        // It is screenshare if we already have a camera track, or the peer state says they are sharing and this is a video-only stream
+        const isScreen = isVideo && (
+          hasWebcamTrack || 
+          (peerStates[peerKey]?.isScreenSharing && remoteStream.getAudioTracks().length === 0)
+        );
+        
+        if (isScreen) {
           setRemoteScreenStreams(prev => ({
             ...prev,
             [peerKey]: remoteStream
@@ -1595,11 +1600,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const data = payload.payload;
         if (data.senderKey !== myKey) {
           setPeerStates(prev => {
-            if (!prev[data.senderKey]) return prev;
+            const current = prev[data.senderKey] || {
+              name: 'Participant',
+              isSpeaking: false
+            };
             return {
               ...prev,
               [data.senderKey]: {
-                ...prev[data.senderKey],
+                ...current,
                 isVideoOn: data.isVideoOn,
                 isMuted: data.isMuted,
                 isScreenSharing: data.isScreenSharing
@@ -3905,18 +3913,17 @@ Securely encrypted under Fintech AES-256 standard.`;
                 }}>
                   {/* Main Screen Share Frame */}
                   <div style={{
-                    flex: 3,
+                    flex: 1,
                     position: 'relative',
-                    borderRadius: 'var(--radius-lg)',
+                    borderRadius: window.innerWidth < 768 ? '8px' : 'var(--radius-lg)',
                     overflow: 'hidden',
                     border: '2px solid var(--color-accent)',
                     display: 'flex',
                     flexDirection: 'column',
                     backgroundColor: '#0A0D14',
                     boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
-                    aspectRatio: '16/9',
-                    margin: window.innerWidth < 768 ? '0.5rem' : '1.5rem',
-                    minHeight: window.innerWidth < 768 ? '220px' : 'auto'
+                    aspectRatio: window.innerWidth < 768 ? 'auto' : '16/9',
+                    margin: window.innerWidth < 768 ? '0.5rem' : '1.5rem'
                   }}>
                     {isScreenSharing ? (
                       <video
