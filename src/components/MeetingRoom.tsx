@@ -451,7 +451,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           return;
         }
 
-        const { token, expiresAt: tokenExpiry } = data;
+        const { token, expiresAt: tokenExpiry, livekitUrl: serverLivekitUrl } = data;
         setLivekitToken(token);
         setExpiresAt(tokenExpiry);
 
@@ -486,7 +486,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           });
         });
 
-        const livekitUrl = getEnv('LIVEKIT_URL') || 'wss://giinmeet-livekit.lkt.cloud';
+        const livekitUrl = serverLivekitUrl || getEnv('LIVEKIT_URL') || 'wss://giinmeet-livekit.lkt.cloud';
         await room.connect(livekitUrl, token);
         triggerToast('Connected to LiveKit SFU engine.');
 

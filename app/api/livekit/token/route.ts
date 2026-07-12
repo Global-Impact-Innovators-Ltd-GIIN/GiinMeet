@@ -112,7 +112,8 @@ export async function POST(req: NextRequest) {
       token,
       expiresAt,
       engine: room.current_engine || 'LIVEKIT',
-      roomSlug: room.slug
+      roomSlug: room.slug,
+      livekitUrl: process.env.LIVEKIT_URL || 'wss://giinmeet-livekit.lkt.cloud'
     });
 
   } catch (err: any) {
