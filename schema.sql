@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   action_items_count INTEGER DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   passcode TEXT,
-  admin_id UUID REFERENCES auth.users(id) ON DELETE SET NULL
+  admin_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  require_waiting_room BOOLEAN DEFAULT true
 );
 
 -- Enable RLS on Meetings
@@ -174,6 +175,7 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS passcode TEXT;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS admin_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS require_waiting_room BOOLEAN DEFAULT true;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'Member';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'UTC';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS location TEXT DEFAULT 'Remote';
