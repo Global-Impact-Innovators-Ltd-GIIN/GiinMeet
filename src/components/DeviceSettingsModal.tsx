@@ -109,8 +109,8 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
             <select
               value={selectedCamera}
               onChange={(e) => onCameraChange(e.target.value)}
-              className="premium-input"
-              style={{ width: '100%', backgroundColor: '#020617', border: '1px solid #1E293B', color: 'white' }}
+              className="device-select"
+              style={{ width: '100%' }}
             >
               {cameras.map(device => (
                 <option key={device.deviceId} value={device.deviceId}>
@@ -130,8 +130,8 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
             <select
               value={selectedMic}
               onChange={(e) => onMicChange(e.target.value)}
-              className="premium-input"
-              style={{ width: '100%', backgroundColor: '#020617', border: '1px solid #1E293B', color: 'white' }}
+              className="device-select"
+              style={{ width: '100%' }}
             >
               {mics.map(device => (
                 <option key={device.deviceId} value={device.deviceId}>
@@ -151,8 +151,8 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
             <select
               value={selectedSpeaker}
               onChange={(e) => onSpeakerChange(e.target.value)}
-              className="premium-input"
-              style={{ width: '100%', backgroundColor: '#020617', border: '1px solid #1E293B', color: 'white' }}
+              className="device-select"
+              style={{ width: '100%' }}
             >
               {speakers.map(device => (
                 <option key={device.deviceId} value={device.deviceId}>

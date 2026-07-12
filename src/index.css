@@ -1231,4 +1231,23 @@ h1, h2, h3, h4, h5, h6 {
   animation: typingDotsSlow 1.8s infinite steps(4);
 }
 
+/* Enforce dark theme dropdown select inputs for hardware device modals */
+.device-select {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid #1E293B !important;
+  background-color: #020617 !important;
+  color: #FFFFFF !important;
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  transition: all var(--transition-fast);
+}
+
+.device-select:focus {
+  outline: none;
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25) !important;
+}
+
 
