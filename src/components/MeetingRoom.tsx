@@ -1445,7 +1445,6 @@ The conference was focused on platform modernization. Participants reviewed the 
 
     sigChannelRef.current = sigChannel;
 
-    initPeerConnectionRef.current = initPeerConnection;
     const initPeerConnection = (peerKey: string, forceAudioOnly = false) => {
       if (pcsRef.current[peerKey]) {
         pcsRef.current[peerKey].close();
@@ -1608,6 +1607,7 @@ The conference was focused on platform modernization. Participants reviewed the 
 
       return pc;
     };
+    initPeerConnectionRef.current = initPeerConnection;
 
     const handleSignal = async (data: any) => {
       const { type, senderKey, sdp, candidate } = data;
