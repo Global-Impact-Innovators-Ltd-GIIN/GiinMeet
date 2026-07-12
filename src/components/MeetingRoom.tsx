@@ -234,90 +234,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [swappedPeers, setSwappedPeers] = useState<string[]>([]);
   const livekitRoomRef = useRef<any>(null);
 
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const triggerToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 4000);
-  };
-
-  const getEnv = (key: string): string | undefined => {
-    if (typeof process !== 'undefined' && process.env && process.env[key]) {
-      return process.env[key];
-    }
-    try {
-      const metaEnv = (import.meta as any).env;
-      if (metaEnv && metaEnv[key]) {
-        return metaEnv[key];
-      }
-    } catch (e) {}
-    return undefined;
-  };
-
-  const participantsRef = useRef<Participant[]>([]);
-  useEffect(() => {
-    participantsRef.current = participants;
-  }, [participants]);
-
-  const startBackgroundP2P = () => {
-    setP2pActive(prev => {
-      if (prev) return prev;
-      
-      const activeParticipantsCount = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).length + 1;
-      const forceAudioOnly = activeParticipantsCount > 4;
-
-      triggerToast(forceAudioOnly
-        ? 'Fallback room size exceeds 4. Launching background P2P engine in Audio-Only Mode.'
-        : 'Launching background P2P connections...'
-      );
-
-      participantsRef.current
-        .filter(p => (p.userId || p.id) !== myKey)
-        .forEach(p => {
-          const peerKey = p.userId || p.id;
-          if (initPeerConnectionRef.current) {
-            initPeerConnectionRef.current(peerKey, forceAudioOnly);
-          }
-        });
-      return true;
-    });
-  };
-
-  const handleTriggerPeerSwap = (peerKey: string) => {
-    setIsHandoffTransitioning(prev => {
-      if (prev[peerKey]) return prev;
-      
-      triggerToast(`Background stream initialized for ${peerStates[peerKey]?.name || peerKey}. Swapping views...`);
-      
-      setTimeout(() => {
-        setSwappedPeers(swapped => {
-          if (swapped.includes(peerKey)) return swapped;
-          const next = [...swapped, peerKey];
-          
-          const activeRemotePeers = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).map(p => p.userId || p.id);
-          const allSwapped = activeRemotePeers.every(pk => next.includes(pk));
-          
-          if (allSwapped && engineType === 'LIVEKIT') {
-            setTimeout(() => {
-              if (livekitRoomRef.current) {
-                livekitRoomRef.current.disconnect();
-                livekitRoomRef.current = null;
-              }
-              setEngineType('P2P');
-              setTransitionPending(false);
-              triggerToast('Seamless engine handoff completed. P2P Mesh engine is now active.');
-            }, 1000);
-          }
-          
-          return next;
-        });
-      }, 800); // 800ms fade cross-over
-      
-      return { ...prev, [peerKey]: true };
-    });
-  };
-
   // Connect to LiveKit SFU Engine
   useEffect(() => {
     if (!isMediaInitialized || engineType !== 'LIVEKIT') return;
@@ -688,6 +604,90 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('giin_selected_mic') || '');
   const [selectedSpeaker, setSelectedSpeaker] = useState(() => localStorage.getItem('giin_selected_speaker') || '');
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
+
+  const getEnv = (key: string): string | undefined => {
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key];
+    }
+    try {
+      const metaEnv = (import.meta as any).env;
+      if (metaEnv && metaEnv[key]) {
+        return metaEnv[key];
+      }
+    } catch (e) {}
+    return undefined;
+  };
+
+  const participantsRef = useRef<Participant[]>([]);
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  const startBackgroundP2P = () => {
+    setP2pActive(prev => {
+      if (prev) return prev;
+      
+      const activeParticipantsCount = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).length + 1;
+      const forceAudioOnly = activeParticipantsCount > 4;
+
+      triggerToast(forceAudioOnly
+        ? 'Fallback room size exceeds 4. Launching background P2P engine in Audio-Only Mode.'
+        : 'Launching background P2P connections...'
+      );
+
+      participantsRef.current
+        .filter(p => (p.userId || p.id) !== myKey)
+        .forEach(p => {
+          const peerKey = p.userId || p.id;
+          if (initPeerConnectionRef.current) {
+            initPeerConnectionRef.current(peerKey, forceAudioOnly);
+          }
+        });
+      return true;
+    });
+  };
+
+  const handleTriggerPeerSwap = (peerKey: string) => {
+    setIsHandoffTransitioning(prev => {
+      if (prev[peerKey]) return prev;
+      
+      triggerToast(`Background stream initialized for ${peerStates[peerKey]?.name || peerKey}. Swapping views...`);
+      
+      setTimeout(() => {
+        setSwappedPeers(swapped => {
+          if (swapped.includes(peerKey)) return swapped;
+          const next = [...swapped, peerKey];
+          
+          const activeRemotePeers = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).map(p => p.userId || p.id);
+          const allSwapped = activeRemotePeers.every(pk => next.includes(pk));
+          
+          if (allSwapped && engineType === 'LIVEKIT') {
+            setTimeout(() => {
+              if (livekitRoomRef.current) {
+                livekitRoomRef.current.disconnect();
+                livekitRoomRef.current = null;
+              }
+              setEngineType('P2P');
+              setTransitionPending(false);
+              triggerToast('Seamless engine handoff completed. P2P Mesh engine is now active.');
+            }, 1000);
+          }
+          
+          return next;
+        });
+      }, 800); // 800ms fade cross-over
+      
+      return { ...prev, [peerKey]: true };
+    });
+  };
 
   // Apply chosen speaker device to remote audio elements
   useEffect(() => {
