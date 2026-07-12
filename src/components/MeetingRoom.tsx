@@ -78,6 +78,13 @@ interface Participant {
   avatarBg: string;
 }
 
+interface HandRaise {
+  userId: string;
+  name: string;
+  timestamp: number;
+  reason?: string;
+}
+
 export const getWebRTCScreenshareConstraints = () => {
   // Relax constraints to prevent mobile browsers (iOS/Android) from falling back
   // to the webcam or throwing OverconstrainedError when trying to capture screen display media.
@@ -157,6 +164,31 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [waitingList, setWaitingList] = useState<any[]>([]);
   const [initialNotes, setInitialNotes] = useState<string>('');
   const [localAdminId, setLocalAdminId] = useState<string>('');
+  const isAdmin = isHost || (currentUser && localAdminId === currentUser.id);
+
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [selectedNewAdminId, setSelectedNewAdminId] = useState<string>('');
+  const [leaveOption, setLeaveOption] = useState<'transfer' | 'end' | null>(null);
+
+  // Host Meeting Settings States
+  const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
+  const [isChatLocked, setIsChatLocked] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+
+  // Floating Emoji Reactions State
+  const [activeReactions, setActiveReactions] = useState<{ id: string; senderKey: string; emoji: string; offset: number }[]>([]);
+  const [showEmojiReactions, setShowEmojiReactions] = useState(false);
+
+  // Q&A Board States
+  const [qaQuestions, setQaQuestions] = useState<{ id: string; text: string; author: string; upvotes: number; upvotedBy: string[] }[]>([]);
+  const [newQuestionText, setNewQuestionText] = useState('');
+  const [isQAActive, setIsQAActive] = useState(false);
+
+  // Handraise / Speaker Queue States
+  const [handRaises, setHandRaises] = useState<HandRaise[]>([]);
+  const [localHandRaised, setLocalHandRaised] = useState(false);
+  const [handRaiseReason, setHandRaiseReason] = useState<string | null>(null);
+  const [showHandRaiseMenu, setShowHandRaiseMenu] = useState(false);
 
   const [engineType, setEngineType] = useState<'LIVEKIT' | 'P2P'>('LIVEKIT');
   const [livekitToken, setLivekitToken] = useState<string>('');
@@ -561,37 +593,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
   }, []);
 
-  const isAdmin = isHost || (currentUser && localAdminId === currentUser.id);
-
-  const [showLeaveModal, setShowLeaveModal] = useState(false);
-  const [selectedNewAdminId, setSelectedNewAdminId] = useState<string>('');
-  const [leaveOption, setLeaveOption] = useState<'transfer' | 'end' | null>(null);
-
-  // Host Meeting Settings States
-  const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
-  const [isChatLocked, setIsChatLocked] = useState(false);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
-
-  // Floating Emoji Reactions State
-  const [activeReactions, setActiveReactions] = useState<{ id: string; senderKey: string; emoji: string; offset: number }[]>([]);
-  const [showEmojiReactions, setShowEmojiReactions] = useState(false);
-
-  // Q&A Board States
-  const [qaQuestions, setQaQuestions] = useState<{ id: string; text: string; author: string; upvotes: number; upvotedBy: string[] }[]>([]);
-  const [newQuestionText, setNewQuestionText] = useState('');
-  const [isQAActive, setIsQAActive] = useState(false);
-
-  // Handraise / Speaker Queue States
-  interface HandRaise {
-    userId: string;
-    name: string;
-    timestamp: number;
-    reason?: string;
-  }
-  const [handRaises, setHandRaises] = useState<HandRaise[]>([]);
-  const [localHandRaised, setLocalHandRaised] = useState(false);
-  const [handRaiseReason, setHandRaiseReason] = useState<string | null>(null);
-  const [showHandRaiseMenu, setShowHandRaiseMenu] = useState(false);
+  // Relocated states/constants to consolidated top block
 
   const toggleHandRaise = (reason?: string) => {
     if (localHandRaised) {
