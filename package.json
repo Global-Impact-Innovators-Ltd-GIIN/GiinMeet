@@ -4,14 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
+    "livekit-server-sdk": "^2.17.0",
     "lucide-react": "^1.21.0",
+    "next": "^16.2.10",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },

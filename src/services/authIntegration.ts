@@ -8,6 +8,19 @@ interface OTPDispatchResult {
   error?: string;
 }
 
+const getEnv = (key: string): string | undefined => {
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key];
+  }
+  try {
+    const metaEnv = (import.meta as any).env;
+    if (metaEnv && metaEnv[key]) {
+      return metaEnv[key];
+    }
+  } catch (e) {}
+  return undefined;
+};
+
 // Helper to generate a random 6-digit verification code
 export function generate6DigitOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -18,9 +31,9 @@ export function generate6DigitOTP(): string {
  * Falls back to high-fidelity virtualization mode if credentials are not configured.
  */
 export async function sendTwilioSMS(phone: string, code: string): Promise<OTPDispatchResult> {
-  const accountSid = import.meta.env.VITE_TWILIO_SID;
-  const authToken = import.meta.env.VITE_TWILIO_AUTH_TOKEN;
-  const messagingSid = import.meta.env.VITE_TWILIO_MESSAGING_SERVICE_SID;
+  const accountSid = getEnv('VITE_TWILIO_SID');
+  const authToken = getEnv('VITE_TWILIO_AUTH_TOKEN');
+  const messagingSid = getEnv('VITE_TWILIO_MESSAGING_SERVICE_SID');
 
   const messageText = `GIIN MEET verification code: ${code}. Valid for 5 minutes.`;
 
@@ -75,7 +88,7 @@ export async function sendTwilioSMS(phone: string, code: string): Promise<OTPDis
  * Falls back to high-fidelity virtualization mode if credentials are not configured.
  */
 export async function sendResendEmail(email: string, code: string): Promise<OTPDispatchResult> {
-  const apiKey = import.meta.env.VITE_RESEND_API_KEY;
+  const apiKey = getEnv('VITE_RESEND_API_KEY');
   console.log(`[Resend Email Service] Preparing dispatch to ${email}...`);
 
   if (apiKey) {
