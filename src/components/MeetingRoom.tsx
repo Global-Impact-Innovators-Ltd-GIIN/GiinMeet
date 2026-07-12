@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Room as LiveKitRoom, RoomEvent } from 'livekit-client';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
@@ -222,6 +223,218 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [initialNotes, setInitialNotes] = useState<string>('');
   const [localAdminId, setLocalAdminId] = useState<string>('');
 
+  // Orchestration state manager tracking engine and token transition
+  const [engineType, setEngineType] = useState<'LIVEKIT' | 'P2P'>('LIVEKIT');
+  const [livekitToken, setLivekitToken] = useState<string>('');
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [transitionPending, setTransitionPending] = useState<boolean>(false);
+  const [p2pActive, setP2pActive] = useState<boolean>(false);
+  const [livekitRemoteStreams, setLivekitRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
+  const [isHandoffTransitioning, setIsHandoffTransitioning] = useState<{ [peerKey: string]: boolean }>({});
+  const [swappedPeers, setSwappedPeers] = useState<string[]>([]);
+  const livekitRoomRef = useRef<any>(null);
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
+
+  const getEnv = (key: string): string | undefined => {
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key];
+    }
+    try {
+      const metaEnv = (import.meta as any).env;
+      if (metaEnv && metaEnv[key]) {
+        return metaEnv[key];
+      }
+    } catch (e) {}
+    return undefined;
+  };
+
+  const participantsRef = useRef<Participant[]>([]);
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  const startBackgroundP2P = () => {
+    setP2pActive(prev => {
+      if (prev) return prev;
+      
+      const activeParticipantsCount = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).length + 1;
+      const forceAudioOnly = activeParticipantsCount > 4;
+
+      triggerToast(forceAudioOnly
+        ? 'Fallback room size exceeds 4. Launching background P2P engine in Audio-Only Mode.'
+        : 'Launching background P2P connections...'
+      );
+
+      participantsRef.current
+        .filter(p => (p.userId || p.id) !== myKey)
+        .forEach(p => {
+          const peerKey = p.userId || p.id;
+          if (initPeerConnectionRef.current) {
+            initPeerConnectionRef.current(peerKey, forceAudioOnly);
+          }
+        });
+      return true;
+    });
+  };
+
+  const handleTriggerPeerSwap = (peerKey: string) => {
+    setIsHandoffTransitioning(prev => {
+      if (prev[peerKey]) return prev;
+      
+      triggerToast(`Background stream initialized for ${peerStates[peerKey]?.name || peerKey}. Swapping views...`);
+      
+      setTimeout(() => {
+        setSwappedPeers(swapped => {
+          if (swapped.includes(peerKey)) return swapped;
+          const next = [...swapped, peerKey];
+          
+          const activeRemotePeers = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).map(p => p.userId || p.id);
+          const allSwapped = activeRemotePeers.every(pk => next.includes(pk));
+          
+          if (allSwapped && engineType === 'LIVEKIT') {
+            setTimeout(() => {
+              if (livekitRoomRef.current) {
+                livekitRoomRef.current.disconnect();
+                livekitRoomRef.current = null;
+              }
+              setEngineType('P2P');
+              setTransitionPending(false);
+              triggerToast('Seamless engine handoff completed. P2P Mesh engine is now active.');
+            }, 1000);
+          }
+          
+          return next;
+        });
+      }, 800); // 800ms fade cross-over
+      
+      return { ...prev, [peerKey]: true };
+    });
+  };
+
+  // Connect to LiveKit SFU Engine
+  useEffect(() => {
+    if (!isMediaInitialized || engineType !== 'LIVEKIT') return;
+
+    let active = true;
+    const connectToLiveKit = async () => {
+      try {
+        const res = await fetch('/api/livekit/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomId: meetingId,
+            userId: myKey,
+            userName: currentUser?.name || 'Guest',
+            role: isAdmin ? 'HOST' : 'GUEST'
+          })
+        });
+
+        if (!active) return;
+        const data = await res.json();
+        if (data.error === 'MAX_CAPACITY_REACHED') {
+          setEngineType('P2P');
+          triggerToast('LiveKit room capacity limit reached. Swapped to P2P Mesh engine.');
+          return;
+        }
+
+        const { token, expiresAt: tokenExpiry } = data;
+        setLivekitToken(token);
+        setExpiresAt(tokenExpiry);
+
+        const room = new LiveKitRoom({
+          adaptiveStream: true,
+          dynacast: true
+        });
+
+        livekitRoomRef.current = room;
+
+        room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          const peerKey = participant.identity;
+          if (track.kind === 'video' || track.kind === 'audio') {
+            setLivekitRemoteStreams(prev => {
+              const currentStream = prev[peerKey] || new MediaStream();
+              if (!currentStream.getTracks().some(t => t.id === track.mediaStreamTrack.id)) {
+                currentStream.addTrack(track.mediaStreamTrack);
+              }
+              return { ...prev, [peerKey]: currentStream };
+            });
+          }
+        });
+
+        room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+          const peerKey = participant.identity;
+          setLivekitRemoteStreams(prev => {
+            const currentStream = prev[peerKey];
+            if (currentStream) {
+              currentStream.removeTrack(track.mediaStreamTrack);
+            }
+            return { ...prev };
+          });
+        });
+
+        const livekitUrl = getEnv('LIVEKIT_URL') || 'wss://giinmeet-livekit.lkt.cloud';
+        await room.connect(livekitUrl, token);
+        triggerToast('Connected to LiveKit SFU engine.');
+
+        if (stream) {
+          const videoTrack = stream.getVideoTracks()[0];
+          const audioTrack = stream.getAudioTracks()[0];
+          if (videoTrack) await room.localParticipant.publishTrack(videoTrack);
+          if (audioTrack) await room.localParticipant.publishTrack(audioTrack);
+        }
+
+      } catch (err) {
+        console.warn('[LiveKit Engine] Failed to connect, falling back to P2P Mesh:', err);
+        setEngineType('P2P');
+        triggerToast('LiveKit SFU connection failed. Swapped to P2P Mesh.');
+      }
+    };
+
+    connectToLiveKit();
+
+    return () => {
+      active = false;
+      if (livekitRoomRef.current) {
+        livekitRoomRef.current.disconnect();
+        livekitRoomRef.current = null;
+      }
+    };
+  }, [isMediaInitialized, engineType, meetingId, myKey, currentUser, isAdmin, stream]);
+
+  // Expiration Interceptor Check Loop
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (expiresAt && engineType === 'LIVEKIT') {
+        const timeDiff = new Date(expiresAt).getTime() - Date.now();
+        if (timeDiff <= 30000 && timeDiff > 0 && !transitionPending) {
+          setTransitionPending(true);
+          triggerToast('LiveKit token expiring soon. Swapping seamlessly to P2P Mesh...');
+          
+          if (sigChannelRef.current) {
+            sigChannelRef.current.send({
+              type: 'broadcast',
+              event: 'transition-pending',
+              payload: {
+                senderKey: myKey
+              }
+            });
+          }
+          
+          startBackgroundP2P();
+        }
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [expiresAt, engineType, transitionPending, myKey]);
+
   useEffect(() => {
     if (meetingAdminId) {
       setTimeout(() => {
@@ -426,6 +639,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // WebRTC Peer States & Connections
   const [myKey] = useState(() => currentUser?.id || 'guest-user-' + generateRandomId());
   const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
+  const initPeerConnectionRef = useRef<((peerKey: string, forceAudioOnly?: boolean) => void) | null>(null);
   const makingOfferRef = useRef<{ [peerKey: string]: boolean }>({});
   const pcCandidatesRef = useRef<{ [peerKey: string]: any[] }>({});
   const [remoteStreams, setRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
@@ -622,16 +836,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       
+      // Calculate responsive coordinates scaled by current canvas dimensions
+      const x0 = stroke.x0 * canvas.width;
+      const y0 = stroke.y0 * canvas.height;
+      const x1 = stroke.x1 * canvas.width;
+      const y1 = stroke.y1 * canvas.height;
+      
       const type = (stroke as any).type || 'pen';
       if (type === 'pen' || type === 'line') {
-        ctx.moveTo(stroke.x0, stroke.y0);
-        ctx.lineTo(stroke.x1, stroke.y1);
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
         ctx.stroke();
       } else if (type === 'rect') {
-        ctx.strokeRect(stroke.x0, stroke.y0, stroke.x1 - stroke.x0, stroke.y1 - stroke.y0);
+        ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
       } else if (type === 'circle') {
-        const radius = Math.sqrt(Math.pow(stroke.x1 - stroke.x0, 2) + Math.pow(stroke.y1 - stroke.y0, 2));
-        ctx.arc(stroke.x0, stroke.y0, radius, 0, 2 * Math.PI);
+        const radius = Math.sqrt(Math.pow(x1 - x0, 2) + Math.pow(y1 - y0, 2));
+        ctx.arc(x0, y0, radius, 0, 2 * Math.PI);
         ctx.stroke();
       }
     });
@@ -718,10 +938,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       const stroke = {
         type: 'pen',
-        x0: lastPosRef.current.x,
-        y0: lastPosRef.current.y,
-        x1: x,
-        y1: y,
+        x0: lastPosRef.current.x / canvas.width,
+        y0: lastPosRef.current.y / canvas.height,
+        x1: x / canvas.width,
+        y1: y / canvas.height,
         color: whiteboardColor,
         width: whiteboardWidth
       };
@@ -787,10 +1007,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       const stroke = {
         type: whiteboardTool,
-        x0: lastPosRef.current.x,
-        y0: lastPosRef.current.y,
-        x1: x,
-        y1: y,
+        x0: lastPosRef.current.x / canvas.width,
+        y0: lastPosRef.current.y / canvas.height,
+        x1: x / canvas.width,
+        y1: y / canvas.height,
         color: whiteboardColor,
         width: whiteboardWidth
       };
@@ -1225,7 +1445,8 @@ The conference was focused on platform modernization. Participants reviewed the 
 
     sigChannelRef.current = sigChannel;
 
-    const initPeerConnection = (peerKey: string) => {
+    initPeerConnectionRef.current = initPeerConnection;
+    const initPeerConnection = (peerKey: string, forceAudioOnly = false) => {
       if (pcsRef.current[peerKey]) {
         pcsRef.current[peerKey].close();
       }
@@ -1253,6 +1474,9 @@ The conference was focused on platform modernization. Participants reviewed the 
       // Add local media tracks
       if (stream) {
         stream.getTracks().forEach(track => {
+          if (forceAudioOnly && track.kind === 'video') {
+            return; // Skip adding video tracks under capacity rules
+          }
           const sender = pc.addTrack(track, stream);
           setupSenderE2EE(sender);
         });
@@ -1726,6 +1950,13 @@ The conference was focused on platform modernization. Participants reviewed the 
           handleSignal(data);
         }
       })
+      .on('broadcast', { event: 'transition-pending' }, (payload: any) => {
+        if (!transitionPending) {
+          setTransitionPending(true);
+          triggerToast('Handoff alert received from peer. Launching background P2P mesh...');
+          startBackgroundP2P();
+        }
+      })
       .on('broadcast', { event: 'reaction' }, (payload: any) => {
         const data = payload.payload;
         triggerReaction(data.senderKey, data.emoji);
@@ -2173,23 +2404,49 @@ The conference was focused on platform modernization. Participants reviewed the 
       return;
     }
 
-    const remoteKeys = Object.keys(remoteStreams);
+    // Build active streams map based on current active engines (LiveKit or P2P fallback)
+    const activeStreams: { [peerKey: string]: MediaStream } = {};
+    participantsRef.current.forEach(p => {
+      const peerKey = p.userId || p.id;
+      if (peerKey === myKey) return;
+      const livekitStream = livekitRemoteStreams[peerKey];
+      const p2pStream = remoteStreams[peerKey];
+      const isPeerSwapped = swappedPeers.includes(peerKey);
+      const activeStream = isPeerSwapped ? p2pStream : (livekitStream || p2pStream);
+      if (activeStream) {
+        activeStreams[peerKey] = activeStream;
+      }
+    });
+
+    const remoteKeys = Object.keys(activeStreams);
     const N = remoteKeys.length;
     
     remoteKeys.forEach((peerKey, idx) => {
-      const streamObj = remoteStreams[peerKey];
+      const streamObj = activeStreams[peerKey];
       if (!streamObj || streamObj.getAudioTracks().length === 0) return;
 
       try {
         const ctx = getSpatialAudioCtx();
         let nodes = spatialAudioNodesRef.current[peerKey];
         
-        if (!nodes) {
+        if (nodes) {
+          // If the stream reference changed, disconnect the old source node first
+          if ((nodes as any).streamId !== streamObj.id) {
+            try {
+              nodes.source.disconnect();
+            } catch (e) {}
+            const source = ctx.createMediaStreamSource(streamObj);
+            source.connect(nodes.panner);
+            nodes.source = source;
+            (nodes as any).streamId = streamObj.id;
+          }
+        } else {
           const source = ctx.createMediaStreamSource(streamObj);
           const panner = ctx.createStereoPanner();
           source.connect(panner);
           panner.connect(ctx.destination);
           nodes = { source, panner };
+          (nodes as any).streamId = streamObj.id;
           spatialAudioNodesRef.current[peerKey] = nodes;
         }
 
@@ -2203,7 +2460,7 @@ The conference was focused on platform modernization. Participants reviewed the 
 
     // Cleanup nodes of peers that left
     Object.keys(spatialAudioNodesRef.current).forEach(peerKey => {
-      if (!remoteStreams[peerKey]) {
+      if (!activeStreams[peerKey]) {
         const nodes = spatialAudioNodesRef.current[peerKey];
         if (nodes) {
           try {
@@ -2214,7 +2471,7 @@ The conference was focused on platform modernization. Participants reviewed the 
         }
       }
     });
-  }, [remoteStreams, isSpatialAudioEnabled]);
+  }, [remoteStreams, livekitRemoteStreams, swappedPeers, isSpatialAudioEnabled]);
 
   // Mock Live Captions & Transcription Engine Effect
   useEffect(() => {
@@ -3965,8 +4222,14 @@ Securely encrypted under Fintech AES-256 standard.`;
               .filter(p => (p.userId || p.id) !== myKey)
               .map(p => {
                 const peerKey = p.userId || p.id;
-                const hasConnection = activePeerKeys.includes(peerKey);
-                const peerStreamObj = remoteStreams[peerKey];
+                const livekitStream = livekitRemoteStreams[peerKey];
+                const p2pStream = remoteStreams[peerKey];
+                const isPeerSwapped = swappedPeers.includes(peerKey);
+                
+                // Select active stream based on engine fallback status and swap completion
+                const activeStreamObj = isPeerSwapped ? p2pStream : (livekitStream || p2pStream);
+                const hasConnection = !!activeStreamObj;
+                
                 const pState = peerStates[peerKey] || {
                   name: p.name,
                   isVideoOn: p.isVideoOn,
@@ -3989,35 +4252,76 @@ Securely encrypted under Fintech AES-256 standard.`;
                     border: pState.isSpeaking && !pState.isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
                     transition: 'all 0.25s ease'
                   }}>
-                    {hasConnection && peerStreamObj && (
+                    {hasConnection && activeStreamObj && (
                       <audio
                         ref={el => {
-                          if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
-                            el.srcObject = peerStreamObj;
+                          if (el && activeStreamObj && el.srcObject !== activeStreamObj) {
+                            el.srcObject = activeStreamObj;
                           }
                         }}
                         autoPlay
                         muted={isSpatialAudioEnabled}
                       />
                     )}
-                  {hasConnection && peerStreamObj && pState.isVideoOn ? (
-                    <video
-                      className="remote-video-feed"
-                      ref={el => {
-                        if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
-                          el.srcObject = peerStreamObj;
-                        }
-                      }}
-                      autoPlay
-                      playsInline
-                      muted
-                      style={{ 
-                        width: '100%', 
-                        height: '100%', 
-                        objectFit: 'cover',
-                        filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
-                      }}
-                    />
+                  {hasConnection && activeStreamObj && pState.isVideoOn ? (
+                    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                      {/* Active Video Feed (LiveKit or Swapped P2P) */}
+                      <video
+                        className="remote-video-feed"
+                        ref={el => {
+                          if (el && activeStreamObj && el.srcObject !== activeStreamObj) {
+                            el.srcObject = activeStreamObj;
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        muted
+                        style={{ 
+                          width: '100%', 
+                          height: '100%', 
+                          objectFit: 'cover',
+                          opacity: (transitionPending && p2pStream && !isPeerSwapped) ? 0 : 1,
+                          transition: 'opacity 0.8s ease-in-out',
+                          filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
+                        }}
+                      />
+
+                      {/* Hidden / Background P2P Buffer Feed */}
+                      {transitionPending && p2pStream && !isPeerSwapped && (
+                        <video
+                          ref={el => {
+                            if (el) {
+                              if (el.srcObject !== p2pStream) {
+                                el.srcObject = p2pStream;
+                              }
+                              // Monitor onunmute to trigger the swap
+                              const track = p2pStream.getVideoTracks()[0];
+                              if (track) {
+                                track.onunmute = () => handleTriggerPeerSwap(peerKey);
+                              } else {
+                                // Fallback if audio-only or instant swap
+                                setTimeout(() => handleTriggerPeerSwap(peerKey), 1500);
+                              }
+                            }
+                          }}
+                          autoPlay
+                          playsInline
+                          muted
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            opacity: isHandoffTransitioning[peerKey] ? 1 : 0,
+                            transition: 'opacity 0.8s ease-in-out',
+                            pointerEvents: 'none',
+                            filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
+                          }}
+                        />
+                      )}
+                    </div>
                   ) : (
                     <div style={{
                       width: '100%',
@@ -7088,6 +7392,29 @@ Securely encrypted under Fintech AES-256 standard.`;
         onMicChange={changeMicrophone}
         onSpeakerChange={changeSpeaker}
       />
+
+      {toastMessage && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          padding: '0.75rem 1.5rem',
+          backgroundColor: '#1E293B',
+          border: '1px solid var(--border-color)',
+          borderRadius: 'var(--radius-md)',
+          color: 'white',
+          fontSize: '0.85rem',
+          zIndex: 9999,
+          boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          animation: 'fadeInUp 0.2s ease-out'
+        }}>
+          <Sparkles size={16} color="var(--color-primary)" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 };

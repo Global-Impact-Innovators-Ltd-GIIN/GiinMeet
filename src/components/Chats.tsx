@@ -1122,13 +1122,14 @@ export const Chats: React.FC<ChatsProps> = ({
               const match = text.match(/^\[WHISPER:([^:]+):([\s\S]*)\]$/);
               if (match) {
                 const targetId = match[1];
-                const whisperText = match[2];
+                const whisperCipher = match[2];
                 const isSender = m.user_id === user?.id;
                 const isTarget = targetId === user?.id;
                 if (!isSender && !isTarget) {
                   return null; // hide whisper from other users
                 }
-                text = whisperText;
+                const whisperSeed = [activeThreadId, m.user_id, targetId].sort().join('_');
+                text = await decryptMessage(whisperCipher, whisperSeed);
                 whisperToId = targetId;
               }
             }
@@ -1175,7 +1176,9 @@ export const Chats: React.FC<ChatsProps> = ({
     let textToSend = currentText;
     let whisperToId: string | null = null;
     if (activeThreadId.startsWith('group_') && whisperTargetUserId) {
-      textToSend = `[WHISPER:${whisperTargetUserId}:${currentText}]`;
+      const whisperSeed = [activeThreadId, user?.id, whisperTargetUserId].sort().join('_');
+      const encryptedInner = await encryptMessage(currentText, whisperSeed);
+      textToSend = `[WHISPER:${whisperTargetUserId}:${encryptedInner}]`;
       whisperToId = whisperTargetUserId;
     }
 
