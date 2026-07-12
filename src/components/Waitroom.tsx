@@ -112,7 +112,11 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     }
 
     // 2. Instant Broadcast Channel subscription
-    const waitChannel = supabase.channel(`sig-webrtc-${meetingId}`);
+    const waitChannel = supabase.channel(`sig-webrtc-${meetingId}`, {
+      config: {
+        broadcast: { self: false }
+      }
+    });
     
     waitChannel
       .on('broadcast', { event: 'waitroom-response' }, (payload: any) => {
@@ -209,10 +213,13 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   };
 
   if (loading) {
+    const loadingMessage = waitingStatus === 'Waiting' 
+      ? 'Wait for Host to admit you...' 
+      : 'Configuring secure tunnel...';
     return (
       <div className="flex-center" style={{ minHeight: '80vh', flexDirection: 'column', gap: '1rem' }}>
         <Loader2 size={40} className="mic-indicator" color="var(--color-primary)" style={{ animation: 'spin 1.5s linear infinite' }} />
-        <span style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>Configuring secure tunnel...</span>
+        <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', fontWeight: 500 }}>{loadingMessage}</span>
       </div>
     );
   }
@@ -345,7 +352,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
                 Waitroom Access Granted
               </h3>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '300px', lineHeight: 1.45 }}>
-                Waiting for the meeting host to admit you in... Please don't close this window.
+                Wait for Host to admit you... Please don't close this window.
               </p>
             </div>
 

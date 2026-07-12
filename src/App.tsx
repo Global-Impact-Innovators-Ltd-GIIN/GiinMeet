@@ -171,6 +171,14 @@ function App() {
       return [];
     }
   });
+  const [createdMeetings, setCreatedMeetings] = useState<string[]>(() => {
+    try {
+      const cached = localStorage.getItem('giin_created_meetings');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
   const [lobbyMeetingData, setLobbyMeetingData] = useState<{
     id: string;
@@ -1240,6 +1248,11 @@ function App() {
 
         if (saved) {
           setActiveMeetingId(saved.id);
+          setCreatedMeetings(prev => {
+            const next = [...prev.filter(id => id !== saved.id), saved.id];
+            localStorage.setItem('giin_created_meetings', JSON.stringify(next));
+            return next;
+          });
           // Register the host in the meeting participants list as Admitted
           await mockAuth.joinMeetingRoom(saved.id, user.name, user.id, 'Admin', 'Admitted');
           
@@ -1686,6 +1699,7 @@ function App() {
           onSaveWorkspaceData={handleSaveWorkspaceData}
           currentUser={guestUser}
           isP2PCall={false}
+          isHost={false}
         />
       </div>
     );
@@ -2483,7 +2497,7 @@ function App() {
               currentUser={user}
               initialVideoState={activeCallVideoState}
               isP2PCall={isP2PCall}
-              isHost={meetingHistory.some(m => m.id === activeMeetingId && (m.host === 'You' || m.host === user?.name))}
+              isHost={createdMeetings.includes(activeMeetingId) || meetingHistory.some(m => m.id === activeMeetingId && (m.host === 'You' || m.host === user?.name))}
               isMinimized={currentView !== 'meeting'}
               onMinimizeToggle={(minimized) => {
                 setCurrentView(minimized ? 'dashboard' : 'meeting');
