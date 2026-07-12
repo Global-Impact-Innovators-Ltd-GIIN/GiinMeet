@@ -131,12 +131,202 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const reconnectTimersRef = useRef<{[key: string]: any}>({});
 
-
-
   // Minimized floating window dragging state
   const [position, setPosition] = useState({ x: window.innerWidth - 350, y: window.innerHeight - 220 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
+
+  // --- CONSOLIDATED HOOK STATES & REFS BLOCK (Prevents TDZ errors) ---
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOn, setIsVideoOn] = useState(initialVideoState);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isAnnotating, setIsAnnotating] = useState(false);
+  const [isColleagueSharing, setIsColleagueSharing] = useState(false);
+  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings' | 'polls' | 'filters' | 'soundboard' | 'info' | 'transcript'>('none');
+  const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
+  const [showMeetingInfo, setShowMeetingInfo] = useState(false);
+
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  const [meetingAdminId, setMeetingAdminId] = useState<string>('');
+  const [passcode, setPasscode] = useState<string>(() => getDeterministicPasscode(meetingId));
+  const [isMediaInitialized, setIsMediaInitialized] = useState(false);
+  const [waitingList, setWaitingList] = useState<any[]>([]);
+  const [initialNotes, setInitialNotes] = useState<string>('');
+  const [localAdminId, setLocalAdminId] = useState<string>('');
+
+  const [engineType, setEngineType] = useState<'LIVEKIT' | 'P2P'>('LIVEKIT');
+  const [livekitToken, setLivekitToken] = useState<string>('');
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [transitionPending, setTransitionPending] = useState<boolean>(false);
+  const [p2pActive, setP2pActive] = useState<boolean>(false);
+  const [livekitRemoteStreams, setLivekitRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
+  const [isHandoffTransitioning, setIsHandoffTransitioning] = useState<{ [peerKey: string]: boolean }>({});
+  const [swappedPeers, setSwappedPeers] = useState<string[]>([]);
+  const livekitRoomRef = useRef<any>(null);
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const meetingRoomRef = useRef<HTMLDivElement | null>(null);
+
+  const [breakoutRoom, setBreakoutRoom] = useState<number | null>(null);
+  const [breakoutTimeRemaining, setBreakoutTimeRemaining] = useState<number | null>(null);
+  const [breakoutRoomsCount, setBreakoutRoomsCount] = useState(2);
+  const [breakoutDurationMinutes, setBreakoutDurationMinutes] = useState(5);
+  const [admittedKeys, setAdmittedKeys] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(`admitted_keys_${meetingId}`);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch (e) {
+      return new Set();
+    }
+  });
+
+  const [polls, setPolls] = useState<any[]>([]);
+  const [userVotes, setUserVotes] = useState<{ [pollId: string]: number }>({});
+  const [newPollQuestion, setNewPollQuestion] = useState('');
+  const [newPollOptions, setNewPollOptions] = useState(['', '']);
+  const [videoFilter, setVideoFilter] = useState('none');
+
+  const [isAudioEnhanced, setIsAudioEnhanced] = useState(false);
+  const [isStudioLightEnabled, setIsStudioLightEnabled] = useState(false);
+  
+  const [isMeetingLocked, setIsMeetingLocked] = useState(false);
+  const [isScreenShareBlockedForGuests, setIsScreenShareBlockedForGuests] = useState(false);
+  const [isMuteOnEntryEnabled, setIsMuteOnEntryEnabled] = useState(false);
+
+  const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
+  const [transcripts, setTranscripts] = useState<{ name: string; text: string; time: string }[]>([]);
+  const [activeCaption, setActiveCaption] = useState<{ name: string; text: string } | null>(null);
+
+  const [messages, setMessages] = useState<{ sender: string; text: string; time: string; self: boolean }[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [participants, setParticipants] = useState<Participant[]>([]);
+
+  const [myKey] = useState(() => currentUser?.id || 'guest-user-' + generateRandomId());
+  const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
+  const initPeerConnectionRef = useRef<((peerKey: string, forceAudioOnly?: boolean) => void) | null>(null);
+  const makingOfferRef = useRef<{ [peerKey: string]: boolean }>({});
+  const pcCandidatesRef = useRef<{ [peerKey: string]: any[] }>({});
+  const [remoteStreams, setRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
+  
+  const [stickyNotes, setStickyNotes] = useState<{ id: string; x: number; y: number; text: string; color: string }[]>([]);
+  const [whiteboardTool, setWhiteboardTool] = useState<'pen' | 'line' | 'rect' | 'circle' | 'sticky'>('pen');
+  
+  const [aiSummary, setAiSummary] = useState<string>('');
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [isSummaryTabActive, setIsSummaryTabActive] = useState(false);
+
+  const [isSpatialAudioEnabled, setIsSpatialAudioEnabled] = useState(() => localStorage.getItem('giin_spatial_audio') === 'true');
+  const spatialAudioNodesRef = useRef<{ [peerKey: string]: { source: MediaStreamAudioSourceNode; panner: StereoPannerNode } }>({});
+  const spatialAudioCtxRef = useRef<AudioContext | null>(null);
+
+  const [peerStates, setPeerStates] = useState<{ 
+    [peerKey: string]: { 
+      name: string; 
+      isVideoOn: boolean; 
+      isMuted: boolean; 
+      isScreenSharing: boolean; 
+      isSpeaking: boolean;
+      latency?: number; 
+      e2eeStatus?: 'secure' | 'unsupported';
+      videoFilter?: string;
+      isStudioLightEnabled?: boolean;
+      isReconnecting?: boolean;
+    } 
+  }>({});
+
+  const [selectedCamera, setSelectedCamera] = useState(() => localStorage.getItem('giin_selected_camera') || '');
+  const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('giin_selected_mic') || '');
+  const [selectedSpeaker, setSelectedSpeaker] = useState(() => localStorage.getItem('giin_selected_speaker') || '');
+  const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
+
+  const getEnv = (key: string): string | undefined => {
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key];
+    }
+    try {
+      const metaEnv = (import.meta as any).env;
+      if (metaEnv && metaEnv[key]) {
+        return metaEnv[key];
+      }
+    } catch (e) {}
+    return undefined;
+  };
+
+  const participantsRef = useRef<Participant[]>([]);
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  const startBackgroundP2P = () => {
+    setP2pActive(prev => {
+      if (prev) return prev;
+      
+      const activeParticipantsCount = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).length + 1;
+      const forceAudioOnly = activeParticipantsCount > 4;
+
+      triggerToast(forceAudioOnly
+        ? 'Fallback room size exceeds 4. Launching background P2P engine in Audio-Only Mode.'
+        : 'Launching background P2P connections...'
+      );
+
+      participantsRef.current
+        .filter(p => (p.userId || p.id) !== myKey)
+        .forEach(p => {
+          const peerKey = p.userId || p.id;
+          if (initPeerConnectionRef.current) {
+            initPeerConnectionRef.current(peerKey, forceAudioOnly);
+          }
+        });
+      return true;
+    });
+  };
+
+  const handleTriggerPeerSwap = (peerKey: string) => {
+    setIsHandoffTransitioning(prev => {
+      if (prev[peerKey]) return prev;
+      
+      triggerToast(`Background stream initialized for ${peerStates[peerKey]?.name || peerKey}. Swapping views...`);
+      
+      setTimeout(() => {
+        setSwappedPeers(swapped => {
+          if (swapped.includes(peerKey)) return swapped;
+          const next = [...swapped, peerKey];
+          
+          const activeRemotePeers = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).map(p => p.userId || p.id);
+          const allSwapped = activeRemotePeers.every(pk => next.includes(pk));
+          
+          if (allSwapped && engineType === 'LIVEKIT') {
+            setTimeout(() => {
+              if (livekitRoomRef.current) {
+                livekitRoomRef.current.disconnect();
+                livekitRoomRef.current = null;
+              }
+              setEngineType('P2P');
+              setTransitionPending(false);
+              triggerToast('Seamless engine handoff completed. P2P Mesh engine is now active.');
+            }, 1000);
+          }
+          
+          return next;
+        });
+      }, 800); // 800ms fade cross-over
+      
+      return { ...prev, [peerKey]: true };
+    });
+  };
+  // --------------------------------------------------------------------
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -201,38 +391,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     return formatted.join(' ');
   };
 
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOn, setIsVideoOn] = useState(initialVideoState);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isAnnotating, setIsAnnotating] = useState(false);
-  const [isColleagueSharing, setIsColleagueSharing] = useState(false);
-  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings' | 'polls' | 'filters' | 'soundboard' | 'info' | 'transcript'>('none');
-  const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
-  const [showMeetingInfo, setShowMeetingInfo] = useState(false);
-
-  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
-  const screenVideoRef = useRef<HTMLVideoElement | null>(null);
-
-  // Waiting list and role delegation states
-  const [meetingAdminId, setMeetingAdminId] = useState<string>('');
-  const [passcode, setPasscode] = useState<string>(() => getDeterministicPasscode(meetingId));
-  const [isMediaInitialized, setIsMediaInitialized] = useState(false);
-  const [waitingList, setWaitingList] = useState<any[]>([]);
-  const [initialNotes, setInitialNotes] = useState<string>('');
-  const [localAdminId, setLocalAdminId] = useState<string>('');
-
-  // Orchestration state manager tracking engine and token transition
-  const [engineType, setEngineType] = useState<'LIVEKIT' | 'P2P'>('LIVEKIT');
-  const [livekitToken, setLivekitToken] = useState<string>('');
-  const [expiresAt, setExpiresAt] = useState<string | null>(null);
-  const [transitionPending, setTransitionPending] = useState<boolean>(false);
-  const [p2pActive, setP2pActive] = useState<boolean>(false);
-  const [livekitRemoteStreams, setLivekitRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
-  const [isHandoffTransitioning, setIsHandoffTransitioning] = useState<{ [peerKey: string]: boolean }>({});
-  const [swappedPeers, setSwappedPeers] = useState<string[]>([]);
-  const livekitRoomRef = useRef<any>(null);
+  // Relocated states to consolidated top block
 
   // Connect to LiveKit SFU Engine
   useEffect(() => {
@@ -359,9 +518,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   }, [meetingAdminId]);
 
-  // Fullscreen State & Logic
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const meetingRoomRef = useRef<HTMLDivElement | null>(null);
+  // Relocated fullscreen state to top block
 
   const toggleFullscreen = () => {
     if (!meetingRoomRef.current) return;
@@ -513,66 +670,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const whiteboardStrokesRef = useRef<{x0: number, y0: number, x1: number, y1: number, color: string, width: number}[]>([]);
 
   // Virtual Breakout Rooms States
-  const [breakoutRoom, setBreakoutRoom] = useState<number | null>(null);
-  const [breakoutTimeRemaining, setBreakoutTimeRemaining] = useState<number | null>(null);
-  const [breakoutRoomsCount, setBreakoutRoomsCount] = useState(2);
-  const [breakoutDurationMinutes, setBreakoutDurationMinutes] = useState(5);
-  const [admittedKeys, setAdmittedKeys] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem(`admitted_keys_${meetingId}`);
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch (e) {
-      return new Set();
-    }
-  });
-
-  // New Interactive States (Polls, Soundboard, Video Filters)
-  const [polls, setPolls] = useState<any[]>([]);
-  const [userVotes, setUserVotes] = useState<{ [pollId: string]: number }>({});
-  const [newPollQuestion, setNewPollQuestion] = useState('');
-  const [newPollOptions, setNewPollOptions] = useState(['', '']);
-  const [videoFilter, setVideoFilter] = useState('none');
-
-  // New AI/AV Enhancements States
-  const [isAudioEnhanced, setIsAudioEnhanced] = useState(false);
-  const [isStudioLightEnabled, setIsStudioLightEnabled] = useState(false);
-  
-  // New Host Controls States
-  const [isMeetingLocked, setIsMeetingLocked] = useState(false);
-  const [isScreenShareBlockedForGuests, setIsScreenShareBlockedForGuests] = useState(false);
-  const [isMuteOnEntryEnabled, setIsMuteOnEntryEnabled] = useState(false);
-
-  // Live Captions States
-  const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
-  const [transcripts, setTranscripts] = useState<{ name: string; text: string; time: string }[]>([]);
-  const [activeCaption, setActiveCaption] = useState<{ name: string; text: string } | null>(null);
-
-  // Relocated state variables to prevent accessed-before-declaration errors
-  const [messages, setMessages] = useState<{ sender: string; text: string; time: string; self: boolean }[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [participants, setParticipants] = useState<Participant[]>([]);
-
-  // WebRTC Peer States & Connections
-  const [myKey] = useState(() => currentUser?.id || 'guest-user-' + generateRandomId());
-  const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
-  const initPeerConnectionRef = useRef<((peerKey: string, forceAudioOnly?: boolean) => void) | null>(null);
-  const makingOfferRef = useRef<{ [peerKey: string]: boolean }>({});
-  const pcCandidatesRef = useRef<{ [peerKey: string]: any[] }>({});
-  const [remoteStreams, setRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
-  
-  // Whiteboard advanced controls
-  const [stickyNotes, setStickyNotes] = useState<{ id: string; x: number; y: number; text: string; color: string }[]>([]);
-  const [whiteboardTool, setWhiteboardTool] = useState<'pen' | 'line' | 'rect' | 'circle' | 'sticky'>('pen');
-  
-  // AI Meeting Summaries
-  const [aiSummary, setAiSummary] = useState<string>('');
-  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
-  const [isSummaryTabActive, setIsSummaryTabActive] = useState(false);
-
-  // Immersive Spatial Audio
-  const [isSpatialAudioEnabled, setIsSpatialAudioEnabled] = useState(() => localStorage.getItem('giin_spatial_audio') === 'true');
-  const spatialAudioNodesRef = useRef<{ [peerKey: string]: { source: MediaStreamAudioSourceNode; panner: StereoPannerNode } }>({});
-  const spatialAudioCtxRef = useRef<AudioContext | null>(null);
+  // Relocated states to top block
 
   const getSpatialAudioCtx = () => {
     if (!spatialAudioCtxRef.current) {
@@ -584,110 +682,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     return spatialAudioCtxRef.current;
   };
-  const [peerStates, setPeerStates] = useState<{ 
-    [peerKey: string]: { 
-      name: string; 
-      isVideoOn: boolean; 
-      isMuted: boolean; 
-      isScreenSharing: boolean; 
-      isSpeaking: boolean;
-      latency?: number; 
-      e2eeStatus?: 'secure' | 'unsupported';
-      videoFilter?: string;
-      isStudioLightEnabled?: boolean;
-      isReconnecting?: boolean;
-    } 
-  }>({});
-
-  // Device Selection States
-  const [selectedCamera, setSelectedCamera] = useState(() => localStorage.getItem('giin_selected_camera') || '');
-  const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('giin_selected_mic') || '');
-  const [selectedSpeaker, setSelectedSpeaker] = useState(() => localStorage.getItem('giin_selected_speaker') || '');
-  const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
-
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const triggerToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 4000);
-  };
-
-  const getEnv = (key: string): string | undefined => {
-    if (typeof process !== 'undefined' && process.env && process.env[key]) {
-      return process.env[key];
-    }
-    try {
-      const metaEnv = (import.meta as any).env;
-      if (metaEnv && metaEnv[key]) {
-        return metaEnv[key];
-      }
-    } catch (e) {}
-    return undefined;
-  };
-
-  const participantsRef = useRef<Participant[]>([]);
-  useEffect(() => {
-    participantsRef.current = participants;
-  }, [participants]);
-
-  const startBackgroundP2P = () => {
-    setP2pActive(prev => {
-      if (prev) return prev;
-      
-      const activeParticipantsCount = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).length + 1;
-      const forceAudioOnly = activeParticipantsCount > 4;
-
-      triggerToast(forceAudioOnly
-        ? 'Fallback room size exceeds 4. Launching background P2P engine in Audio-Only Mode.'
-        : 'Launching background P2P connections...'
-      );
-
-      participantsRef.current
-        .filter(p => (p.userId || p.id) !== myKey)
-        .forEach(p => {
-          const peerKey = p.userId || p.id;
-          if (initPeerConnectionRef.current) {
-            initPeerConnectionRef.current(peerKey, forceAudioOnly);
-          }
-        });
-      return true;
-    });
-  };
-
-  const handleTriggerPeerSwap = (peerKey: string) => {
-    setIsHandoffTransitioning(prev => {
-      if (prev[peerKey]) return prev;
-      
-      triggerToast(`Background stream initialized for ${peerStates[peerKey]?.name || peerKey}. Swapping views...`);
-      
-      setTimeout(() => {
-        setSwappedPeers(swapped => {
-          if (swapped.includes(peerKey)) return swapped;
-          const next = [...swapped, peerKey];
-          
-          const activeRemotePeers = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).map(p => p.userId || p.id);
-          const allSwapped = activeRemotePeers.every(pk => next.includes(pk));
-          
-          if (allSwapped && engineType === 'LIVEKIT') {
-            setTimeout(() => {
-              if (livekitRoomRef.current) {
-                livekitRoomRef.current.disconnect();
-                livekitRoomRef.current = null;
-              }
-              setEngineType('P2P');
-              setTransitionPending(false);
-              triggerToast('Seamless engine handoff completed. P2P Mesh engine is now active.');
-            }, 1000);
-          }
-          
-          return next;
-        });
-      }, 800); // 800ms fade cross-over
-      
-      return { ...prev, [peerKey]: true };
-    });
-  };
+  // Relocated states/helpers to consolidated top block
 
   // Apply chosen speaker device to remote audio elements
   useEffect(() => {
