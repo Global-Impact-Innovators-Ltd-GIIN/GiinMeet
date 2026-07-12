@@ -1,73 +1,49 @@
-# React + TypeScript + Vite
+# GIIN Meet - Virtualization & Collaboration Hub
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+GIIN Meet is a high-performance, premium virtual workspace designed for zero-drop video conferencing, secure messaging, and interactive team collaboration.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 🚀 Key Premium Features
 
-## React Compiler
+- **Perfect Negotiation WebRTC Mesh**: Eliminates offer collisions (glare) and screen-share renegotiation errors.
+- **3D Spatial Audio**: Horizontally pans remote voices matching layout coordinates, complemented by decibel-based noise gates and voice pitch modulators.
+- **AI Transcript Companion**: Live speech captions side-by-side with an AI Copilot summary cards engine.
+- **Advanced Collaborative Whiteboard**: Real-time whiteboard supporting freehand sketches, straight lines, rectangles, circles, and draggable sticky notes.
+- **Security & Chat Upgrades**: End-to-end encrypted direct messages, secure whispers in group rooms, rich Markdown text toolbar, and inline base64 PDF attachment previews.
+- **10 Brand UI Styling Themes**: Select globally between *Glassmorphism*, *Neumorphism*, *Cyberpunk Glow*, *Flat Minimal*, *Liquid Glass*, *Bento Grid*, *Spatial UI*, *Skeuomorphism*, *Minimalism*, and *Maximalism*.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## 🛠️ Quick Start & Local Setup
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### 1. Install Dependencies
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### 2. Configure Environment Variables
+Create a `.env` file in the root directory:
+```env
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
+
+### 3. Run Development Server
+```bash
+npm run dev
+```
+
+### 4. Build Production Bundle
+```bash
+npm run build
+```
+
+---
+
+## 📂 Documentation & Specifications
+For detailed architecture guides and API schemas:
+- **Product Requirements**: Refer to [PRD.md](file:///c:/Users/hleo5/Desktop/GiinMeet/PRD.md).
+- **Coding Idioms & Handbook**: Refer to [Skill.md](file:///c:/Users/hleo5/Desktop/GiinMeet/Skill.md).
+- **Database & Memory Schema**: Refer to [memory.md](file:///c:/Users/hleo5/Desktop/GiinMeet/memory.md).
+- **Walkthrough and Diffs**: Refer to [walkthrough.md](file:///C:/Users/hleo5/.gemini/antigravity-ide/brain/c8989bbf-23e8-4121-9e07-50e8894a976a/walkthrough.md).
