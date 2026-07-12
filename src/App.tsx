@@ -53,6 +53,20 @@ const applyBorderRadius = (radius: number) => {
 
 const applyUiStyle = (style: string, isDark: boolean) => {
   document.documentElement.setAttribute('data-ui-style', style);
+  // Remove temporary inline properties to avoid clashing with the stylesheet rule sets
+  document.documentElement.style.removeProperty('--bg-app');
+  document.documentElement.style.removeProperty('--bg-sidebar');
+  document.documentElement.style.removeProperty('--bg-card');
+  document.documentElement.style.removeProperty('--border-color');
+  document.documentElement.style.removeProperty('--radius-md');
+  document.documentElement.style.removeProperty('--radius-lg');
+  document.documentElement.style.removeProperty('--glass-bg');
+  document.documentElement.style.removeProperty('--glass-border');
+  document.documentElement.style.removeProperty('--glass-blur');
+  document.documentElement.style.removeProperty('--shadow-premium');
+  document.documentElement.style.removeProperty('--shadow-sm');
+  document.documentElement.style.removeProperty('--shadow-md');
+
   if (style === 'neumorphism') {
     const shadowDark = isDark ? '#070a10' : '#b8c2d0';
     const shadowLight = isDark ? '#1d273c' : '#ffffff';
@@ -77,7 +91,7 @@ const applyUiStyle = (style: string, isDark: boolean) => {
     document.documentElement.style.setProperty('--shadow-premium', 'none');
     document.documentElement.style.setProperty('--shadow-sm', 'none');
     document.documentElement.style.setProperty('--shadow-md', 'none');
-  } else { // glassmorphism
+  } else if (style === 'glassmorphism') {
     if (isDark) {
       document.documentElement.style.setProperty('--glass-bg', 'rgba(18, 24, 38, 0.75)');
       document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.06)');

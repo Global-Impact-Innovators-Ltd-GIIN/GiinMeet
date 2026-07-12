@@ -1564,6 +1564,29 @@ export const Chats: React.FC<ChatsProps> = ({
             </a>
           </div>
         );
+      } else if (fileType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) {
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem', width: '280px' }}>
+            <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden', height: '200px', backgroundColor: '#1E293B' }}>
+              <object 
+                data={fileData} 
+                type="application/pdf" 
+                style={{ width: '100%', height: '100%', border: 'none' }}
+              >
+                <div style={{ padding: '2rem', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  PDF Preview is not supported by your browser.
+                </div>
+              </object>
+            </div>
+            <a 
+              href={fileData} 
+              download={fileName} 
+              style={{ fontSize: '0.75rem', color: self ? '#FABD02' : 'var(--color-primary)', textDecoration: 'underline', fontWeight: 600 }}
+            >
+              📄 Open/Download {fileName}
+            </a>
+          </div>
+        );
       } else {
         return (
           <div style={{ 
@@ -2375,6 +2398,50 @@ export const Chats: React.FC<ChatsProps> = ({
                   </button>
                 </div>
               )}
+
+              {/* Rich Markdown Editor Toolbar */}
+              <div style={{
+                display: 'flex',
+                gap: '0.5rem',
+                padding: '0.35rem 0.75rem',
+                borderBottom: '1px solid var(--border-color)',
+                backgroundColor: 'rgba(255,255,255,0.02)',
+                alignItems: 'center',
+                marginBottom: '0.4rem',
+                borderRadius: '8px'
+              }}>
+                {[
+                  { label: 'B', style: { fontWeight: 'bold' }, syntax: '**', title: 'Bold' },
+                  { label: 'I', style: { fontStyle: 'italic' }, syntax: '*', title: 'Italic' },
+                  { label: 'S', style: { textDecoration: 'line-through' }, syntax: '~~', title: 'Strikethrough' },
+                  { label: '</>', style: { fontFamily: 'monospace' }, syntax: '`', title: 'Code Block' },
+                  { label: 'H1', style: { fontWeight: 900 }, syntax: '# ', title: 'Header 1' },
+                  { label: 'Quote', style: {}, syntax: '> ', title: 'Blockquote' }
+                ].map(tool => (
+                  <button
+                    key={tool.title}
+                    type="button"
+                    title={tool.title}
+                    onClick={() => {
+                      setChatInput(prev => prev + tool.syntax);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '0.75rem',
+                      padding: '2px 6px',
+                      borderRadius: '3px',
+                      ...tool.style
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'var(--color-primary)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                  >
+                    {tool.label}
+                  </button>
+                ))}
+              </div>
 
               <form onSubmit={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <input 

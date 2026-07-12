@@ -29,6 +29,20 @@ const applyBorderRadius = (radius: number) => {
 
 const applyUiStyle = (style: string, isDark: boolean) => {
   document.documentElement.setAttribute('data-ui-style', style);
+  // Remove temporary inline properties to avoid clashing with the stylesheet rule sets
+  document.documentElement.style.removeProperty('--bg-app');
+  document.documentElement.style.removeProperty('--bg-sidebar');
+  document.documentElement.style.removeProperty('--bg-card');
+  document.documentElement.style.removeProperty('--border-color');
+  document.documentElement.style.removeProperty('--radius-md');
+  document.documentElement.style.removeProperty('--radius-lg');
+  document.documentElement.style.removeProperty('--glass-bg');
+  document.documentElement.style.removeProperty('--glass-border');
+  document.documentElement.style.removeProperty('--glass-blur');
+  document.documentElement.style.removeProperty('--shadow-premium');
+  document.documentElement.style.removeProperty('--shadow-sm');
+  document.documentElement.style.removeProperty('--shadow-md');
+
   if (style === 'neumorphism') {
     const shadowDark = isDark ? '#070a10' : '#b8c2d0';
     const shadowLight = isDark ? '#1d273c' : '#ffffff';
@@ -53,7 +67,7 @@ const applyUiStyle = (style: string, isDark: boolean) => {
     document.documentElement.style.setProperty('--shadow-premium', 'none');
     document.documentElement.style.setProperty('--shadow-sm', 'none');
     document.documentElement.style.setProperty('--shadow-md', 'none');
-  } else { // glassmorphism
+  } else if (style === 'glassmorphism') {
     if (isDark) {
       document.documentElement.style.setProperty('--glass-bg', 'rgba(18, 24, 38, 0.75)');
       document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.06)');
@@ -174,6 +188,20 @@ export const Settings: React.FC<SettingsProps> = ({
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
   const [noiseReduction, setNoiseReduction] = useState(true);
   const [voicePitchProfile, setVoicePitchProfile] = useState('normal');
+  const [isSpatialAudioEnabled, setIsSpatialAudioEnabled] = useState(() => localStorage.getItem('giin_spatial_audio') === 'true');
+  const [noiseGateThreshold, setNoiseGateThreshold] = useState(() => parseInt(localStorage.getItem('giin_noise_gate_threshold') || '-50', 10));
+
+  const handleToggleSpatialAudio = (enabled: boolean) => {
+    setIsSpatialAudioEnabled(enabled);
+    localStorage.setItem('giin_spatial_audio', enabled ? 'true' : 'false');
+    window.dispatchEvent(new Event('giin_spatial_audio_changed'));
+    triggerToast(`Spatial Audio ${enabled ? 'enabled' : 'disabled'}`);
+  };
+
+  const handleUpdateNoiseGate = (value: number) => {
+    setNoiseGateThreshold(value);
+    localStorage.setItem('giin_noise_gate_threshold', value.toString());
+  };
 
   // Interactive keyboard shortcuts customizer states
   const [hotkeyMute, setHotkeyMute] = useState(() => localStorage.getItem('giin_hotkey_mute') || 'm');
@@ -1089,7 +1117,13 @@ export const Settings: React.FC<SettingsProps> = ({
                     { id: 'glassmorphism', label: 'Glassmorphism' },
                     { id: 'neumorphism', label: 'Neumorphism' },
                     { id: 'cyberpunk-glow', label: 'Cyberpunk Glow' },
-                    { id: 'flat-minimal', label: 'Flat Minimal' }
+                    { id: 'flat-minimal', label: 'Flat Minimal' },
+                    { id: 'liquid-glass', label: 'Liquid Glass' },
+                    { id: 'bento-grid', label: 'Bento Grid' },
+                    { id: 'spatial-ui', label: 'Spatial UI' },
+                    { id: 'skeuomorphism', label: 'Skeuomorphism' },
+                    { id: 'minimalism', label: 'Minimalism' },
+                    { id: 'maximalism', label: 'Maximalism' }
                   ].map((style) => (
                     <button
                       key={style.id}
@@ -1346,7 +1380,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
               {/* Audio enhancement filters */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-primary)' }}>Audio Suppression Filters</span>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-primary)' }}>Audio Suppression & Voice Filters</span>
                 
                 <label style={{ display: 'flex', alignItems: 'center', justifySelf: 'space-between', cursor: 'pointer', fontSize: '0.8rem' }}>
                   <input type="checkbox" checked={noiseReduction} onChange={() => setNoiseReduction(!noiseReduction)} style={{ marginRight: '8px' }} />
@@ -1356,6 +1390,35 @@ export const Settings: React.FC<SettingsProps> = ({
                   </div>
                 </label>
 
+                {/* Spatial Audio Toggle */}
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '0.8rem' }}>
+                    <input type="checkbox" checked={isSpatialAudioEnabled} onChange={(e) => handleToggleSpatialAudio(e.target.checked)} style={{ marginRight: '8px' }} />
+                    <div>
+                      <strong style={{ display: 'block' }}>3D Spatial Audio Panning</strong>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Immersive audio panning matches speakers' positions in the meeting grid.</span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Noise Gate Threshold */}
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
+                  <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Noise Gate Threshold ({noiseGateThreshold} dB)</label>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="-100" 
+                    max="0" 
+                    value={noiseGateThreshold} 
+                    onChange={(e) => handleUpdateNoiseGate(parseInt(e.target.value, 10))} 
+                    style={{ width: '100%', cursor: 'pointer', accentColor: 'var(--color-primary)' }} 
+                  />
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.15rem' }}>
+                    Signals below this volume level will be muted to eliminate breathing or room hum.
+                  </span>
+                </div>
+
                 <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Vocal Equalizer Pitch Profile</label>
                   <select value={voicePitchProfile} onChange={(e) => { setVoicePitchProfile(e.target.value); triggerToast(`Vocal profile set to ${e.target.value}`); }} className="premium-input" style={{ width: '100%' }}>
@@ -1363,6 +1426,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     <option value="baritone">Deep Broadcast Baritone (Low Enhances)</option>
                     <option value="robotic">Robotic Echo Pitch (WebRTC filter preview)</option>
                     <option value="high">High Echo Studio (Upper Gain)</option>
+                    <option value="alien">Alien Voice Pitch (Pitch Shift Alteration)</option>
                   </select>
                 </div>
               </div>

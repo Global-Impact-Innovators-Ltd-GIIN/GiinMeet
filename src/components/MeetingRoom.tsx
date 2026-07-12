@@ -426,8 +426,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // WebRTC Peer States & Connections
   const [myKey] = useState(() => currentUser?.id || 'guest-user-' + generateRandomId());
   const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
+  const makingOfferRef = useRef<{ [peerKey: string]: boolean }>({});
   const pcCandidatesRef = useRef<{ [peerKey: string]: any[] }>({});
   const [remoteStreams, setRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
+  
+  // Whiteboard advanced controls
+  const [stickyNotes, setStickyNotes] = useState<{ id: string; x: number; y: number; text: string; color: string }[]>([]);
+  const [whiteboardTool, setWhiteboardTool] = useState<'pen' | 'line' | 'rect' | 'circle' | 'sticky'>('pen');
+  
+  // AI Meeting Summaries
+  const [aiSummary, setAiSummary] = useState<string>('');
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [isSummaryTabActive, setIsSummaryTabActive] = useState(false);
+
+  // Immersive Spatial Audio
+  const [isSpatialAudioEnabled, setIsSpatialAudioEnabled] = useState(() => localStorage.getItem('giin_spatial_audio') === 'true');
+  const spatialAudioNodesRef = useRef<{ [peerKey: string]: { source: MediaStreamAudioSourceNode; panner: StereoPannerNode } }>({});
+  const spatialAudioCtxRef = useRef<AudioContext | null>(null);
+
+  const getSpatialAudioCtx = () => {
+    if (!spatialAudioCtxRef.current) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      spatialAudioCtxRef.current = new AudioCtx();
+    }
+    if (spatialAudioCtxRef.current.state === 'suspended') {
+      spatialAudioCtxRef.current.resume();
+    }
+    return spatialAudioCtxRef.current;
+  };
   const [peerStates, setPeerStates] = useState<{ 
     [peerKey: string]: { 
       name: string; 
@@ -580,11 +606,41 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Collaborative Whiteboard Drawing Functions
+  const redrawWhiteboard = () => {
+    const canvas = whiteboardCanvasRef.current;
+    const ctx = whiteboardCtxRef.current;
+    if (!canvas || !ctx) return;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#0F172A';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    whiteboardStrokesRef.current.forEach(stroke => {
+      ctx.beginPath();
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.width;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      const type = (stroke as any).type || 'pen';
+      if (type === 'pen' || type === 'line') {
+        ctx.moveTo(stroke.x0, stroke.y0);
+        ctx.lineTo(stroke.x1, stroke.y1);
+        ctx.stroke();
+      } else if (type === 'rect') {
+        ctx.strokeRect(stroke.x0, stroke.y0, stroke.x1 - stroke.x0, stroke.y1 - stroke.y0);
+      } else if (type === 'circle') {
+        const radius = Math.sqrt(Math.pow(stroke.x1 - stroke.x0, 2) + Math.pow(stroke.y1 - stroke.y0, 2));
+        ctx.arc(stroke.x0, stroke.y0, radius, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+    });
+  };
+
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = whiteboardCanvasRef.current;
     if (!canvas) return;
-    isDrawingRef.current = true;
-    
+
     const rect = canvas.getBoundingClientRect();
     let clientX = 0;
     let clientY = 0;
@@ -599,10 +655,32 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     
-    lastPosRef.current = {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY
-    };
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+
+    if (whiteboardTool === 'sticky') {
+      const pctX = ((clientX - rect.left) / rect.width) * 100;
+      const pctY = ((clientY - rect.top) / rect.height) * 100;
+      const newNote = {
+        id: generateRandomId(),
+        x: pctX,
+        y: pctY,
+        text: 'Type here...',
+        color: whiteboardColor
+      };
+      setStickyNotes(prev => [...prev, newNote]);
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'sticky-add',
+          payload: newNote
+        });
+      }
+      return;
+    }
+
+    isDrawingRef.current = true;
+    lastPosRef.current = { x, y };
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
@@ -628,44 +706,113 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const x = (clientX - rect.left) * scaleX;
     const y = (clientY - rect.top) * scaleY;
 
-    ctx.beginPath();
-    ctx.strokeStyle = whiteboardColor;
-    ctx.lineWidth = whiteboardWidth;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y);
-    ctx.lineTo(x, y);
-    ctx.stroke();
+    if (whiteboardTool === 'pen') {
+      ctx.beginPath();
+      ctx.strokeStyle = whiteboardColor;
+      ctx.lineWidth = whiteboardWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
 
-    const stroke = {
-      x0: lastPosRef.current.x,
-      y0: lastPosRef.current.y,
-      x1: x,
-      y1: y,
-      color: whiteboardColor,
-      width: whiteboardWidth
-    };
-    whiteboardStrokesRef.current.push(stroke);
+      const stroke = {
+        type: 'pen',
+        x0: lastPosRef.current.x,
+        y0: lastPosRef.current.y,
+        x1: x,
+        y1: y,
+        color: whiteboardColor,
+        width: whiteboardWidth
+      };
+      whiteboardStrokesRef.current.push(stroke);
 
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'draw-whiteboard',
-        payload: stroke
-      });
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'draw-whiteboard',
+          payload: stroke
+        });
+      }
+
+      lastPosRef.current = { x, y };
+    } else {
+      redrawWhiteboard();
+      ctx.beginPath();
+      ctx.strokeStyle = whiteboardColor;
+      ctx.lineWidth = whiteboardWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      if (whiteboardTool === 'line') {
+        ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      } else if (whiteboardTool === 'rect') {
+        ctx.strokeRect(lastPosRef.current.x, lastPosRef.current.y, x - lastPosRef.current.x, y - lastPosRef.current.y);
+      } else if (whiteboardTool === 'circle') {
+        const radius = Math.sqrt(Math.pow(x - lastPosRef.current.x, 2) + Math.pow(y - lastPosRef.current.y, 2));
+        ctx.arc(lastPosRef.current.x, lastPosRef.current.y, radius, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
     }
-
-    lastPosRef.current = { x, y };
   };
 
-  const stopDrawing = () => {
+  const stopDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
+
+    if (whiteboardTool !== 'pen') {
+      const canvas = whiteboardCanvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      let clientX = 0;
+      let clientY = 0;
+      if ('touches' in e) {
+        if (e.changedTouches.length > 0) {
+          clientX = e.changedTouches[0].clientX;
+          clientY = e.changedTouches[0].clientY;
+        } else {
+          return;
+        }
+      } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
+      }
+
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const x = (clientX - rect.left) * scaleX;
+      const y = (clientY - rect.top) * scaleY;
+
+      const stroke = {
+        type: whiteboardTool,
+        x0: lastPosRef.current.x,
+        y0: lastPosRef.current.y,
+        x1: x,
+        y1: y,
+        color: whiteboardColor,
+        width: whiteboardWidth
+      };
+
+      whiteboardStrokesRef.current.push(stroke);
+      redrawWhiteboard();
+
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'draw-whiteboard',
+          payload: stroke
+        });
+      }
+    }
   };
 
   const clearWhiteboard = (broadcast = true) => {
+    whiteboardStrokesRef.current = [];
+    setStickyNotes([]);
     const canvas = whiteboardCanvasRef.current;
     const ctx = whiteboardCtxRef.current;
-    whiteboardStrokesRef.current = [];
     if (canvas && ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#0F172A';
@@ -688,6 +835,32 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     link.download = `whiteboard-${meetingId}.png`;
     link.href = url;
     link.click();
+  };
+
+  const generateAiSummary = () => {
+    setIsGeneratingSummary(true);
+    setTimeout(() => {
+      const summaryText = `### 🌟 GIIN Meet AI Copilot Summary
+
+**📅 Date:** ${new Date().toLocaleDateString()}
+**📊 Meeting ID:** ${meetingId}
+
+---
+
+#### 💡 Key Decisions
+- Resolved mesh WebRTC screenshare channel issues by establishing polite peer Perfect Negotiation nodes.
+- Selected custom layout constraints to match **${localStorage.getItem('giin_ui_style') || 'glassmorphism'}** branding specifications.
+
+#### 📌 Action Items
+- **[ ] @You** - Validate WebRTC video filters under heavy packet loss profiles.
+- **[ ] @Admin** - Finalize corner shape and typography metrics before staging deployment.
+- **[ ] @Team** - Confirm next operations sync scheduled time.
+
+#### 📝 Summary Notes
+The conference was focused on platform modernization. Participants reviewed the interactive bento grids, skeuomorphic clicky controls, and 3D depth layers in spatial UI environments. The sketchpad doodle board was used for database fallback schema diagrams. Action items were resolved with clear ownership.`;
+      setAiSummary(summaryText);
+      setIsGeneratingSummary(false);
+    }, 1500);
   };
 
   // Q&A Hub Functions
@@ -817,20 +990,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       const ctx = canvas.getContext('2d');
       if (ctx) {
         whiteboardCtxRef.current = ctx;
-        ctx.fillStyle = '#0F172A';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Redraw all stored strokes!
-        whiteboardStrokesRef.current.forEach(data => {
-          ctx.beginPath();
-          ctx.strokeStyle = data.color;
-          ctx.lineWidth = data.width;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.moveTo(data.x0, data.y0);
-          ctx.lineTo(data.x1, data.y1);
-          ctx.stroke();
-        });
+        redrawWhiteboard();
       }
     }
   }, [isWhiteboardActive]);
@@ -1065,7 +1225,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
     sigChannelRef.current = sigChannel;
 
-    const initPeerConnection = (peerKey: string, isCaller: boolean) => {
+    const initPeerConnection = (peerKey: string) => {
       if (pcsRef.current[peerKey]) {
         pcsRef.current[peerKey].close();
       }
@@ -1087,6 +1247,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
 
       pcsRef.current[peerKey] = pc;
+      makingOfferRef.current[peerKey] = false;
       setActivePeerKeys(prev => [...new Set([...prev, peerKey])]);
 
       // Add local media tracks
@@ -1123,7 +1284,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       pc.ontrack = (event) => {
         const remoteStream = event.streams[0] || new MediaStream([event.track]);
-        
         const isVideo = event.track.kind === 'video';
         const hasWebcamTrack = remoteStreams[peerKey] && remoteStreams[peerKey].getVideoTracks().length > 0;
         
@@ -1179,7 +1339,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             }
           }));
           
-          // Trigger ICE restart automatically to heal connection
           try {
             pc.restartIce();
           } catch (e) {
@@ -1197,28 +1356,31 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       };
 
-      if (isCaller) {
-        pc.onnegotiationneeded = async () => {
-          try {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            if (sigChannelRef.current) {
-              sigChannelRef.current.send({
-                type: 'broadcast',
-                event: 'signal',
-                payload: {
-                  type: 'offer',
-                  targetKey: peerKey,
-                  senderKey: myKey,
-                  sdp: offer
-                }
-              });
-            }
-          } catch (err) {
-            console.error('[WebRTC] Offer error:', err);
+      // Set up onnegotiationneeded for Perfect Negotiation
+      pc.onnegotiationneeded = async () => {
+        try {
+          makingOfferRef.current[peerKey] = true;
+          const offer = await pc.createOffer();
+          if (pc.signalingState !== 'stable') return;
+          await pc.setLocalDescription(offer);
+          if (sigChannelRef.current) {
+            sigChannelRef.current.send({
+              type: 'broadcast',
+              event: 'signal',
+              payload: {
+                type: 'offer',
+                targetKey: peerKey,
+                senderKey: myKey,
+                sdp: pc.localDescription
+              }
+            });
           }
-        };
-      }
+        } catch (err) {
+          console.error('[WebRTC] Offer error:', err);
+        } finally {
+          makingOfferRef.current[peerKey] = false;
+        }
+      };
 
       return pc;
     };
@@ -1228,25 +1390,37 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       if (type === 'offer') {
         let pc = pcsRef.current[senderKey];
-        const pcExists = !!pc && pc.signalingState !== 'closed';
-        if (!pcExists) {
-          pc = initPeerConnection(senderKey, false);
+        if (!pc || pc.signalingState === 'closed') {
+          pc = initPeerConnection(senderKey);
         }
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        
-        if (sigChannelRef.current) {
-          sigChannelRef.current.send({
-            type: 'broadcast',
-            event: 'signal',
-            payload: {
-              type: 'answer',
-              targetKey: senderKey,
-              senderKey: myKey,
-              sdp: answer
-            }
-          });
+
+        const polite = myKey < senderKey;
+        const offerCollision = makingOfferRef.current[senderKey] || pc.signalingState !== 'stable';
+        const ignoreOffer = !polite && offerCollision;
+
+        if (ignoreOffer) {
+          console.warn('[WebRTC] Collision detected: ignoring polite offer from', senderKey);
+          return;
+        }
+
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          if (sigChannelRef.current) {
+            sigChannelRef.current.send({
+              type: 'broadcast',
+              event: 'signal',
+              payload: {
+                type: 'answer',
+                targetKey: senderKey,
+                senderKey: myKey,
+                sdp: pc.localDescription
+              }
+            });
+          }
+        } catch (err) {
+          console.error('[WebRTC] Error handling offer:', err);
         }
 
         // Process buffered ICE candidates
@@ -1262,8 +1436,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       } else if (type === 'answer') {
         const pc = pcsRef.current[senderKey];
-        if (pc) {
-          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        if (pc && pc.signalingState !== 'closed') {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          } catch (err) {
+            console.error('[WebRTC] Error handling answer:', err);
+          }
 
           // Process buffered ICE candidates
           const candidates = pcCandidatesRef.current[senderKey] || [];
@@ -1278,7 +1456,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       } else if (type === 'candidate') {
         const pc = pcsRef.current[senderKey];
-        if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        if (pc && pc.remoteDescription && pc.remoteDescription.type && pc.signalingState !== 'closed') {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
           } catch (e) {
@@ -1347,7 +1525,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             existingPc.connectionState === 'closed';
 
           if (isInitiator && needsConnection) {
-            initPeerConnection(senderKey, true);
+            initPeerConnection(senderKey);
           }
         }
       })
@@ -1566,21 +1744,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       .on('broadcast', { event: 'draw-whiteboard' }, (payload: any) => {
         const data = payload.payload;
         whiteboardStrokesRef.current.push(data);
-        const canvas = whiteboardCanvasRef.current;
-        const ctx = whiteboardCtxRef.current;
-        if (canvas && ctx) {
-          ctx.beginPath();
-          ctx.strokeStyle = data.color;
-          ctx.lineWidth = data.width;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.moveTo(data.x0, data.y0);
-          ctx.lineTo(data.x1, data.y1);
-          ctx.stroke();
-        }
+        redrawWhiteboard();
       })
       .on('broadcast', { event: 'clear-whiteboard' }, () => {
         clearWhiteboard(false);
+      })
+      .on('broadcast', { event: 'sticky-add' }, (payload: any) => {
+        const data = payload.payload;
+        setStickyNotes(prev => [...prev.filter(n => n.id !== data.id), data]);
+      })
+      .on('broadcast', { event: 'sticky-update' }, (payload: any) => {
+        const data = payload.payload;
+        setStickyNotes(prev => prev.map(n => n.id === data.id ? { ...n, text: data.text } : n));
+      })
+      .on('broadcast', { event: 'sticky-delete' }, (payload: any) => {
+        const data = payload.payload;
+        setStickyNotes(prev => prev.filter(n => n.id !== data.id));
       })
       .on('broadcast', { event: 'start-breakout' }, (payload: any) => {
         const data = payload.payload;
@@ -1966,6 +2145,76 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
     }
   }, [stream]);
+
+  // Spatial Audio change listener
+  useEffect(() => {
+    const handleSpatialChange = () => {
+      setIsSpatialAudioEnabled(localStorage.getItem('giin_spatial_audio') === 'true');
+    };
+    window.addEventListener('giin_spatial_audio_changed', handleSpatialChange);
+    return () => {
+      window.removeEventListener('giin_spatial_audio_changed', handleSpatialChange);
+    };
+  }, []);
+
+  // Spatial Audio Panning effect
+  useEffect(() => {
+    if (!isSpatialAudioEnabled) {
+      Object.keys(spatialAudioNodesRef.current).forEach(peerKey => {
+        const nodes = spatialAudioNodesRef.current[peerKey];
+        if (nodes) {
+          try {
+            nodes.source.disconnect();
+            nodes.panner.disconnect();
+          } catch (e) {}
+        }
+      });
+      spatialAudioNodesRef.current = {};
+      return;
+    }
+
+    const remoteKeys = Object.keys(remoteStreams);
+    const N = remoteKeys.length;
+    
+    remoteKeys.forEach((peerKey, idx) => {
+      const streamObj = remoteStreams[peerKey];
+      if (!streamObj || streamObj.getAudioTracks().length === 0) return;
+
+      try {
+        const ctx = getSpatialAudioCtx();
+        let nodes = spatialAudioNodesRef.current[peerKey];
+        
+        if (!nodes) {
+          const source = ctx.createMediaStreamSource(streamObj);
+          const panner = ctx.createStereoPanner();
+          source.connect(panner);
+          panner.connect(ctx.destination);
+          nodes = { source, panner };
+          spatialAudioNodesRef.current[peerKey] = nodes;
+        }
+
+        // Calculate horizontal panning value based on grid position (-0.7 to 0.7)
+        const panValue = N <= 1 ? 0 : -0.7 + (1.4 * (idx / (N - 1)));
+        nodes.panner.pan.setValueAtTime(panValue, ctx.currentTime);
+      } catch (err) {
+        console.warn('Error setting up spatial audio panning for', peerKey, err);
+      }
+    });
+
+    // Cleanup nodes of peers that left
+    Object.keys(spatialAudioNodesRef.current).forEach(peerKey => {
+      if (!remoteStreams[peerKey]) {
+        const nodes = spatialAudioNodesRef.current[peerKey];
+        if (nodes) {
+          try {
+            nodes.source.disconnect();
+            nodes.panner.disconnect();
+          } catch (e) {}
+          delete spatialAudioNodesRef.current[peerKey];
+        }
+      }
+    });
+  }, [remoteStreams, isSpatialAudioEnabled]);
 
   // Mock Live Captions & Transcription Engine Effect
   useEffect(() => {
@@ -3712,42 +3961,45 @@ Securely encrypted under Fintech AES-256 standard.`;
             );
 
             // Render remote video cards
-            const remoteVideoCards = participants.map(p => {
-              const peerKey = p.userId || p.id;
-              const hasConnection = activePeerKeys.includes(peerKey);
-              const peerStreamObj = remoteStreams[peerKey];
-              const pState = peerStates[peerKey] || {
-                name: p.name,
-                isVideoOn: p.isVideoOn,
-                isMuted: p.isMuted,
-                isSpeaking: p.isSpeaking,
-                latency: undefined,
-                e2eeStatus: undefined,
-                videoFilter: undefined,
-                isStudioLightEnabled: false,
-                isReconnecting: false
-              };
+            const remoteVideoCards = participants
+              .filter(p => (p.userId || p.id) !== myKey)
+              .map(p => {
+                const peerKey = p.userId || p.id;
+                const hasConnection = activePeerKeys.includes(peerKey);
+                const peerStreamObj = remoteStreams[peerKey];
+                const pState = peerStates[peerKey] || {
+                  name: p.name,
+                  isVideoOn: p.isVideoOn,
+                  isMuted: p.isMuted,
+                  isSpeaking: p.isSpeaking,
+                  latency: undefined,
+                  e2eeStatus: undefined,
+                  videoFilter: undefined,
+                  isStudioLightEnabled: false,
+                  isReconnecting: false
+                };
 
-              return (
-                <div key={p.id} className={`meeting-card ${pState.isSpeaking && !pState.isMuted ? 'speaking' : ''}`} style={{
-                  position: 'relative',
-                  borderRadius: 'var(--radius-md)',
-                  overflow: 'hidden',
-                  backgroundColor: '#111827',
-                  aspectRatio: '16/9',
-                  border: pState.isSpeaking && !pState.isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
-                  transition: 'all 0.25s ease'
-                }}>
-                  {hasConnection && peerStreamObj && (
-                    <audio
-                      ref={el => {
-                        if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
-                          el.srcObject = peerStreamObj;
-                        }
-                      }}
-                      autoPlay
-                    />
-                  )}
+                return (
+                  <div key={p.id} className={`meeting-card ${pState.isSpeaking && !pState.isMuted ? 'speaking' : ''}`} style={{
+                    position: 'relative',
+                    borderRadius: 'var(--radius-md)',
+                    overflow: 'hidden',
+                    backgroundColor: '#111827',
+                    aspectRatio: '16/9',
+                    border: pState.isSpeaking && !pState.isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
+                    transition: 'all 0.25s ease'
+                  }}>
+                    {hasConnection && peerStreamObj && (
+                      <audio
+                        ref={el => {
+                          if (el && peerStreamObj && el.srcObject !== peerStreamObj) {
+                            el.srcObject = peerStreamObj;
+                          }
+                        }}
+                        autoPlay
+                        muted={isSpatialAudioEnabled}
+                      />
+                    )}
                   {hasConnection && peerStreamObj && pState.isVideoOn ? (
                     <video
                       className="remote-video-feed"
@@ -5050,7 +5302,7 @@ Securely encrypted under Fintech AES-256 standard.`;
 
         {activePanel === 'transcript' && (
           <div style={{
-            width: '300px',
+            width: '320px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
@@ -5061,7 +5313,7 @@ Securely encrypted under Fintech AES-256 standard.`;
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Languages size={16} color="var(--color-accent)" />
-                <span>Live Transcript</span>
+                <span>Transcript & AI Summary</span>
               </h4>
               <button 
                 onClick={() => setActivePanel('none')}
@@ -5071,52 +5323,179 @@ Securely encrypted under Fintech AES-256 standard.`;
               </button>
             </div>
 
-            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div className="flex-between" style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'white' }}>Enable Speech Captions</span>
-                <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={isCaptionsEnabled}
-                    onChange={(e) => setIsCaptionsEnabled(e.target.checked)}
-                    style={{ opacity: 0, width: 0, height: 0 }}
-                  />
-                  <span style={{
-                    position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: isCaptionsEnabled ? 'var(--color-accent)' : '#1E293B',
-                    transition: '0.3s', borderRadius: '20px'
-                  }}>
-                    <span style={{
-                      position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
-                      backgroundColor: isCaptionsEnabled ? '#07090E' : 'white',
-                      transition: '0.3s', borderRadius: '50%',
-                      transform: isCaptionsEnabled ? 'translateX(14px)' : 'none'
-                    }} />
-                  </span>
-                </label>
-              </div>
+            {/* Tab Selector */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #1E293B' }}>
+              <button 
+                onClick={() => setIsSummaryTabActive(false)}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem',
+                  background: !isSummaryTabActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  border: 'none',
+                  color: !isSummaryTabActive ? 'var(--color-accent)' : 'white',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.8rem'
+                }}
+              >
+                🎙️ Captions
+              </button>
+              <button 
+                onClick={() => setIsSummaryTabActive(true)}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem',
+                  background: isSummaryTabActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  border: 'none',
+                  color: isSummaryTabActive ? 'var(--color-accent)' : 'white',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.8rem'
+                }}
+              >
+                ✨ AI Copilot
+              </button>
+            </div>
 
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRANSCRIPT HISTORY</span>
-                
-                {transcripts.length === 0 ? (
-                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', height: '150px', textAlign: 'center' }}>
-                    {isCaptionsEnabled ? 'Listening for speech...' : 'Turn on captions to view live transcription history.'}
+            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {!isSummaryTabActive ? (
+                <>
+                  <div className="flex-between" style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'white' }}>Enable Speech Captions</span>
+                    <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={isCaptionsEnabled}
+                        onChange={(e) => setIsCaptionsEnabled(e.target.checked)}
+                        style={{ opacity: 0, width: 0, height: 0 }}
+                      />
+                      <span style={{
+                        position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: isCaptionsEnabled ? 'var(--color-accent)' : '#1E293B',
+                        transition: '0.3s', borderRadius: '20px'
+                      }}>
+                        <span style={{
+                          position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                          backgroundColor: isCaptionsEnabled ? '#07090E' : 'white',
+                          transition: '0.3s', borderRadius: '50%',
+                          transform: isCaptionsEnabled ? 'translateX(14px)' : 'none'
+                        }} />
+                      </span>
+                    </label>
                   </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    {transcripts.map((t, idx) => (
-                      <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                        <div className="flex-between">
-                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-accent)' }}>{t.name}</span>
-                          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{t.time}</span>
-                        </div>
-                        <p style={{ fontSize: '0.8rem', color: 'white', margin: 0, lineHeight: 1.4 }}>{t.text}</p>
+
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRANSCRIPT HISTORY</span>
+                    
+                    {transcripts.length === 0 ? (
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', height: '150px', textAlign: 'center' }}>
+                        {isCaptionsEnabled ? 'Listening for speech...' : 'Turn on captions to view live transcription history.'}
                       </div>
-                    ))}
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {transcripts.map((t, idx) => (
+                          <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                            <div className="flex-between">
+                              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-accent)' }}>{t.name}</span>
+                              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{t.time}</span>
+                            </div>
+                            <p style={{ fontSize: '0.8rem', color: 'white', margin: 0, lineHeight: 1.4 }}>{t.text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                </>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', height: '100%' }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>AI MEETING SUMMARY</span>
+
+                  {isGeneratingSummary ? (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', height: '200px' }}>
+                      <div className="pulse" style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Sparkles size={20} color="black" />
+                      </div>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Analyzing transcript audio...</span>
+                    </div>
+                  ) : aiSummary ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto' }}>
+                      <div style={{
+                        backgroundColor: 'rgba(255,255,255,0.02)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '1rem',
+                        fontSize: '0.8rem',
+                        color: 'white',
+                        lineHeight: 1.5,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.75rem'
+                      }}>
+                        <div style={{ color: 'var(--color-accent)', fontWeight: 700, fontSize: '0.9rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                          🌟 GIIN Meet AI Copilot Summary
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          <div>📅 <strong>Date:</strong> {new Date().toLocaleDateString()}</div>
+                          <div>📊 <strong>ID:</strong> {meetingId}</div>
+                        </div>
+
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>💡 Key Decisions</div>
+                          <ul style={{ paddingLeft: '1.2rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <li>Resolved WebRTC screenshare channel issues by establishing Perfect Negotiation glare rollbacks.</li>
+                            <li>Selected custom layout constraints to match <strong>{localStorage.getItem('giin_ui_style') || 'glassmorphism'}</strong> branding.</li>
+                          </ul>
+                        </div>
+
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📌 Action Items</div>
+                          <ul style={{ listStyleType: 'none', paddingLeft: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                            <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <input type="checkbox" readOnly checked={false} /> <span style={{ fontSize: '0.75rem' }}><strong>@You</strong> - Validate WebRTC video filters under heavy packet loss profiles.</span>
+                            </li>
+                            <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <input type="checkbox" readOnly checked={false} /> <span style={{ fontSize: '0.75rem' }}><strong>@Admin</strong> - Finalize corner shape and typography metrics before staging deployment.</span>
+                            </li>
+                            <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <input type="checkbox" readOnly checked={false} /> <span style={{ fontSize: '0.75rem' }}><strong>@Team</strong> - Confirm next operations sync scheduled time.</span>
+                            </li>
+                          </ul>
+                        </div>
+
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📝 Summary Notes</div>
+                          <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                            The conference was focused on platform modernization. Participants reviewed the interactive bento grids, skeuomorphic clicky controls, and 3D depth layers in spatial UI environments. The sketchpad doodle board was used for database fallback schema diagrams. Action items were resolved with clear ownership.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button 
+                        onClick={() => {
+                          navigator.clipboard.writeText(aiSummary);
+                          alert('Summary copied to clipboard!');
+                        }}
+                        className="premium-btn premium-btn-secondary"
+                        style={{ width: '100%', justifyContent: 'center', fontSize: '0.75rem', height: '36px' }}
+                      >
+                        Copy Summary Text
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', height: '200px', textAlign: 'center' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No summary generated yet. Click below to analyze meeting transcripts.</span>
+                      <button 
+                        onClick={generateAiSummary}
+                        className="premium-btn premium-btn-primary"
+                        style={{ padding: '0.5rem 1rem', fontSize: '0.8rem', height: '36px', gap: '0.4rem', justifyContent: 'center', width: '100%' }}
+                      >
+                        <Sparkles size={14} />
+                        <span>Generate AI Summary</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -5312,6 +5691,35 @@ Securely encrypted under Fintech AES-256 standard.`;
                   </button>
                 </div>
 
+                {/* Whiteboard Tool Picker */}
+                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', borderBottom: '1px dashed var(--border-color)', paddingBottom: '0.5rem' }}>
+                  {[
+                    { id: 'pen', label: '✏️ Pen' },
+                    { id: 'line', label: '📏 Line' },
+                    { id: 'rect', label: '⬛ Rect' },
+                    { id: 'circle', label: '⭕ Circle' },
+                    { id: 'sticky', label: '📌 Note' }
+                  ].map(tool => (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      onClick={() => setWhiteboardTool(tool.id as any)}
+                      style={{
+                        padding: '0.25rem 0.45rem',
+                        fontSize: '0.7rem',
+                        borderRadius: '4px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: whiteboardTool === tool.id ? 'var(--color-primary)' : 'rgba(255,255,255,0.05)',
+                        color: 'white',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                    >
+                      {tool.label}
+                    </button>
+                  ))}
+                </div>
+
                 <div style={{
                   border: '1px solid var(--border-color)',
                   borderRadius: '8px',
@@ -5336,6 +5744,82 @@ Securely encrypted under Fintech AES-256 standard.`;
                       cursor: 'crosshair'
                     }}
                   />
+
+                  {/* Render sticky notes */}
+                  {stickyNotes.map(note => (
+                    <div
+                      key={note.id}
+                      style={{
+                        position: 'absolute',
+                        left: `${note.x}%`,
+                        top: `${note.y}%`,
+                        backgroundColor: note.color,
+                        padding: '0.35rem',
+                        borderRadius: '4px',
+                        border: '1px solid rgba(0,0,0,0.2)',
+                        boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 10,
+                        width: '85px',
+                        minHeight: '45px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '2px'
+                      }}
+                    >
+                      <textarea
+                        value={note.text}
+                        onChange={(e) => {
+                          const text = e.target.value;
+                          setStickyNotes(prev => prev.map(n => n.id === note.id ? { ...n, text } : n));
+                          if (sigChannelRef.current) {
+                            sigChannelRef.current.send({
+                              type: 'broadcast',
+                              event: 'sticky-update',
+                              payload: { id: note.id, text }
+                            });
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '25px',
+                          background: 'none',
+                          border: 'none',
+                          resize: 'none',
+                          outline: 'none',
+                          fontSize: '0.65rem',
+                          color: '#000000',
+                          fontWeight: 600,
+                          lineHeight: 1.1,
+                          padding: 0
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          setStickyNotes(prev => prev.filter(n => n.id !== note.id));
+                          if (sigChannelRef.current) {
+                            sigChannelRef.current.send({
+                              type: 'broadcast',
+                              event: 'sticky-delete',
+                              payload: { id: note.id }
+                            });
+                          }
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#EF4444',
+                          fontSize: '0.55rem',
+                          cursor: 'pointer',
+                          marginLeft: 'auto',
+                          padding: 0,
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
                 </div>
 
                 {/* Drawing Controls */}

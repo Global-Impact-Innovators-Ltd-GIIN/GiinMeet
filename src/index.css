@@ -67,6 +67,173 @@
   --color-active-nav: var(--color-accent);
 }
 
+/* UI Style Brand Injectors */
+
+/* Liquid Glass Theme */
+[data-ui-style="liquid-glass"] {
+  --bg-app: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%);
+  --bg-sidebar: rgba(15, 23, 42, 0.4);
+  --bg-card: rgba(30, 41, 59, 0.4);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --glass-bg: rgba(15, 23, 42, 0.35);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-blur: 24px;
+}
+[data-ui-style="liquid-glass"] .meeting-card, 
+[data-ui-style="liquid-glass"] .app-sidebar, 
+[data-ui-style="liquid-glass"] .main-content-panel, 
+[data-ui-style="liquid-glass"] .premium-btn {
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  transition: all var(--transition-normal);
+}
+[data-ui-style="liquid-glass"] .premium-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 15px rgba(250, 189, 2, 0.4);
+}
+
+/* Bento Grid Theme */
+[data-ui-style="bento-grid"] {
+  --bg-app: #080b11;
+  --bg-card: #0f141f;
+  --border-color: #1e293b;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+}
+[data-ui-style="bento-grid"] .grid-layout,
+[data-ui-style="bento-grid"] .dashboard-grid {
+  gap: 1.25rem !important;
+  padding: 1.25rem !important;
+}
+[data-ui-style="bento-grid"] .meeting-card, 
+[data-ui-style="bento-grid"] .app-sidebar, 
+[data-ui-style="bento-grid"] .main-content-panel {
+  border: 2px solid var(--border-color);
+  box-shadow: 6px 6px 0px rgba(0, 0, 0, 0.4);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+[data-ui-style="bento-grid"] .meeting-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 8px 8px 0px var(--color-accent);
+}
+
+/* Spatial UI Theme */
+[data-ui-style="spatial-ui"] {
+  perspective: 1000px;
+  --bg-app: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+  --bg-card: rgba(17, 24, 39, 0.85);
+  --border-color: rgba(255, 255, 255, 0.05);
+}
+[data-ui-style="spatial-ui"] .meeting-card, 
+[data-ui-style="spatial-ui"] .app-sidebar, 
+[data-ui-style="spatial-ui"] .main-content-panel {
+  transform-style: preserve-3d;
+  transform: translateZ(0px);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(255, 255, 255, 0.05);
+  transition: transform 0.4s cubic-bezier(0.165, 0.84, 0.44, 1), box-shadow 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+[data-ui-style="spatial-ui"] .meeting-card:hover, 
+[data-ui-style="spatial-ui"] .premium-btn:hover {
+  transform: translateZ(15px) scale(1.02);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7), 0 0 20px rgba(59, 130, 246, 0.2);
+}
+
+/* Skeuomorphism Theme */
+[data-ui-style="skeuomorphism"] {
+  --bg-app: #1e222b;
+  --bg-card: #282c37;
+  --border-color: #3e4451;
+}
+[data-ui-style="skeuomorphism"] .meeting-card, 
+[data-ui-style="skeuomorphism"] .app-sidebar, 
+[data-ui-style="skeuomorphism"] .main-content-panel {
+  background: linear-gradient(145deg, #2b303b, #242832);
+  border: 1px solid #343a46;
+  box-shadow: 5px 5px 15px #15181e, -5px -5px 15px #2d323e;
+  border-radius: 14px;
+}
+[data-ui-style="skeuomorphism"] .premium-btn {
+  background: linear-gradient(145deg, #2e3442, #272b37);
+  box-shadow: 3px 3px 6px #161822, -3px -3px 6px #363c4c, inset 0 1px 0 rgba(255,255,255,0.06);
+  border: 1px solid #383f4f;
+  border-radius: 8px;
+  color: #cdd6f4;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  transition: all 0.15s ease;
+}
+[data-ui-style="skeuomorphism"] .premium-btn:active {
+  background: linear-gradient(145deg, #222631, #2b303c);
+  box-shadow: inset 3px 3px 6px #161822, inset -3px -3px 6px #363c4c;
+}
+
+/* Minimalism Theme */
+[data-ui-style="minimalism"] {
+  --bg-app: #ffffff;
+  --bg-sidebar: #fafafa;
+  --bg-card: #ffffff;
+  --border-color: #e5e5e5;
+  --text-main: #111111;
+  --text-muted: #737373;
+  --color-primary: #171717;
+  --color-accent: #171717;
+}
+[data-ui-style="minimalism"] .meeting-card, 
+[data-ui-style="minimalism"] .app-sidebar, 
+[data-ui-style="minimalism"] .main-content-panel {
+  border: 1px solid var(--border-color) !important;
+  box-shadow: none !important;
+  border-radius: 4px !important;
+  background: #ffffff !important;
+}
+[data-ui-style="minimalism"] .premium-btn {
+  background: #171717 !important;
+  color: #ffffff !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+[data-ui-style="minimalism"] .premium-btn:hover {
+  background: #404040 !important;
+}
+
+/* Maximalism Theme */
+[data-ui-style="maximalism"] {
+  --bg-app: #ff0055;
+  --bg-sidebar: #00ffcc;
+  --bg-card: #ffff00;
+  --border-color: #000000;
+  --text-main: #000000;
+  --text-muted: #111111;
+  --color-primary: #0000ff;
+  --color-accent: #ff00ff;
+}
+[data-ui-style="maximalism"] .meeting-card, 
+[data-ui-style="maximalism"] .app-sidebar, 
+[data-ui-style="maximalism"] .main-content-panel {
+  border: 3px solid #000000 !important;
+  box-shadow: 8px 8px 0px #000000 !important;
+  border-radius: 0px !important;
+  background: #ffff00 !important;
+  color: #000000 !important;
+}
+[data-ui-style="maximalism"] .premium-btn {
+  background: #00ffcc !important;
+  border: 3px solid #000000 !important;
+  box-shadow: 4px 4px 0px #000000 !important;
+  border-radius: 0px !important;
+  color: #000000 !important;
+  font-weight: 900 !important;
+  text-transform: uppercase;
+}
+[data-ui-style="maximalism"] .premium-btn:hover {
+  background: #ff00ff !important;
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0px #000000 !important;
+}
+
 /* Global Reset & Base Styling */
 html, body {
   height: 100%;
