@@ -52,5 +52,5 @@ To render vector whiteboard shapes (Line, Rect, Circle):
 ---
 
 ## 5. Security & Cryptography
-- DMs (Direct Messages) are end-to-end encrypted. Standard text is converted to cipher text before Supabase inserts.
+- DMs (Direct Messages) are encrypted with AES-GCM using a key derived from the channel ID before Supabase inserts. This is NOT end-to-end encryption: anyone who knows the channel ID can derive the same key. Media (audio/video) is protected by standard WebRTC transport encryption (DTLS-SRTP).
 - Whispers in group channels are formatted as `[WHISPER:targetUserId:text]`. Other peers' message loaders intercept this format and return `null` if the user is neither the sender nor the target recipient.

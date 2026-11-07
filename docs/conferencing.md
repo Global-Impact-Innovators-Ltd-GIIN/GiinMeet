@@ -56,12 +56,11 @@ if (ignoreOffer) return;
 Raw media streams are routed through a Web Audio node pipeline:
 
 ```
-MediaStreamAudioSourceNode ──> StereoPannerNode ──> GainNode (Noise Gate) ──> AudioContext.destination
+MediaStreamAudioSourceNode ──> StereoPannerNode ──> AudioContext.destination
 ```
 
 1. **3D Spatial Panning**: Based on a participant's horizontal grid position (offset from `-0.7` to `0.7`), the `StereoPannerNode` shifts their vocal track, creating a physical sense of layout spacing.
-2. **Noise Gate Gating**: Gain levels below a user-defined threshold (e.g., `-60 dB`) are immediately zeroed, filtering out local static noise or keyboard typing sounds.
-3. **Voice Modulations**: Frequency equalizers pitch-shift vocal signatures (normal, broadcast baritone, robot, studio crisp).
+2. **Audio enhancement**: The microphone uses the browser's built-in echo cancellation, noise suppression and automatic gain control. There is no noise gate and no voice pitch-shifting in the app.
 
 ---
 

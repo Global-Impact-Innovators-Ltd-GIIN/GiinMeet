@@ -84,10 +84,21 @@ export async function POST(req: NextRequest) {
       }, { status: 500 });
     }
 
-    // 4. Generate the LiveKit Access Token
-    const apiKey = process.env.LIVEKIT_API_KEY || 'devkey';
-    const apiSecret = process.env.LIVEKIT_API_SECRET || 'secret';
-    
+    // 4. Generate the LiveKit Access Token — the server credentials are
+    // required. There is no fallback: without them no valid token can be
+    // issued, so the request fails instead of minting a token that cannot
+    // connect or pointing the client at a wrong server.
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const livekitUrl = process.env.LIVEKIT_URL;
+    if (!apiKey || !apiSecret || !livekitUrl) {
+      console.error('[Token API] LiveKit is not configured: LIVEKIT_API_KEY, LIVEKIT_API_SECRET and LIVEKIT_URL must all be set.');
+      return NextResponse.json({
+        error: 'SERVER_MISCONFIGURED',
+        message: 'The video service is not configured on this server. Please contact the administrator.'
+      }, { status: 500 });
+    }
+
     // Default expiration: 2 hours (7200 seconds)
     const expireSeconds = 7200;
     const expiresAt = new Date(Date.now() + expireSeconds * 1000).toISOString();
@@ -113,7 +124,7 @@ export async function POST(req: NextRequest) {
       expiresAt,
       engine: room.current_engine || 'LIVEKIT',
       roomSlug: room.slug,
-      livekitUrl: process.env.LIVEKIT_URL || 'wss://giinmeet-livekit.lkt.cloud'
+      livekitUrl
     });
 
   } catch (err: any) {

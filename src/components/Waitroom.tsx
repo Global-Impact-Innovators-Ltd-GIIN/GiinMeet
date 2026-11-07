@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, ArrowLeft, Loader2, Sparkles, UserPlus, CheckCircle } from 'lucide-react';
-import { mockAuth, supabase } from '../supabaseClient';
+import { giinApi, supabase } from '../supabaseClient';
 
 interface WaitroomProps {
   meetingId: string;
@@ -32,14 +32,14 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const [displayName, setDisplayName] = useState(user?.name || '');
   const [participantId, setParticipantId] = useState<string>('');
   const [waitingStatus, setWaitingStatus] = useState<'Waiting' | 'Admitted' | 'Declined' | 'None'>('None');
-  const [guestKey] = useState(() => user?.id || 'guest-' + Math.random().toString(36).substring(2, 11));
+  const [guestKey] = useState(() => user?.id || crypto.randomUUID());
 
   // If already admitted once, bypass waitroom completely!
   useEffect(() => {
     if (localStorage.getItem(`admitted_meeting_${meetingId}`) === 'true') {
       const savedTitle = localStorage.getItem(`admitted_meeting_title_${meetingId}`) || 'GIIN MEET Call';
       const savedName = localStorage.getItem(`admitted_meeting_name_${meetingId}`) || displayName || user?.name || 'Guest';
-      onAdmitted(savedTitle, user?.id || 'guest-' + Math.random().toString(36).substring(2, 11), savedName);
+      onAdmitted(savedTitle, user?.id || guestKey, savedName);
     }
   }, [meetingId, onAdmitted, user]);
 
@@ -47,29 +47,14 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   useEffect(() => {
     const fetchDetails = async () => {
       try {
-        const { data, error } = await mockAuth.getMeetingDetails(meetingId);
+        const { data, error } = await giinApi.getMeetingDetails(meetingId);
         if (error || !data) {
           setErrorMsg('Meeting does not exist or has been deleted.');
         } else {
           setMeetingDetails(data);
-          // Auto-validate passcode so users never have to manually enter it when joining via link
-          setPasscodeValidated(true);
-
-          // If the meeting allows automatic join (bypass waiting room) and we have a name, admit immediately
-          if (data.require_waiting_room === false && (user?.name || displayName)) {
-            const finalName = user?.name || displayName || 'Participant';
-            setWaitingStatus('Admitted');
-            localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
-            localStorage.setItem(`admitted_meeting_title_${meetingId}`, data.title || 'GIIN MEET Call');
-            localStorage.setItem(`admitted_meeting_name_${meetingId}`, finalName);
-            onAdmitted(data.title || 'GIIN MEET Call', user?.id || guestKey, finalName);
-            return;
-          }
-
-          // If user is logged in, auto-join waitroom
-          if (user?.name) {
-            joinWaitingRoom(user.name, data.passcode);
-          }
+          // The passcode is never auto-accepted: the user must verify it (the
+          // field is pre-filled when they followed an invite link). A signed-in
+          // user still verifies the passcode before joining.
         }
       } catch (err) {
         console.error('Failed to load meeting details:', err);
@@ -91,7 +76,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     const checkStatus = async () => {
       if (!participantId || !active) return;
       try {
-        const status = await mockAuth.checkParticipantStatus(participantId);
+        const status = await giinApi.checkParticipantStatus(participantId);
         if (status === 'Admitted' && active) {
           setWaitingStatus('Admitted');
           localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
@@ -195,12 +180,13 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       }
 
       setWaitingStatus('Waiting');
-      const data = await mockAuth.joinMeetingRoom(meetingId, name, user?.id);
+      const data = await giinApi.joinMeetingRoom(meetingId, name, user?.id);
       if (data) {
         setParticipantId(data.id);
       }
-    } catch (err) {
-      console.warn('Database waitroom join failed, running in pure broadcast mode:', err);
+    } catch (err: any) {
+      console.error('Could not join the waiting room:', err);
+      setErrorMsg(`Could not join the waiting room: ${err?.message || 'please check your connection and try again.'}`);
     } finally {
       setLoading(false);
     }

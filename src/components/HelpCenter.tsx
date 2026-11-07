@@ -34,17 +34,17 @@ export const HelpCenter: React.FC = () => {
     {
       category: 'Meetings',
       question: 'How do I share my screen in an active meeting?',
-      answer: 'To share your screen, click the Monitor icon in the control bar at the bottom center of the active meeting room. You can simulate canvas presentation slides instantly.'
+      answer: 'To share your screen, click the Monitor icon in the control bar at the bottom center of the active meeting room. Your desktop window is then shared live with the other participants.'
     },
     {
       category: 'Billing',
       question: 'How do I upgrade my account to Pro?',
-      answer: 'Go to the Upgrade to Pro tab in the sidebar navigation, choose the tier (Pro or Enterprise), and follow the multi-step checkout wizard. Your account will be upgraded instantly.'
+      answer: 'Paid upgrades are coming soon. The Upgrade to Pro tab shows the Pro and Enterprise tiers for reference, but no payment is taken yet and no card details are collected.'
     },
     {
       category: 'Security',
       question: 'Are GIIN MEET video tunnels encrypted?',
-      answer: 'Yes! All calls, audio feeds, and text chat channels inside GIIN MEET use end-to-end security virtualization protocols. We do not store streams on servers.'
+      answer: 'Calls are protected by standard WebRTC transport encryption (DTLS-SRTP), and direct-message text is encrypted with AES-GCM using a key derived from the channel. This is not end-to-end encryption: there is no media end-to-end encryption in GIIN MEET yet. We do not store audio or video streams on servers.'
     },
     {
       category: 'General',
@@ -83,13 +83,13 @@ export const HelpCenter: React.FC = () => {
       let replyText = "I'm sorry, I didn't quite catch that. Could you please specify if you're asking about 'Pro upgrade', 'pricing', 'screen sharing', or 'security'?";
 
       if (questionText.includes('pro') || questionText.includes('upgrade') || questionText.includes('premium')) {
-        replyText = "To upgrade, navigate to the Billing tab. We offer two premium tiers: the Pro Plan at $9.99/mo (up to 300 participants) and the Enterprise Plan at $19.99/mo (up to 1000 participants). Checkout is secure and immediate!";
+        replyText = "Paid upgrades are coming soon. The Billing tab shows the Pro Plan ($9.99/mo, up to 300 participants) and the Enterprise Plan ($19.99/mo, up to 1000 participants) for reference, but no payment is taken yet.";
       } else if (questionText.includes('screen') || questionText.includes('share') || questionText.includes('monitor')) {
-        replyText = "During any active meeting, look at the bottom control bar and click the Monitor icon. This will activate a canvas-animated report presentation to simulate sharing your desktop window with other participants.";
+        replyText = "During any active meeting, look at the bottom control bar and click the Monitor icon. Your desktop window is then shared live with the other participants.";
       } else if (questionText.includes('price') || questionText.includes('cost') || questionText.includes('money')) {
-        replyText = "Our pricing is transparent: Pro is $9.99/mo and Enterprise is $19.99/mo. We support Credit/Debit Cards, PayPal, and Apple/Google Pay. You can complete this via the Billing sidebar panel.";
+        replyText = "Our pricing is transparent: Pro is $9.99/mo and Enterprise is $19.99/mo. Paid upgrades are coming soon — no payment method is connected yet, so nothing is charged.";
       } else if (questionText.includes('security') || questionText.includes('private') || questionText.includes('encrypt')) {
-        replyText = "All call audio/video streams use top-tier virtualization security. We establish point-to-point connections so that your team data remains completely encrypted and private.";
+        replyText = "Calls use standard WebRTC transport encryption (DTLS-SRTP), and direct messages are encrypted with AES-GCM using a key derived from the channel. This is not end-to-end encryption — there is no media end-to-end encryption in GIIN MEET yet.";
       } else if (questionText.includes('hello') || questionText.includes('hi') || questionText.includes('hey')) {
         replyText = "Hello! How can I help you today? Ask me anything about GIIN MEET functions or subscription billing.";
       }

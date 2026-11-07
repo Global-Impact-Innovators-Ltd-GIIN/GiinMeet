@@ -186,10 +186,7 @@ export const Settings: React.FC<SettingsProps> = ({
   const [micActive, setMicActive] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
-  const [noiseReduction, setNoiseReduction] = useState(true);
-  const [voicePitchProfile, setVoicePitchProfile] = useState('normal');
   const [isSpatialAudioEnabled, setIsSpatialAudioEnabled] = useState(() => localStorage.getItem('giin_spatial_audio') === 'true');
-  const [noiseGateThreshold, setNoiseGateThreshold] = useState(() => parseInt(localStorage.getItem('giin_noise_gate_threshold') || '-50', 10));
 
   const handleToggleSpatialAudio = (enabled: boolean) => {
     setIsSpatialAudioEnabled(enabled);
@@ -198,20 +195,13 @@ export const Settings: React.FC<SettingsProps> = ({
     triggerToast(`Spatial Audio ${enabled ? 'enabled' : 'disabled'}`);
   };
 
-  const handleUpdateNoiseGate = (value: number) => {
-    setNoiseGateThreshold(value);
-    localStorage.setItem('giin_noise_gate_threshold', value.toString());
-  };
-
   // Interactive keyboard shortcuts customizer states
   const [hotkeyMute, setHotkeyMute] = useState(() => localStorage.getItem('giin_hotkey_mute') || 'm');
   const [hotkeyCam, setHotkeyCam] = useState(() => localStorage.getItem('giin_hotkey_cam') || 'v');
   const [hotkeyChat, setHotkeyChat] = useState(() => localStorage.getItem('giin_hotkey_chat') || 'c');
   const [recordingHotkey, setRecordingHotkey] = useState<'mute' | 'cam' | 'chat' | null>(null);
 
-  // E2EE cryptography keys & sessions
-  const [publicKey, setPublicKey] = useState('');
-  const [privateKey, setPrivateKey] = useState('');
+  // Active device sessions
   const [activeSessions, setActiveSessions] = useState([
     { id: '1', os: 'Windows 11', browser: 'Google Chrome', ip: '192.168.1.108', active: true, location: 'Local Network' },
     { id: '2', os: 'macOS Sequoia', browser: 'Safari Browser', ip: '104.244.75.13', active: false, location: 'New York, USA' },
@@ -256,17 +246,6 @@ export const Settings: React.FC<SettingsProps> = ({
     setTiktok(userSocialHandles.tiktok || '');
     setGithub(userSocialHandles.github || '');
   }, [userName, userEmail, userPhone, userRole, userTimezone, userLocation, userSkills, userWorkspaceName, userDomain, userSocialHandles]);
-
-  // Generate E2EE Keys
-  useEffect(() => {
-    const generateHex = (length: number) => {
-      const arr = new Uint8Array(length / 2);
-      window.crypto.getRandomValues(arr);
-      return Array.from(arr, dec => dec.toString(16).padStart(2, '0')).join('');
-    };
-    setPublicKey(`SHA-256: ${generateHex(64)}`);
-    setPrivateKey(`AES-GCM: ${generateHex(48)}`);
-  }, []);
 
   // Cleanup media streams and animation frames
   useEffect(() => {
@@ -666,18 +645,6 @@ export const Settings: React.FC<SettingsProps> = ({
     draw();
   };
 
-  // E2EE rotates key signatures
-  const handleRotateKeys = () => {
-    const generateHex = (length: number) => {
-      const arr = new Uint8Array(length / 2);
-      window.crypto.getRandomValues(arr);
-      return Array.from(arr, dec => dec.toString(16).padStart(2, '0')).join('');
-    };
-    setPublicKey(`SHA-256: ${generateHex(64)}`);
-    setPrivateKey(`AES-GCM: ${generateHex(48)}`);
-    triggerToast('E2EE Cryptographic Keychains Rotated Successfully!');
-  };
-
   const handleRevokeSession = (sessionId: string) => {
     setActiveSessions(prev => prev.filter(s => s.id !== sessionId));
     triggerToast('Active Session terminated successfully.');
@@ -699,7 +666,7 @@ export const Settings: React.FC<SettingsProps> = ({
         ...prev,
         `[PING] Supabase Endpoint resolved in ${duration}ms (Optimal connection)`,
         `[DB] Cache sync response -> 200 OK (Profiles table read verified)`,
-        `[SYS] Security handshake active with E2EE modules`,
+        `[SYS] Transport encryption active (DTLS-SRTP)`,
         `[STATUS] System health is currently 100% OPERATIONAL`
       ]);
     } catch (err: any) {
@@ -720,7 +687,7 @@ export const Settings: React.FC<SettingsProps> = ({
       profile: { name, email, phone, role, location, timezone, skills: userSkills },
       workspace: { workspaceName, domain, gatedRegistration, directoryVisible, guestWaitroomGating },
       aesthetics: { accentColor, glassOpacity, layoutStyle, meetingWatermark },
-      security: { publicKey, activeSessions },
+      security: { activeSessions },
       exportedAt: new Date().toISOString()
     };
 
@@ -735,7 +702,7 @@ export const Settings: React.FC<SettingsProps> = ({
   };
 
   const handleClearCache = () => {
-    if (window.confirm("Are you sure you want to flush all local storage configurations? This will clear E2EE layouts and local caches, but will keep remote profiles intact.")) {
+    if (window.confirm("Are you sure you want to flush all local storage configurations? This will clear local layout and cache settings, but will keep remote profiles intact.")) {
       localStorage.clear();
       triggerToast('Local cache cleared! Reloading system engine...');
       setTimeout(() => window.location.reload(), 1500);
@@ -747,9 +714,9 @@ export const Settings: React.FC<SettingsProps> = ({
     { id: 'profile', name: 'Profile Settings', icon: User, desc: 'Display details & contact info' },
     { id: 'branding', name: 'Branding & Layout', icon: ImageIcon, desc: 'Themes, custom logos, watermarks' },
     { id: 'workspace', name: 'Workspace Admin', icon: Globe, desc: 'Subdomains, limits & exports' },
-    { id: 'devices', name: 'Hardware & Noise', icon: Video, desc: 'A/V testing, RNNoise suppressor' },
+    { id: 'devices', name: 'Hardware & Audio', icon: Video, desc: 'A/V testing & audio enhancement' },
     { id: 'shortcuts', name: 'Shortcuts Manager', icon: Keyboard, desc: 'Custom keyboard productivity bindings' },
-    { id: 'security', name: 'E2EE Vault & Logins', icon: Shield, desc: 'Key chains & active device logs' },
+    { id: 'security', name: 'Connection Security & Logins', icon: Shield, desc: 'Transport encryption & active device logs' },
     { id: 'diagnostics', name: 'System Telemetry', icon: Terminal, desc: 'Pings, scrolling terminals, CPU graphs' },
     { id: 'notifications', name: 'Notifications', icon: Bell, desc: 'Alert channels & push filters' },
     { id: 'meetings', name: 'Meeting Defaults', icon: Sliders, desc: 'Microphone & camera preset switches' },
@@ -1318,7 +1285,7 @@ export const Settings: React.FC<SettingsProps> = ({
               {/* Data Portability Tools */}
               <div style={{ border: '1.5px dashed var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-primary)' }}>Workspace Data Portability & Resets</span>
-                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Export your profile records, E2EE keys, and aesthetic settings, or clear temporary local storage configurations.</span>
+                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Export your profile records and aesthetic settings, or clear temporary local storage configurations.</span>
                 
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button type="button" onClick={handleExportWorkspace} className="premium-btn premium-btn-primary" style={{ flex: 1, fontSize: '0.75rem', gap: '4px', justifyContent: 'center' }}>
@@ -1344,7 +1311,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {activeCategory === 'devices' && (
           <div>
             <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Audio, Video & Filters</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Manage hardware inputs, test microphones, toggle RNNoise suppression, and adjust vocal pitch profiles.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Manage hardware inputs, test microphones, and adjust audio enhancement.</p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -1380,15 +1347,9 @@ export const Settings: React.FC<SettingsProps> = ({
 
               {/* Audio enhancement filters */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-primary)' }}>Audio Suppression & Voice Filters</span>
+                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-primary)' }}>Audio Settings</span>
                 
-                <label style={{ display: 'flex', alignItems: 'center', justifySelf: 'space-between', cursor: 'pointer', fontSize: '0.8rem' }}>
-                  <input type="checkbox" checked={noiseReduction} onChange={() => setNoiseReduction(!noiseReduction)} style={{ marginRight: '8px' }} />
-                  <div>
-                    <strong style={{ display: 'block' }}>Activate RNNoise Suppression Gating</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Dynamically suppress background echoes, clicks, and white noise elements.</span>
-                  </div>
-                </label>
+
 
                 {/* Spatial Audio Toggle */}
                 <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
@@ -1401,34 +1362,6 @@ export const Settings: React.FC<SettingsProps> = ({
                   </label>
                 </div>
 
-                {/* Noise Gate Threshold */}
-                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
-                  <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Noise Gate Threshold ({noiseGateThreshold} dB)</label>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="-100" 
-                    max="0" 
-                    value={noiseGateThreshold} 
-                    onChange={(e) => handleUpdateNoiseGate(parseInt(e.target.value, 10))} 
-                    style={{ width: '100%', cursor: 'pointer', accentColor: 'var(--color-primary)' }} 
-                  />
-                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.15rem' }}>
-                    Signals below this volume level will be muted to eliminate breathing or room hum.
-                  </span>
-                </div>
-
-                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Vocal Equalizer Pitch Profile</label>
-                  <select value={voicePitchProfile} onChange={(e) => { setVoicePitchProfile(e.target.value); triggerToast(`Vocal profile set to ${e.target.value}`); }} className="premium-input" style={{ width: '100%' }}>
-                    <option value="normal">Normal Vocal Pitch (Default)</option>
-                    <option value="baritone">Deep Broadcast Baritone (Low Enhances)</option>
-                    <option value="robotic">Robotic Echo Pitch (WebRTC filter preview)</option>
-                    <option value="high">High Echo Studio (Upper Gain)</option>
-                    <option value="alien">Alien Voice Pitch (Pitch Shift Alteration)</option>
-                  </select>
-                </div>
               </div>
 
               {/* Live Webcam & Microphone decibels tests */}
@@ -1543,42 +1476,21 @@ export const Settings: React.FC<SettingsProps> = ({
           </div>
         )}
 
-        {/* Category Panel: E2EE Vault & Logins */}
+        {/* Category Panel: Connection Security & Logins */}
         {activeCategory === 'security' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>E2EE Cryptography & Active Logins</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Review end-to-end encryption keychains, rotate cryptographic tokens, and manage active device sessions.</p>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Connection Security & Active Logins</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Review how your calls and messages are protected, and manage active device sessions.</p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px' }}>
               <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Shield size={20} color="var(--color-primary)" />
                   <div>
-                    <strong style={{ display: 'block', fontSize: '0.9rem' }}>End-to-End Encryption (E2EE) Keychain</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Your direct chat messages are client-side encrypted before network transmission.</span>
+                    <strong style={{ display: 'block', fontSize: '0.9rem' }}>How your calls and messages are protected</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Calls use standard WebRTC transport encryption (DTLS-SRTP). Direct messages are encrypted with AES-GCM using a key derived from the channel. This is not end-to-end encryption — there is no media end-to-end encryption in GIIN MEET yet.</span>
                   </div>
                 </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontFamily: 'monospace', fontSize: '0.75rem', backgroundColor: '#090D16', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                  <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Public Key: </span>
-                    <span style={{ color: 'var(--color-accent)' }}>{publicKey}</span>
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Private Key: </span>
-                    <span style={{ color: '#EF4444' }}>{privateKey}</span>
-                  </div>
-                </div>
-
-                <button 
-                  type="button"
-                  onClick={handleRotateKeys} 
-                  className="premium-btn premium-btn-primary" 
-                  style={{ alignSelf: 'flex-start', fontSize: '0.75rem', gap: '0.35rem' }}
-                >
-                  <RefreshCw size={12} />
-                  <span>Rotate Cryptographic Keychains</span>
-                </button>
               </div>
 
               {/* Active Sessions Lists */}

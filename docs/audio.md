@@ -15,15 +15,10 @@ When remote audio streams are added:
 
 ---
 
-## 2. Decibel Noise Gate
-Eliminates breathing, clicks, and background hum:
-- A threshold state `noiseGateThreshold` (values `-100 dB` to `0 dB`) is registered.
-- Signals below this decibel value are gain-scaled to `0` (muted).
+## 2. Audio enhancement (no noise gate)
+There is no noise gate in the app. Microphone audio uses the browser's built-in echo cancellation, noise suppression and automatic gain control.
 
 ---
 
-## 3. Equalizer Pitch Profiles
-Custom filter frequencies shift vocal pitches:
-- **Baritone**: Boosts low-mid frequencies (100 Hz - 250 Hz) for a deep broadcast tone.
-- **High**: Amplifies upper gains (2 kHz - 5 kHz) for crisp vocals.
-- **Robotic / Alien**: Connects delay and feedback loop nodes to distort pitch frequencies.
+## 3. Voice pitch profiles — removed
+Voice pitch profiles (baritone, high, robotic, alien) were removed: no pitch-shifting is implemented.

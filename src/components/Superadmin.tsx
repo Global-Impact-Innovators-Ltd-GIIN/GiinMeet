@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Video, DollarSign, Activity, Trash2, Shield, ShieldCheck, CreditCard, Search, CheckCircle } from 'lucide-react';
-import { mockAuth } from '../supabaseClient';
+import { giinApi } from '../supabaseClient';
 
 interface Profile {
   id: string;
@@ -26,9 +26,9 @@ export const Superadmin: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const profiles = await mockAuth.getAllProfiles();
+      const profiles = await giinApi.getAllProfiles();
       setUsers(profiles);
-      const meets = await mockAuth.getAllMeetings();
+      const meets = await giinApi.getAllMeetings();
       setMeetingsCount(meets.length);
 
       // Generate dynamic payments list based on actual Pro members in profiles
@@ -70,7 +70,7 @@ export const Superadmin: React.FC = () => {
   // Toggle Superadmin Role
   const handleToggleAdmin = async (userId: string, currentVal: boolean) => {
     try {
-      await mockAuth.updateProfileSuperadmin(userId, !currentVal);
+      await giinApi.updateProfileSuperadmin(userId, !currentVal);
       triggerToast(`Superadmin status updated successfully.`);
       loadData();
     } catch (err) {
@@ -81,7 +81,7 @@ export const Superadmin: React.FC = () => {
   // Toggle Premium Tier
   const handleTogglePremium = async (userId: string, currentVal: boolean) => {
     try {
-      await mockAuth.toggleProfilePremium(userId, !currentVal);
+      await giinApi.toggleProfilePremium(userId, !currentVal);
       triggerToast(`User subscription tier updated successfully.`);
       loadData();
     } catch (err) {
@@ -93,7 +93,7 @@ export const Superadmin: React.FC = () => {
   const handleDeleteUser = async (userId: string) => {
     if (!confirm('Are you sure you want to delete this user profile? This action is permanent.')) return;
     try {
-      await mockAuth.deleteProfile(userId);
+      await giinApi.deleteProfile(userId);
       triggerToast(`User profile deleted successfully.`);
       loadData();
     } catch (err) {

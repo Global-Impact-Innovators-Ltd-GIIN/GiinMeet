@@ -1,4 +1,11 @@
-// E2EE Service using Web Crypto API (AES-GCM 256-bit encryption)
+// Direct-message content protection (AES-GCM).
+//
+// Honest scope: this is NOT end-to-end encryption. The symmetric key is
+// derived from the channel/thread ID, so anyone who knows the thread ID can
+// derive the same key. What it does is keep message content unreadable in the
+// database and in transit to anyone who does not know the channel. Media
+// (audio/video) is protected by standard WebRTC transport encryption
+// (DTLS-SRTP) — there is no media end-to-end encryption in this app.
 
 // Helper to convert array buffer to hex string
 const bufferToHex = (buffer: ArrayBuffer): string => {
@@ -93,70 +100,6 @@ export const decryptMessage = async (encryptedText: string, channelSeed: string)
     return dec.decode(decryptedBuffer);
   } catch (err) {
     console.warn('[E2EE Service] Decryption failed (possibly wrong key or corrupt data):', err);
-    return '[Decryption Error: Secure handshake mismatch]';
+    return '[Decryption Error: message could not be decrypted]';
   }
 };
-
-// WebRTC Insertable Streams Frame transform encryption
-export const encryptFrame = (chunk: any, controller: any, keySeed: string) => {
-  const data = chunk.data;
-  // Payload header offsets to avoid corrupting RTP/codec headers:
-  // - Video: offset by 10 bytes (leaves VP8 keyframe/metadata untouched)
-  // - Audio: offset by 4 bytes (leaves Opus packet config untouched)
-  const offset = chunk.type === 'audio' ? 4 : 10;
-  if (data.byteLength <= offset) {
-    controller.enqueue(chunk);
-    return;
-  }
-
-  try {
-    const keyBytes = new TextEncoder().encode(keySeed);
-    const u8 = new Uint8Array(data);
-    
-    // Create a new buffer to avoid direct modification errors on read-only buffers
-    const newBuffer = new ArrayBuffer(data.byteLength);
-    const newData = new Uint8Array(newBuffer);
-    newData.set(u8);
-    
-    for (let i = offset; i < newData.length; i++) {
-      newData[i] ^= keyBytes[(i - offset) % keyBytes.length];
-    }
-    
-    chunk.data = newBuffer;
-  } catch (err) {
-    console.warn('[E2EE] encryptFrame failed, bypassing encryption for this frame:', err);
-  }
-  
-  controller.enqueue(chunk);
-};
-
-// WebRTC Insertable Streams Frame transform decryption (XOR is symmetric)
-export const decryptFrame = (chunk: any, controller: any, keySeed: string) => {
-  const data = chunk.data;
-  const offset = chunk.type === 'audio' ? 4 : 10;
-  if (data.byteLength <= offset) {
-    controller.enqueue(chunk);
-    return;
-  }
-
-  try {
-    const keyBytes = new TextEncoder().encode(keySeed);
-    const u8 = new Uint8Array(data);
-    
-    // Create a new buffer to avoid direct modification errors on read-only buffers
-    const newBuffer = new ArrayBuffer(data.byteLength);
-    const newData = new Uint8Array(newBuffer);
-    newData.set(u8);
-    
-    for (let i = offset; i < newData.length; i++) {
-      newData[i] ^= keyBytes[(i - offset) % keyBytes.length];
-    }
-    
-    chunk.data = newBuffer;
-  } catch (err) {
-    console.warn('[E2EE] decryptFrame failed, bypassing decryption for this frame:', err);
-  }
-  
-  controller.enqueue(chunk);
-};
-

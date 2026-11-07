@@ -7,10 +7,10 @@ GIIN Meet is a high-performance, premium virtual workspace designed for zero-dro
 ## 🚀 Key Premium Features
 
 - **Perfect Negotiation WebRTC Mesh**: Eliminates offer collisions (glare) and screen-share renegotiation errors.
-- **3D Spatial Audio**: Horizontally pans remote voices matching layout coordinates, complemented by decibel-based noise gates and voice pitch modulators.
-- **AI Transcript Companion**: Live speech captions side-by-side with an AI Copilot summary cards engine.
+- **3D Spatial Audio**: Horizontally pans remote voices matching layout coordinates.
+- **Live speech captions**: Browser Web Speech API captions in the meeting. AI summaries are not available yet — no transcription service is connected.
 - **Advanced Collaborative Whiteboard**: Real-time whiteboard supporting freehand sketches, straight lines, rectangles, circles, and draggable sticky notes.
-- **Security & Chat Upgrades**: End-to-end encrypted direct messages, secure whispers in group rooms, rich Markdown text toolbar, and inline base64 PDF attachment previews.
+- **Security & Chat Upgrades**: Direct messages encrypted with AES-GCM using a channel-derived key (not end-to-end encryption), whispers in group rooms, rich Markdown text toolbar, and inline base64 PDF attachment previews.
 - **10 Brand UI Styling Themes**: Select globally between *Glassmorphism*, *Neumorphism*, *Cyberpunk Glow*, *Flat Minimal*, *Liquid Glass*, *Bento Grid*, *Spatial UI*, *Skeuomorphism*, *Minimalism*, and *Maximalism*.
 
 ---

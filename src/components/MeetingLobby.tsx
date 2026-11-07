@@ -106,7 +106,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10B981', fontSize: '0.8rem', fontWeight: 700 }}>
           <ShieldCheck size={16} />
-          <span>SECURE END-TO-END ENCRYPTED MEETING</span>
+          <span>SECURE ENCRYPTED MEETING · DTLS-SRTP</span>
         </div>
       </div>
 
@@ -340,7 +340,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
                 </button>
               </div>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                Passcode is integrated into link for instant access.
+                The passcode is included in the link; guests still verify it before joining.
               </span>
             </div>
 
@@ -372,7 +372,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span>Fintech-Standard AES-256 GCM Cryptography</span>
+              <span>Media encrypted in transit (DTLS-SRTP)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10B981' }} />
@@ -380,7 +380,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span>Real-Time WebRTC Peer Network Infrastructure</span>
+              <span>LiveKit-powered video infrastructure</span>
             </div>
           </div>
 

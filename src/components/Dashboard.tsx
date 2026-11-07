@@ -308,7 +308,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <button 
                         onClick={() => {
-                          const shareableLink = `${window.location.origin}/#/join?id=${meeting.id}&passcode=${meeting.passcode || 'ABCD'}`;
+                          const shareableLink = `${window.location.origin}/#/join?id=${meeting.id}&passcode=${meeting.passcode || ''}`;
                           navigator.clipboard.writeText(shareableLink);
                           setCopiedHistoryId(meeting.id);
                           setTimeout(() => setCopiedHistoryId(null), 2000);
@@ -690,7 +690,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div>
                   <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Passcode</span>
                   <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-accent)' }}>
-                    {scheduledMeetingDetails.passcode || 'ABCD'}
+                    {scheduledMeetingDetails.passcode || '—'}
                   </div>
                 </div>
               </div>
@@ -705,11 +705,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   readOnly 
                   className="premium-input"
                   style={{ fontSize: '0.8rem', backgroundColor: 'rgba(0,0,0,0.1)', flex: 1 }}
-                  value={`${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || 'ABCD'}`}
+                  value={`${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || '—'}`}
                 />
                 <button
                   onClick={() => {
-                    const link = `${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || 'ABCD'}`;
+                    const link = `${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || '—'}`;
                     navigator.clipboard.writeText(link);
                     setCopiedSuccessId('link');
                     setTimeout(() => setCopiedSuccessId(null), 2000);
@@ -726,7 +726,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {/* Copy Invitation Details Button */}
             <button
               onClick={() => {
-                const link = `${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || 'ABCD'}`;
+                const link = `${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || '—'}`;
                 const timeStr = (() => {
                   try {
                     return new Date(scheduledMeetingDetails.time).toLocaleString();
@@ -741,9 +741,9 @@ Time: ${timeStr}
 Join Meeting Link: ${link}
 
 Meeting ID: ${scheduledMeetingDetails.id}
-Passcode: ${scheduledMeetingDetails.passcode || 'ABCD'}
+Passcode: ${scheduledMeetingDetails.passcode || '—'}
 
-Securely encrypted under Fintech AES-256 standard.`;
+Media encrypted in transit (DTLS-SRTP).`;
                 navigator.clipboard.writeText(invitation);
                 setCopiedSuccessId('details');
                 setTimeout(() => setCopiedSuccessId(null), 2000);

@@ -57,7 +57,7 @@ export const stopRingSound = () => {
   }
 };
 
-// Handshake E2EE confirmation chime
+// Handshake confirmation chime (silenced)
 export const playHandshakeConfirmSound = () => {
   // Permanently silenced to prevent annoying background noise
 };
@@ -96,7 +96,7 @@ export const getWebRTCScreenshareConstraints = () => {
   };
 };
 
-import { mockAuth, supabase, getDeterministicPasscode } from '../supabaseClient';
+import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode } from '../supabaseClient';
 
 // Helper functions defined outside the component to satisfy purity rules
 const generateRandomId = () => {
@@ -132,7 +132,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   isMinimized = false,
   onMinimizeToggle
 }) => {
-  const [showE2EEPannel, setShowE2EEPannel] = useState(false);
   const sigChannelRef = useRef<any>(null);
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -150,7 +149,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isAnnotating, setIsAnnotating] = useState(false);
-  const [isColleagueSharing, setIsColleagueSharing] = useState(false);
   const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings' | 'polls' | 'filters' | 'soundboard' | 'info' | 'transcript'>('none');
   const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
   const [showMeetingInfo, setShowMeetingInfo] = useState(false);
@@ -159,7 +157,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const [meetingAdminId, setMeetingAdminId] = useState<string>('');
-  const [passcode, setPasscode] = useState<string>(() => getDeterministicPasscode(meetingId));
+  const [passcode, setPasscode] = useState<string>(() => generateMeetingPasscode());
   const [isMediaInitialized, setIsMediaInitialized] = useState(false);
   const [waitingList, setWaitingList] = useState<any[]>([]);
   const [initialNotes, setInitialNotes] = useState<string>('');
@@ -237,7 +235,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [chatInput, setChatInput] = useState('');
   const [participants, setParticipants] = useState<Participant[]>([]);
 
-  const [myKey] = useState(() => currentUser?.id || 'guest-user-' + generateRandomId());
+  // Guests have no signed-in account, so they get a stable random UUID for
+  // this visit. It must be a UUID: the token route registers the participant
+  // by user_id, and a non-UUID guest key broke that upsert.
+  const [myKey] = useState(() => currentUser?.id || crypto.randomUUID());
   const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
   const initPeerConnectionRef = useRef<((peerKey: string, forceAudioOnly?: boolean) => void) | null>(null);
   const makingOfferRef = useRef<{ [peerKey: string]: boolean }>({});
@@ -263,7 +264,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       isScreenSharing: boolean; 
       isSpeaking: boolean;
       latency?: number; 
-      e2eeStatus?: 'secure' | 'unsupported';
       videoFilter?: string;
       isStudioLightEnabled?: boolean;
       isReconnecting?: boolean;
@@ -276,6 +276,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Persistent banner shown whenever the call is running peer-to-peer because
+  // the LiveKit server could not be reached. A degraded connection is never
+  // silent: the user must know video quality may be lower.
+  const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
   const triggerToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
@@ -283,18 +287,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }, 4000);
   };
 
-  const getEnv = (key: string): string | undefined => {
-    if (typeof process !== 'undefined' && process.env && process.env[key]) {
-      return process.env[key];
-    }
-    try {
-      const metaEnv = (import.meta as any).env;
-      if (metaEnv && metaEnv[key]) {
-        return metaEnv[key];
-      }
-    } catch (e) {}
-    return undefined;
-  };
 
   const participantsRef = useRef<Participant[]>([]);
   useEffect(() => {
@@ -410,19 +402,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  const deriveE2EESeal = (id: string) => {
-    let hashVal = 5381;
-    for (let i = 0; i < id.length; i++) {
-      hashVal = ((hashVal << 5) + hashVal) + id.charCodeAt(i);
-    }
-    const formatted = [];
-    for (let i = 0; i < 12; i++) {
-      const seed = Math.abs(Math.sin(hashVal + i) * 100000);
-      formatted.push(Math.floor(seed).toString().padEnd(5, '0').substring(0, 5));
-    }
-    return formatted.join(' ');
-  };
-
   // Relocated states to consolidated top block
 
   // Connect to LiveKit SFU Engine
@@ -432,11 +411,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     let active = true;
     const connectToLiveKit = async () => {
       try {
+        // Find (or create) the LiveKit room for this meeting, then request a
+        // token for that room. The token route looks the room up by its slug —
+        // a meeting ID on its own is not a room.
+        const videoRoom = await ensureMeetingRoom(meetingId, meetingTitle, currentUser?.id);
+        if (!videoRoom) {
+          throw new Error('ROOM_NOT_FOUND');
+        }
+
         const res = await fetch('/api/livekit/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            roomId: meetingId,
+            roomSlug: videoRoom.slug,
             userId: myKey,
             userName: currentUser?.name || 'Guest',
             role: isAdmin ? 'HOST' : 'GUEST'
@@ -446,9 +433,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (!active) return;
         const data = await res.json();
         if (data.error === 'MAX_CAPACITY_REACHED') {
+          setConnectionNotice('This meeting room is full. You are connected peer-to-peer instead — video quality may be lower.');
           setEngineType('P2P');
           triggerToast('LiveKit room capacity limit reached. Swapped to P2P Mesh engine.');
           return;
+        }
+        if (data.error || !data.token) {
+          throw new Error(data.message || data.error || 'Could not get a video token.');
         }
 
         const { token, expiresAt: tokenExpiry, livekitUrl: serverLivekitUrl } = data;
@@ -486,7 +477,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           });
         });
 
-        const livekitUrl = serverLivekitUrl || getEnv('LIVEKIT_URL') || 'wss://giinmeet-livekit.lkt.cloud';
+        const livekitUrl = serverLivekitUrl;
+        if (!livekitUrl) {
+          throw new Error('The video server address is missing.');
+        }
         await room.connect(livekitUrl, token);
         triggerToast('Connected to LiveKit SFU engine.');
 
@@ -497,10 +491,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (audioTrack) await room.localParticipant.publishTrack(audioTrack);
         }
 
-      } catch (err) {
-        console.warn('[LiveKit Engine] Failed to connect, falling back to P2P Mesh:', err);
+      } catch (err: any) {
+        console.warn('[LiveKit Engine] Could not connect to the video server:', err);
+        // The call still works peer-to-peer, but the user must be told it is
+        // degraded — never a silent downgrade.
+        setConnectionNotice(
+          err?.message === 'ROOM_NOT_FOUND'
+            ? 'The video room for this meeting could not be found. The meeting may need to be re-created, or the rooms setup is incomplete — you are connected peer-to-peer instead.'
+            : `Could not connect to the video server (${err?.message || 'unknown error'}). You are connected peer-to-peer instead — video quality may be lower.`
+        );
         setEngineType('P2P');
-        triggerToast('LiveKit SFU connection failed. Swapped to P2P Mesh.');
+        triggerToast('LiveKit connection failed. Swapped to P2P Mesh.');
       }
     };
 
@@ -522,6 +523,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const timeDiff = new Date(expiresAt).getTime() - Date.now();
         if (timeDiff <= 30000 && timeDiff > 0 && !transitionPending) {
           setTransitionPending(true);
+          setConnectionNotice('Your video token is expiring. You are connected peer-to-peer instead — video quality may be lower.');
           triggerToast('LiveKit token expiring soon. Swapping seamlessly to P2P Mesh...');
           
           if (sigChannelRef.current) {
@@ -671,7 +673,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const lastPosRef = useRef({ x: 0, y: 0 });
   const whiteboardStrokesRef = useRef<{x0: number, y0: number, x1: number, y1: number, color: string, width: number}[]>([]);
 
-  // Virtual Breakout Rooms States
+  // Breakout Rooms States
   // Relocated states to top block
 
   const getSpatialAudioCtx = () => {
@@ -1054,30 +1056,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     link.click();
   };
 
+  // AI summary is not available: no transcription or summarisation service is
+  // wired up yet. The panel says so instead of showing a pre-written summary
+  // that was never about this meeting.
   const generateAiSummary = () => {
     setIsGeneratingSummary(true);
     setTimeout(() => {
-      const summaryText = `### 🌟 GIIN Meet AI Copilot Summary
-
-**📅 Date:** ${new Date().toLocaleDateString()}
-**📊 Meeting ID:** ${meetingId}
-
----
-
-#### 💡 Key Decisions
-- Resolved mesh WebRTC screenshare channel issues by establishing polite peer Perfect Negotiation nodes.
-- Selected custom layout constraints to match **${localStorage.getItem('giin_ui_style') || 'glassmorphism'}** branding specifications.
-
-#### 📌 Action Items
-- **[ ] @You** - Validate WebRTC video filters under heavy packet loss profiles.
-- **[ ] @Admin** - Finalize corner shape and typography metrics before staging deployment.
-- **[ ] @Team** - Confirm next operations sync scheduled time.
-
-#### 📝 Summary Notes
-The conference was focused on platform modernization. Participants reviewed the interactive bento grids, skeuomorphic clicky controls, and 3D depth layers in spatial UI environments. The sketchpad doodle board was used for database fallback schema diagrams. Action items were resolved with clear ownership.`;
-      setAiSummary(summaryText);
+      setAiSummary('AI summaries are not available yet — no transcription service is connected. This panel will show a real summary once speech-to-text is wired up.');
       setIsGeneratingSummary(false);
-    }, 1500);
+    }, 300);
   };
 
   // Q&A Hub Functions
@@ -1212,15 +1199,6 @@ The conference was focused on platform modernization. Participants reviewed the 
     }
   }, [isWhiteboardActive]);
 
-  // E2EE Transform stream injectors (bypassed for maximum stability and performance; native WebRTC DTLS-SRTP is active)
-  const setupSenderE2EE = (_sender: RTCRtpSender) => {
-    // Bypassed: standard WebRTC DTLS-SRTP provides robust end-to-end security without codec corruption
-  };
-
-  const setupReceiverE2EE = (_receiver: RTCRtpReceiver) => {
-    // Bypassed: standard WebRTC DTLS-SRTP provides robust end-to-end security without codec corruption
-  };
-
   // Web Audio speaking volume analyzer
   const setupSpeakingDetection = (mediaStream: MediaStream, targetKey: string, isLocal: boolean) => {
     try {
@@ -1287,10 +1265,10 @@ The conference was focused on platform modernization. Participants reviewed the 
   useEffect(() => {
     const loadDetails = async () => {
       try {
-        const { data } = await mockAuth.getMeetingDetails(meetingId);
+        const { data } = await giinApi.getMeetingDetails(meetingId);
         if (data) {
           setMeetingAdminId(data.admin_id || '');
-          setPasscode(data.passcode || getDeterministicPasscode(meetingId));
+          if (data.passcode) setPasscode(data.passcode);
           setInitialNotes(data.notes || '');
         }
       } catch (err) {
@@ -1304,7 +1282,7 @@ The conference was focused on platform modernization. Participants reviewed the 
   useEffect(() => {
     const loadMessages = async () => {
       try {
-        const list = await mockAuth.getMessages(meetingId);
+        const list = await giinApi.getMessages(meetingId);
         if (list) {
           const mapped = list.map((msg: any) => {
             const isSelf = currentUser ? (msg.user_id === currentUser.id) : false;
@@ -1360,7 +1338,7 @@ The conference was focused on platform modernization. Participants reviewed the 
   useEffect(() => {
     const loadParticipants = async () => {
       try {
-        const list = await mockAuth.getAdmittedParticipants(meetingId);
+        const list = await giinApi.getAdmittedParticipants(meetingId);
         if (list) {
           const mapped: Participant[] = list
             .filter((p: any) => p.user_id !== currentUser?.id && p.id !== currentUser?.id)
@@ -1388,9 +1366,9 @@ The conference was focused on platform modernization. Participants reviewed the 
           setParticipants(prev => {
             const merged = [...mapped];
             prev.forEach(p => {
-              // If it's a dynamic/virtual participant, preserve them so they are not wiped out by the database sync
-              const isDynamic = p.id.startsWith('guest-') || p.id.startsWith('mock-') || p.id.startsWith('virtual-') || p.id.startsWith('user-signals-') || !mapped.some(m => m.id === p.id || m.userId === p.userId);
-              const isStillActive = !!(pcsRef.current[p.id] || pcsRef.current[p.userId || ''] || peerStates[p.id] || peerStates[p.userId || ''] || p.id.startsWith('user-signals-') || p.id.startsWith('virtual-'));
+              // If it's a peer discovered over the signalling channel (not in the database list), preserve it so it is not wiped out by the database sync
+              const isDynamic = p.id.startsWith('user-signals-') || !mapped.some(m => m.id === p.id || m.userId === p.userId);
+              const isStillActive = !!(pcsRef.current[p.id] || pcsRef.current[p.userId || ''] || peerStates[p.id] || peerStates[p.userId || ''] || p.id.startsWith('user-signals-'));
               if (isDynamic && isStillActive) {
                 if (!merged.some(m => m.id === p.id || m.userId === p.userId)) {
                   merged.push(p);
@@ -1474,7 +1452,6 @@ The conference was focused on platform modernization. Participants reviewed the 
             return; // Skip adding video tracks under capacity rules
           }
           const sender = pc.addTrack(track, stream);
-          setupSenderE2EE(sender);
         });
       }
       // If we are currently screensharing, we must also add the screen track!
@@ -1482,7 +1459,6 @@ The conference was focused on platform modernization. Participants reviewed the 
         const screenTrack = screenStream.getVideoTracks()[0];
         if (screenTrack) {
           const sender = pc.addTrack(screenTrack, screenStream);
-          setupSenderE2EE(sender);
           screenSendersRef.current[peerKey] = sender;
         }
       }
@@ -1529,7 +1505,6 @@ The conference was focused on platform modernization. Participants reviewed the 
             [peerKey]: newStream
           }));
 
-          setupReceiverE2EE(event.receiver);
           setupSpeakingDetection(newStream, peerKey, false);
         }
       };
@@ -1546,7 +1521,6 @@ The conference was focused on platform modernization. Participants reviewed the 
             ...prev,
             [peerKey]: {
               ...prev[peerKey],
-              e2eeStatus: 'secure',
               isReconnecting: false
             }
           }));
@@ -1711,7 +1685,7 @@ The conference was focused on platform modernization. Participants reviewed the 
             }
           }));
 
-          // DYNAMIC RESILIENCE: If this participant is not in our list, add them virtually!
+          // A peer discovered over the signalling channel: add them to the participant list if not present yet.
           setParticipants(prev => {
             const exists = prev.some(p => p.id === senderKey || p.userId === senderKey);
             if (exists) return prev;
@@ -1724,7 +1698,7 @@ The conference was focused on platform modernization. Participants reviewed the 
             const hue = Math.abs(hash % 360);
             const avatarBg = `hsl(${hue}, 60%, 40%)`;
 
-            const newVirtualParticipant: Participant = {
+            const newDiscoveredParticipant: Participant = {
               id: senderKey,
               userId: senderKey,
               name: data.name || 'Participant',
@@ -1735,7 +1709,7 @@ The conference was focused on platform modernization. Participants reviewed the 
               isVideoOn: data.isVideoOn,
               avatarBg: avatarBg
             };
-            return [...prev, newVirtualParticipant];
+            return [...prev, newDiscoveredParticipant];
           });
 
           // Lexicographical ordering resolves glare (only smaller key initiates)
@@ -1839,7 +1813,7 @@ The conference was focused on platform modernization. Participants reviewed the 
           alert('You have been removed from the meeting by the host.');
           // Delete our own row from the database (fully allowed by RLS since it is our own user_id)
           try {
-            await mockAuth.removeParticipant(meetingId, myKey);
+            await giinApi.removeParticipant(meetingId, myKey);
           } catch (e) {
             console.warn('Failed to delete own participant row on kick:', e);
           }
@@ -2172,7 +2146,6 @@ The conference was focused on platform modernization. Participants reviewed the 
       Object.keys(pcsRef.current).forEach(peerKey => {
         const pc = pcsRef.current[peerKey];
         const sender = pc.addTrack(screenTrack, displayStream);
-        setupSenderE2EE(sender);
         screenSendersRef.current[peerKey] = sender;
       });
 
@@ -2269,7 +2242,7 @@ The conference was focused on platform modernization. Participants reviewed the 
     if (!isAdmin) return;
     const checkWaitroom = async () => {
       try {
-        const list = await mockAuth.getWaitingParticipants(meetingId);
+        const list = await giinApi.getWaitingParticipants(meetingId);
         setWaitingList(list);
       } catch (err) {
         console.error(err);
@@ -2323,10 +2296,9 @@ The conference was focused on platform modernization. Participants reviewed the 
         });
       }
 
-      // 2. Update database in background if it's a real database record
-      if (!participantId.startsWith('guest-') && !participantId.startsWith('virtual-')) {
-        await mockAuth.updateParticipantStatus(participantId, status);
-      }
+      // 2. Update the participant's status in the database (a no-op when the
+      // participant is a signalling-only peer with no database row).
+      await giinApi.updateParticipantStatus(participantId, status);
       
       if (status === 'Admitted') {
         setAdmittedKeys(prev => {
@@ -2349,7 +2321,7 @@ The conference was focused on platform modernization. Participants reviewed the 
   const handleDesignateAdmin = async (targetUserId: string) => {
     if (!confirm('Are you sure you want to designate this user as the meeting admin? You will transfer host settings.')) return;
     try {
-      await mockAuth.changeMeetingAdmin(meetingId, targetUserId);
+      await giinApi.changeMeetingAdmin(meetingId, targetUserId);
       setMeetingAdminId(targetUserId);
       alert('Meeting administrator transferred successfully!');
     } catch (err) {
@@ -2359,7 +2331,6 @@ The conference was focused on platform modernization. Participants reviewed the 
 
 
   
-  const colleagueCanvasRef = useRef<HTMLCanvasElement | null>(null);
   
   // Camera video ref
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -2470,41 +2441,6 @@ The conference was focused on platform modernization. Participants reviewed the 
     });
   }, [remoteStreams, livekitRemoteStreams, swappedPeers, isSpatialAudioEnabled]);
 
-  // Mock Live Captions & Transcription Engine Effect
-  useEffect(() => {
-    if (isMinimized || !isMediaInitialized) return;
-    
-    const mockPhrases = [
-      "I think the new Q3 goals are very achievable.",
-      "Could you clarify the budget allocations for marketing?",
-      "The tactical neumorphism styling looks extremely premium!",
-      "Let's make sure we test the WebRTC audio channels thoroughly.",
-      "I agree with that point. The integration is seamless.",
-      "Should we schedule a follow-up session tomorrow?",
-      "The collaborative whiteboard is perfect for this brainstorming.",
-      "I will send over the action items by end of day."
-    ];
-
-    const interval = setInterval(() => {
-      if (participants.length <= 1) return;
-      const remoteParticipants = participants.filter(p => p.id !== myKey);
-      if (remoteParticipants.length === 0) return;
-      
-      const speaker = remoteParticipants[Math.floor(Math.random() * remoteParticipants.length)];
-      const text = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
-      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      
-      setActiveCaption({ name: speaker.name, text });
-      setTranscripts(prev => [...prev, { name: speaker.name, text, time }]);
-      
-      setTimeout(() => {
-        setActiveCaption(null);
-      }, 3000);
-    }, 12000);
-
-    return () => clearInterval(interval);
-  }, [participants, isMediaInitialized, isMinimized]);
-
   // Initialize audio track (kept alive throughout the meeting)
   useEffect(() => {
     async function initAudio() {
@@ -2544,7 +2480,6 @@ The conference was focused on platform modernization. Participants reviewed the 
             audioSender.replaceTrack(audioTrack);
           } else {
             const sender = pc.addTrack(audioTrack, stream || new MediaStream([audioTrack]));
-            setupSenderE2EE(sender);
           }
         });
       } catch (err) {
@@ -2600,7 +2535,6 @@ The conference was focused on platform modernization. Participants reviewed the 
                 videoSender.replaceTrack(videoTrack);
               } else {
                 const sender = pc.addTrack(videoTrack, stream || new MediaStream([videoTrack]));
-                setupSenderE2EE(sender);
               }
             });
           } catch (err) {
@@ -2789,7 +2723,7 @@ The conference was focused on platform modernization. Participants reviewed the 
       }
 
       // 2. Update database in background
-      await mockAuth.changeMeetingAdmin(meetingId, selectedNewAdminId);
+      await giinApi.changeMeetingAdmin(meetingId, selectedNewAdminId);
       
       // 3. Leave the meeting
       setShowLeaveModal(false);
@@ -3117,23 +3051,6 @@ The conference was focused on platform modernization. Participants reviewed the 
     }
   };
 
-  // Simulated Speaking status fluctuations (backup fallback)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Only mock speaking for peers who do not have active streams yet
-      setParticipants(prev => 
-        prev.map(p => {
-          const peerKey = p.userId || p.id;
-          if (remoteStreams[peerKey]) return p; // use actual volume meter
-          if (p.isMuted) return { ...p, isSpeaking: false };
-          const shouldSpeak = Math.random() > 0.85;
-          return { ...p, isSpeaking: shouldSpeak };
-        })
-      );
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [remoteStreams]);
-
   // Screen Share Canvas Animation Simulation (unused, but kept for safe ref compatibility)
   useEffect(() => {
     let animationId: number;
@@ -3158,26 +3075,6 @@ The conference was focused on platform modernization. Participants reviewed the 
     };
   }, [isScreenSharing]);
 
-  // Colleague Screenshare Canvas Animation (unused mock visual animation compatibility)
-  useEffect(() => {
-    let animationId: number;
-    const canvas = colleagueCanvasRef.current;
-    if (isColleagueSharing && canvas) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const draw = () => {
-          ctx.fillStyle = '#1E1E1E';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          animationId = requestAnimationFrame(draw);
-        };
-        draw();
-      }
-    }
-    return () => {
-      cancelAnimationFrame(animationId);
-    };
-  }, [isColleagueSharing]);
-
 
 
   const sendChatMessage = async (e: React.FormEvent) => {
@@ -3189,14 +3086,14 @@ The conference was focused on platform modernization. Participants reviewed the 
     setChatInput('');
 
     try {
-      await mockAuth.sendMessage({
+      await giinApi.sendMessage({
         thread_id: meetingId,
         sender_name: senderName,
         text: text,
         user_id: currentUser?.id
       });
       
-      const list = await mockAuth.getMessages(meetingId);
+      const list = await giinApi.getMessages(meetingId);
       if (list) {
         const mapped = list.map((msg: { user_id: string; sender_name: string; text: string; created_at: string }) => {
           const isSelf = currentUser ? (msg.user_id === currentUser.id) : false;
@@ -3605,7 +3502,7 @@ The conference was focused on platform modernization. Participants reviewed the 
               <div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Passcode</span>
                 <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>
-                  {passcode || 'ABCD'}
+                  {passcode || '—'}
                 </div>
               </div>
             </div>
@@ -3617,9 +3514,9 @@ The conference was focused on platform modernization. Participants reviewed the 
 Topic: ${meetingTitle}
 Join Link: ${link}
 Meeting ID: ${meetingId}
-Passcode: ${passcode || 'ABCD'}
+Passcode: ${passcode || '—'}
 
-Securely encrypted under Fintech AES-256 standard.`;
+Media encrypted in transit (DTLS-SRTP).`;
                 navigator.clipboard.writeText(invitation);
                 setCopiedInfo('details');
                 setTimeout(() => setCopiedInfo(null), 2000);
@@ -3729,7 +3626,6 @@ Securely encrypted under Fintech AES-256 standard.`;
                   isMuted: p.isMuted,
                   isSpeaking: p.isSpeaking,
                   latency: undefined,
-                  e2eeStatus: undefined
                 };
 
                 return (
@@ -4233,7 +4129,6 @@ Securely encrypted under Fintech AES-256 standard.`;
                   isMuted: p.isMuted,
                   isSpeaking: p.isSpeaking,
                   latency: undefined,
-                  e2eeStatus: undefined,
                   videoFilter: undefined,
                   isStudioLightEnabled: false,
                   isReconnecting: false
@@ -4901,7 +4796,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                               // Immediately clean up locally for instant UI feedback
                               cleanupPeer(p.userId!);
                               // Attempt database delete
-                              await mockAuth.removeParticipant(meetingId, p.userId!);
+                              await giinApi.removeParticipant(meetingId, p.userId!);
                             }
                           }}
                           style={{
@@ -5525,7 +5420,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                   </label>
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
-                  Real-time DSP noise gate and vocal compressor to filter background hum and boost speech clarity.
+                  Audio enhancement: echo cancellation, noise suppression and automatic gain control, applied to your microphone.
                 </p>
               </div>
 
@@ -5784,7 +5679,7 @@ Securely encrypted under Fintech AES-256 standard.`;
                     </div>
                   ) : (
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', height: '200px', textAlign: 'center' }}>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No summary generated yet. Click below to analyze meeting transcripts.</span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>AI summaries are not available yet — no transcription service is connected.</span>
                       <button 
                         onClick={generateAiSummary}
                         className="premium-btn premium-btn-primary"
@@ -6886,33 +6781,6 @@ Securely encrypted under Fintech AES-256 standard.`;
                     </button>
                   )}
 
-                  {/* Simulate Remote Share */}
-                  <button 
-                    onClick={() => {
-                      const nextVal = !isColleagueSharing;
-                      setIsColleagueSharing(nextVal);
-                      if (nextVal) {
-                        setIsScreenSharing(false);
-                      }
-                      setShowMoreMenu(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem',
-                      backgroundColor: isColleagueSharing ? 'rgba(255,255,255,0.1)' : 'transparent',
-                      border: 'none',
-                      padding: '0.6rem 0.85rem',
-                      borderRadius: '6px',
-                      color: 'white',
-                      fontSize: '0.85rem',
-                      cursor: 'pointer',
-                      textAlign: 'left'
-                    }}
-                  >
-                    <Users size={16} />
-                    <span>Simulate Remote Share</span>
-                  </button>
                 </div>
               </>
             )}
@@ -6976,83 +6844,6 @@ Securely encrypted under Fintech AES-256 standard.`;
               <PhoneOff size={15} />
               <span className="hide-mobile-text">{isAdmin ? 'End for All' : 'Leave Call'}</span>
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* E2EE Shield Status Details Drawer Panel Overlay */}
-      {showE2EEPannel && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          right: 0,
-          width: '360px',
-          height: '100%',
-          backgroundColor: 'rgba(11, 15, 25, 0.98)',
-          borderLeft: '1px solid #1E293B',
-          padding: '2rem',
-          zIndex: 200,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1.5rem',
-          boxShadow: '-10px 0 30px rgba(0,0,0,0.5)',
-          animation: 'slide-in var(--transition-normal)'
-        }}>
-          <div className="flex-between">
-            <h3 style={{ color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-heading)' }}>
-              <ShieldCheck size={22} color="#10B981" />
-              <span>E2EE Verification</span>
-            </h3>
-            <button 
-              onClick={() => setShowE2EEPannel(false)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.25rem', cursor: 'pointer' }}
-            >
-              &times;
-            </button>
-          </div>
-
-          <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
-
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-            GIIN MEET calls and chat are protected by end-to-end encryption. Your audio, video, and messages are encrypted client-side using Web Crypto 256-bit AES-GCM before sending. No one, not even GIIN, can read or hear them.
-          </p>
-
-          <div>
-            <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '0.5rem' }}>
-              VISUAL VERIFICATION CODE
-            </span>
-            <div style={{ 
-              backgroundColor: '#0F172A', 
-              padding: '1rem', 
-              borderRadius: '8px', 
-              border: '1px solid #1E293B', 
-              color: 'white', 
-              fontFamily: 'monospace', 
-              fontSize: '0.9rem',
-              letterSpacing: '0.05em',
-              textAlign: 'center',
-              lineHeight: 1.6
-            }}>
-              {deriveE2EESeal(meetingId)}
-            </div>
-            <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem', lineHeight: 1.35 }}>
-              Compare these numbers with another participant to verify that this call is securely locked with zero-knowledge keys.
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.8rem' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span>Cryptographic Session Keys Generated</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.8rem' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span>Symmetric AES-GCM Tunnel Initialised</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.8rem' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span>Zero-Knowledge Verification Passed</span>
-            </div>
           </div>
         </div>
       )}
@@ -7389,6 +7180,37 @@ Securely encrypted under Fintech AES-256 standard.`;
         onMicChange={changeMicrophone}
         onSpeakerChange={changeSpeaker}
       />
+
+      {connectionNotice && (
+        <div style={{
+          position: 'fixed',
+          top: '16px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          maxWidth: '640px',
+          width: 'calc(100% - 32px)',
+          padding: '0.75rem 1rem',
+          backgroundColor: '#451A03',
+          border: '1px solid #F59E0B',
+          borderRadius: 'var(--radius-md)',
+          color: '#FDE68A',
+          fontSize: '0.85rem',
+          zIndex: 9999,
+          boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)',
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '0.5rem'
+        }}>
+          <span>⚠ Connection degraded: {connectionNotice}</span>
+          <button
+            onClick={() => setConnectionNotice(null)}
+            style={{ background: 'none', border: 'none', color: '#FDE68A', cursor: 'pointer', fontSize: '1rem', marginLeft: 'auto', flexShrink: 0 }}
+            aria-label="Dismiss connection notice"
+          >
+            &times;
+          </button>
+        </div>
+      )}
 
       {toastMessage && (
         <div style={{

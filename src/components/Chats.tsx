@@ -5,7 +5,7 @@ import {
   Volume2, VolumeX, BarChart2, FolderOpen, Info, FileText, Image, File,
   ExternalLink, Minimize2, Paintbrush, Calendar, Phone, Users, Lock, Plus
 } from 'lucide-react';
-import { mockAuth, supabase } from '../supabaseClient';
+import { giinApi, supabase } from '../supabaseClient';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
 
 export interface MessageReaction {
@@ -465,6 +465,9 @@ export const Chats: React.FC<ChatsProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [chatInput, setChatInput] = useState('');
+  // Shown when a message could not be sent (for example no signed-in session
+  // or the database is unreachable) so a failed message is never shown as sent.
+  const [sendError, setSendError] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showConversationMobile, setShowConversationMobile] = useState(false);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
@@ -739,12 +742,15 @@ export const Chats: React.FC<ChatsProps> = ({
                   });
                   const updatedText = `[POLL:${question}|${opts.join('|')}]`;
                   
-                  mockAuth.sendMessage({
+                  giinApi.sendMessage({
                     thread_id: activeThreadId,
                     sender_name: m.sender,
                     text: updatedText,
                     user_id: user?.id
-                  }).catch(err => console.error("Error updating poll database:", err));
+                  }).catch((err: any) => {
+                    console.error("Error updating poll database:", err);
+                    setSendError(err?.message || 'Could not save your vote. Please try again.');
+                  });
                   
                   return { ...m, text: updatedText };
                 }
@@ -767,6 +773,11 @@ export const Chats: React.FC<ChatsProps> = ({
   const handleCreatePoll = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pollQuestion.trim() || !pollOption1.trim() || !pollOption2.trim() || !activeThreadId) return;
+    if (!user) {
+      setSendError('Sign in to send messages. Guests can read, but messaging requires an account.');
+      return;
+    }
+    setSendError(null);
 
     const options = [pollOption1.trim(), pollOption2.trim()];
     if (pollOption3.trim()) options.push(pollOption3.trim());
@@ -782,8 +793,8 @@ export const Chats: React.FC<ChatsProps> = ({
     setPollOption4('');
     setShowCreatePollModal(false);
 
+    const localId = Math.random().toString(36).substr(2, 9);
     try {
-      const localId = Math.random().toString(36).substr(2, 9);
       const newMsg: Message = {
         id: localId,
         sender: 'You',
@@ -805,25 +816,39 @@ export const Chats: React.FC<ChatsProps> = ({
       if (activeThreadId.startsWith('dm_')) {
         dbText = await encryptMessage(pollPayload, activeThreadId);
       }
-      await mockAuth.sendMessage({
+      await giinApi.sendMessage({
         thread_id: activeThreadId,
         sender_name: user?.name || 'You',
         text: dbText,
         user_id: user?.id
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to send poll message:', err);
+      setThreads(prev =>
+        prev.map(t => {
+          if (t.id === activeThreadId) {
+            return { ...t, messages: t.messages.filter(m => m.id !== localId) };
+          }
+          return t;
+        })
+      );
+      setSendError(err?.message || 'Could not send the poll. Please check your connection and try again.');
     }
   };
 
   const handleLaunchDoodle = async () => {
     if (!activeThreadId) return;
+    if (!user) {
+      setSendError('Sign in to send messages. Guests can read, but messaging requires an account.');
+      return;
+    }
+    setSendError(null);
 
     const doodleId = `doodle_${Math.random().toString(36).substr(2, 9)}`;
     const doodlePayload = `[DOODLE:${doodleId}]`;
 
+    const localId = Math.random().toString(36).substr(2, 9);
     try {
-      const localId = Math.random().toString(36).substr(2, 9);
       const newMsg: Message = {
         id: localId,
         sender: 'You',
@@ -845,14 +870,23 @@ export const Chats: React.FC<ChatsProps> = ({
       if (activeThreadId.startsWith('dm_')) {
         dbText = await encryptMessage(doodlePayload, activeThreadId);
       }
-      await mockAuth.sendMessage({
+      await giinApi.sendMessage({
         thread_id: activeThreadId,
         sender_name: user?.name || 'You',
         text: dbText,
         user_id: user?.id
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to send doodle message:', err);
+      setThreads(prev =>
+        prev.map(t => {
+          if (t.id === activeThreadId) {
+            return { ...t, messages: t.messages.filter(m => m.id !== localId) };
+          }
+          return t;
+        })
+      );
+      setSendError(err?.message || 'Could not send the doodle. Please check your connection and try again.');
     }
   };
 
@@ -865,7 +899,7 @@ export const Chats: React.FC<ChatsProps> = ({
 
     setSearchStatus('searching');
     try {
-      const { data } = await mockAuth.searchProfile(queryAdd);
+      const { data } = await giinApi.searchProfile(queryAdd);
       if (data && data.length > 0) {
         setFoundContacts(data);
         setSearchStatus('found');
@@ -1004,7 +1038,7 @@ export const Chats: React.FC<ChatsProps> = ({
           setShowConversationMobile(true);
         } else {
           // Fetch contact details directly by profile ID
-          const { data: contact } = await mockAuth.getProfile(initialTargetContactId);
+          const { data: contact } = await giinApi.getProfile(initialTargetContactId);
           if (contact) {
             const initials = contact.name ? contact.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
             let hash = 0;
@@ -1111,7 +1145,7 @@ export const Chats: React.FC<ChatsProps> = ({
     const loadMessages = async () => {
       if (!activeThreadId) return;
       try {
-        const dbMessages = await mockAuth.getMessages(activeThreadId);
+        const dbMessages = await giinApi.getMessages(activeThreadId);
         if (dbMessages) {
           const decryptedMessages = (await Promise.all(dbMessages.map(async (m: any) => {
             let text = m.text;
@@ -1160,6 +1194,11 @@ export const Chats: React.FC<ChatsProps> = ({
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || !activeThreadId) return;
+    if (!user) {
+      setSendError('Sign in to send messages. Guests can read, but messaging requires an account.');
+      return;
+    }
+    setSendError(null);
 
     // Immediately clear typing status on send
     if (typingTimeoutRef.current) {
@@ -1208,15 +1247,26 @@ export const Chats: React.FC<ChatsProps> = ({
       if (activeThreadId.startsWith('dm_')) {
         dbText = await encryptMessage(textToSend, activeThreadId);
       }
-      await mockAuth.sendMessage({
+      await giinApi.sendMessage({
         thread_id: activeThreadId,
         sender_name: user?.name || 'You',
         text: dbText,
         user_id: user?.id || undefined
       });
       setWhisperTargetUserId('');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to send user message to database:', err);
+      // The message was never saved: remove the optimistic copy so it is not
+      // shown as sent, and tell the user why.
+      setThreads(prev =>
+        prev.map(t => {
+          if (t.id === activeThreadId) {
+            return { ...t, messages: t.messages.filter(m => m.id !== localId) };
+          }
+          return t;
+        })
+      );
+      setSendError(err?.message || 'Could not send the message. Please check your connection and try again.');
     }
   };
 
@@ -1235,14 +1285,14 @@ export const Chats: React.FC<ChatsProps> = ({
       const filePayload = `[FILE:${file.name}|${file.type}|${base64Data}]`;
 
       // Save user message to Supabase
+      const localId = Math.random().toString(36).substr(2, 9);
       try {
         let dbText = filePayload;
         if (activeThreadId.startsWith('dm_')) {
           dbText = await encryptMessage(filePayload, activeThreadId);
         }
-        
+
         // Add locally first for instant feedback
-        const localId = Math.random().toString(36).substr(2, 9);
         const newMsg: Message = {
           id: localId,
           sender: 'You',
@@ -1260,14 +1310,23 @@ export const Chats: React.FC<ChatsProps> = ({
           })
         );
 
-        await mockAuth.sendMessage({
+        await giinApi.sendMessage({
           thread_id: activeThreadId,
           sender_name: user.name || 'You',
           text: dbText,
           user_id: user.id
         });
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to send file attachment:', err);
+        setThreads(prev =>
+          prev.map(t => {
+            if (t.id === activeThreadId) {
+              return { ...t, messages: t.messages.filter(m => m.id !== localId) };
+            }
+            return t;
+          })
+        );
+        setSendError(err?.message || 'Could not send the file. Please check your connection and try again.');
       }
     };
     reader.readAsDataURL(file);
@@ -1328,7 +1387,7 @@ export const Chats: React.FC<ChatsProps> = ({
             <div><strong>Date:</strong> {date}</div>
             <div><strong>Time:</strong> {time}</div>
             <div style={{ fontSize: '0.65rem', color: self ? 'rgba(255,255,255,0.6)' : 'var(--text-muted)' }}>
-              E2EE Secure Meeting ID: {meetingId.substring(0, 8)}...
+              Meeting ID: {meetingId.substring(0, 8)}...
             </div>
           </div>
 
@@ -1475,7 +1534,7 @@ export const Chats: React.FC<ChatsProps> = ({
                 {self ? 'Outgoing Video Call' : `Incoming Call from ${callerName}`}
               </h4>
               <span style={{ fontSize: '0.7rem', color: self ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)' }}>
-                Zero-Knowledge E2EE Call
+                Video Call
               </span>
             </div>
           </div>
@@ -1933,7 +1992,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   borderRadius: '9999px',
                   border: '1px solid var(--border-color)'
                 }}>
-                  Messages are end-to-end encrypted
+                  Messages are encrypted in transit
                 </span>
               </div>
 
@@ -2445,6 +2504,13 @@ export const Chats: React.FC<ChatsProps> = ({
                   </button>
                 ))}
               </div>
+
+                            {sendError && (
+                <div style={{ marginBottom: '0.5rem', padding: '0.6rem 0.85rem', borderRadius: '8px', backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#FCA5A5', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>{sendError}</span>
+                  <button onClick={() => setSendError(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#FCA5A5', cursor: 'pointer', fontSize: '1rem' }}>&times;</button>
+                </div>
+              )}
 
               <form onSubmit={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <input 
@@ -3583,7 +3649,7 @@ export const Chats: React.FC<ChatsProps> = ({
                       borderRadius: '9999px',
                       border: '1px solid var(--border-color)'
                     }}>
-                      Messages are end-to-end encrypted
+                      Messages are encrypted in transit
                     </span>
                   </div>
 
@@ -3757,6 +3823,13 @@ export const Chats: React.FC<ChatsProps> = ({
                           {suggestion}
                         </button>
                       ))}
+                    </div>
+                  )}
+
+                                    {sendError && (
+                    <div style={{ marginBottom: '0.5rem', padding: '0.6rem 0.85rem', borderRadius: '8px', backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#FCA5A5', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span>{sendError}</span>
+                      <button onClick={() => setSendError(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#FCA5A5', cursor: 'pointer', fontSize: '1rem' }}>&times;</button>
                     </div>
                   )}
 

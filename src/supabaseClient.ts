@@ -13,9 +13,18 @@ const getEnv = (key: string): string | undefined => {
   return undefined;
 };
 
-// Supabase configuration details
-export const supabaseUrl = getEnv('VITE_SUPABASE_URL') || 'https://umeptngfntryekzxifvq.supabase.co';
-export const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVtZXB0bmdmbnRyeWVrenhpZnZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMjgwNjQsImV4cCI6MjA5NzcwNDA2NH0.MTdlBNNfcreCAgGVD4wWHfCZMoOSd4_bDq753Wru_cI';
+// Supabase configuration. No credentials are hardcoded here: the app fails
+// loudly at startup when VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are
+// missing, instead of silently pointing at a stale or deleted project.
+export const supabaseUrl = getEnv('VITE_SUPABASE_URL');
+export const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    '[GiinMeet] Supabase is not configured: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env. ' +
+    'The app will not start with missing credentials.'
+  );
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -23,7 +32,7 @@ export const isSupabaseConfigured =
   getEnv('VITE_SUPABASE_URL') !== undefined && 
   getEnv('VITE_SUPABASE_ANON_KEY') !== undefined;
 
-export interface MockUser {
+export interface GiinUser {
   id: string;
   email: string;
   name: string;
@@ -34,23 +43,76 @@ export interface MockUser {
   avatar_url?: string;
 }
 
-// Dynamic resilience flag to bypass missing database tables
-let isMeetingParticipantsTableMissing = false;
-
-// Helper to generate a deterministic passcode based on meeting ID
-export const getDeterministicPasscode = (meetingId: string): string => {
-  const safeId = meetingId || 'virtual-meeting';
-  let hash = 0;
-  for (let i = 0; i < safeId.length; i++) {
-    hash = safeId.charCodeAt(i) + ((hash << 5) - hash);
+// Random 6-character meeting passcode, generated with crypto randomness and
+// stored on the meeting row — never derived from the meeting ID, so it cannot
+// be guessed by anyone who knows the meeting ID.
+export const generateMeetingPasscode = (): string => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = new Uint8Array(6);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
   }
-  return Math.abs(hash).toString(36).substr(0, 6).toUpperCase();
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
+};
+
+// The LiveKit room for a meeting is addressed by a stable slug derived from
+// the meeting ID, so no extra column is needed on the meetings table.
+export const getMeetingRoomSlug = (meetingId: string): string => `meet-${meetingId}`;
+
+// Find the LiveKit room for a meeting, creating it when it does not exist yet.
+// Returns the room row, or null when it cannot be ensured (for example a
+// guest with no signed-in session, or the rooms INSERT policy has not been
+// applied yet — see rooms_insert_policy_patch.sql). Never throws: callers
+// surface the missing room through the token error UI instead.
+export const ensureMeetingRoom = async (
+  meetingId: string,
+  roomName: string,
+  hostId?: string | null
+): Promise<{ id: string; slug: string } | null> => {
+  const slug = getMeetingRoomSlug(meetingId);
+  try {
+    const { data: existing } = await supabase
+      .from('rooms')
+      .select('id, slug')
+      .eq('slug', slug)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (existing) return existing as { id: string; slug: string };
+    if (!hostId) {
+      console.warn('[GiinMeet] Cannot create a video room for a meeting without a signed-in host.');
+      return null;
+    }
+    const { data: created, error } = await supabase
+      .from('rooms')
+      .insert([{
+        room_name: roomName || 'GiinMeet Meeting',
+        slug,
+        organization_id: hostId,
+        host_id: hostId,
+        is_active: true,
+        max_capacity: 8,
+        current_engine: 'LIVEKIT'
+      }])
+      .select('id, slug')
+      .maybeSingle();
+    if (error || !created) {
+      console.error('[GiinMeet] Could not create the video room for this meeting. Run the rooms INSERT policy patch in the Supabase SQL Editor (rooms_insert_policy_patch.sql).', error?.message);
+      return null;
+    }
+    return created as { id: string; slug: string };
+  } catch (err: any) {
+    console.error('[GiinMeet] Could not ensure the video room for this meeting:', err?.message);
+    return null;
+  }
 };
 
 // Wrapper object for direct auth and database operations
-export const mockAuth = {
+export const giinApi = {
   // Sign up using email & password
-  signUp: async (email: string, password?: string, name?: string, customWorkspaceName?: string) => {
+  signUp: async (email: string, password: string, name?: string, customWorkspaceName?: string) => {
+    if (!password) throw new Error('A password is required to create an account.');
     const domain = email.split('@')[1] || 'personal';
     const workspaceName = customWorkspaceName?.trim() || (
       !['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'aol.com', 'zoho.com', 'mail.com'].includes(domain.toLowerCase())
@@ -60,7 +122,7 @@ export const mockAuth = {
 
     const { data, error } = await supabase.auth.signUp({
       email,
-      password: password || 'DefaultPassword123!',
+      password,
       options: {
         data: {
           name: name || email.split('@')[0],
@@ -74,7 +136,7 @@ export const mockAuth = {
 
     if (error) throw error;
 
-    const user: MockUser = {
+    const user: GiinUser = {
       id: data.user?.id || '',
       email: data.user?.email || email,
       name: name || email.split('@')[0],
@@ -88,10 +150,11 @@ export const mockAuth = {
   },
 
   // Sign in using email & password
-  signIn: async (email: string, password?: string, customWorkspaceName?: string) => {
+  signIn: async (email: string, password: string, customWorkspaceName?: string) => {
+    if (!password) throw new Error('A password is required to sign in.');
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
-      password: password || 'DefaultPassword123!'
+      password
     });
 
     if (error) throw error;
@@ -104,7 +167,7 @@ export const mockAuth = {
       .maybeSingle();
 
     const domain = email.split('@')[1] || 'personal';
-    const user: MockUser = {
+    const user: GiinUser = {
       id: data.user?.id || '',
       email: data.user?.email || email,
       name: profile?.name || email.split('@')[0].split('.').map((n: string) => n.charAt(0).toUpperCase() + n.slice(1)).join(' '),
@@ -118,73 +181,53 @@ export const mockAuth = {
     return { data: { user }, error: null };
   },
 
-  // Passwordless OTP Phone Sign-In
+  // Passwordless OTP Phone Sign-In — real Supabase SMS OTP only. Phone auth
+  // must be enabled in the Supabase dashboard; when it is not, this throws
+  // with a clear message instead of pretending a sign-in succeeded.
   signInWithPhone: async (phone: string, customWorkspaceName?: string) => {
-    // Attempt live OTP request if configured, otherwise do a mock fallback
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: phone.replace(/\s+/g, ''),
-        options: {
-          data: {
-            workspace_name: customWorkspaceName || 'Personal Workspace',
-            name: `Phone User (${phone})`
-          }
+    const { error } = await supabase.auth.signInWithOtp({
+      phone: phone.replace(/\s+/g, ''),
+      options: {
+        data: {
+          workspace_name: customWorkspaceName || 'Personal Workspace',
+          name: `Phone User (${phone})`
         }
-      });
-      if (error) throw error;
-      return { data: { success: true }, error: null };
-    } catch (err: any) {
-      console.warn('[Supabase Client] Real SMS OTP dispatch failed or not configured in dashboard, running mock fallback session.', err.message);
-      // Fallback session variables
-      return { data: { success: true, isMocked: true }, error: null };
-    }
+      }
+    });
+    if (error) throw error;
+    return { data: { success: true }, error: null };
   },
 
-  // Validate Phone OTP
+  // Validate Phone OTP — real Supabase verification only. Any code is never
+  // accepted: an invalid or expired code throws and the user stays signed out.
   verifyOTP: async (phone: string, code: string, name?: string, customWorkspaceName?: string) => {
-    try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone: phone.replace(/\s+/g, ''),
-        token: code,
-        type: 'sms'
-      });
+    const { data, error } = await supabase.auth.verifyOtp({
+      phone: phone.replace(/\s+/g, ''),
+      token: code,
+      type: 'sms'
+    });
 
-      if (error) throw error;
+    if (error) throw error;
 
-      // Fetch or insert profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', data.user?.id)
-        .maybeSingle();
+    // Fetch or insert profile
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', data.user?.id)
+      .maybeSingle();
 
-      const user: MockUser = {
-        id: data.user?.id || '',
-        email: data.user?.email || `${phone.replace(/\D/g, '')}@phone.giinmeet.com`,
-        name: profile?.name || name || `Phone User (${phone})`,
-        workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
-        domain: profile?.domain || 'phone.giinmeet.com',
-        is_premium: profile?.is_premium || false,
-        is_superadmin: false,
-        avatar_url: profile?.avatar_url || ''
-      };
+    const user: GiinUser = {
+      id: data.user?.id || '',
+      email: data.user?.email || `${phone.replace(/\D/g, '')}@phone.giinmeet.com`,
+      name: profile?.name || name || `Phone User (${phone})`,
+      workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
+      domain: profile?.domain || 'phone.giinmeet.com',
+      is_premium: profile?.is_premium || false,
+      is_superadmin: false,
+      avatar_url: profile?.avatar_url || ''
+    };
 
-      return { data: { user }, error: null };
-    } catch (err: any) {
-      console.warn('[Supabase Client] Real verifyOtp failed, verifying virtual fallback mock session.', err.message);
-      // Virtual session fallback
-      const user: MockUser = {
-        id: 'mock-phone-id-' + Math.random().toString(36).substr(2, 5),
-        email: `${phone.replace(/\D/g, '')}@phone.giinmeet.com`,
-        name: name || `Phone User (${phone})`,
-        workspaceName: customWorkspaceName || 'Personal Workspace',
-        domain: 'phone.giinmeet.com',
-        is_premium: false,
-        is_superadmin: false,
-        avatar_url: ''
-      };
-      return { data: { user }, error: null };
-    }
+    return { data: { user }, error: null };
   },
 
   // Fetch user profile from database
@@ -215,7 +258,7 @@ export const mockAuth = {
     const payload: any = { name, email, updated_at: new Date() };
     if (avatarUrl) {
       if (avatarUrl.startsWith('data:image')) {
-        const uploadRes = await mockAuth.uploadAvatar(userId, avatarUrl);
+        const uploadRes = await giinApi.uploadAvatar(userId, avatarUrl);
         payload.avatar_url = uploadRes.data || avatarUrl;
       } else {
         payload.avatar_url = avatarUrl;
@@ -237,35 +280,32 @@ export const mockAuth = {
     return { data, error };
   },
 
-  // Fetch all meetings linked to user_id
+  // Fetch all meetings linked to user_id. Throws when the database cannot be
+  // reached — the caller keeps any previously loaded list and shows the error
+  // instead of silently inventing meetings.
   getMeetings: async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('meetings')
-        .select('*')
-        .eq('user_id', userId)
-        .order('time', { ascending: false });
-      if (error) {
-        console.warn('[Supabase Client] Failed to fetch meetings. Falling back to local storage.', error.message);
-        const local = localStorage.getItem('giin_meetings');
-        return local ? JSON.parse(local) : [];
-      }
-      return data || [];
-    } catch (e: any) {
-      console.warn('[Supabase Client] Error in getMeetings, falling back to local storage.', e.message);
-      const local = localStorage.getItem('giin_meetings');
-      return local ? JSON.parse(local) : [];
-    }
+    const { data, error } = await supabase
+      .from('meetings')
+      .select('*')
+      .eq('user_id', userId)
+      .order('time', { ascending: false });
+    if (error) throw new Error(`Could not load your meetings: ${error.message}`);
+    return data || [];
   },
 
-  // Save new meeting with auto-generated passcode (handles schema differences gracefully)
+  // Save a new meeting with a random stored passcode, and create the LiveKit
+  // room the meeting's video call will use. Throws when the meeting itself
+  // cannot be saved — a meeting is never faked locally. The rooms row is
+  // best-effort here (it is retried when the meeting is joined); if it
+  // fails, a clear warning is logged and the video call will surface the
+  // missing room instead of silently dropping to a peer-to-peer call.
   createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean }) => {
     // Generate UUID on the client side to avoid race conditions and mismatches
-    const meetingId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' 
-      ? crypto.randomUUID() 
+    const meetingId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
       : Math.random().toString(36).substring(2, 15) + '-' + Math.random().toString(36).substring(2, 15);
-      
-    const passcode = getDeterministicPasscode(meetingId);
+
+    const passcode = generateMeetingPasscode();
     const requireWaitingRoom = meeting.require_waiting_room ?? true;
     localStorage.setItem(`giin_meeting_settings_${meetingId}`, JSON.stringify({ require_waiting_room: requireWaitingRoom }));
 
@@ -276,71 +316,27 @@ export const mockAuth = {
       admin_id: meeting.user_id,
       require_waiting_room: requireWaitingRoom
     };
-    
-    let { data, error } = await supabase
+
+    const { data, error } = await supabase
       .from('meetings')
       .insert([payload])
       .select()
       .maybeSingle();
 
     if (error) {
-      console.warn('[Supabase Client] Failed to create meeting with passcode/admin_id. Retrying with basic fields.', error.message);
-      // Fallback: Retry inserting only the basic fields that exist in the original table schema
-      const fallbackRes = await supabase
-        .from('meetings')
-        .insert([{
-          id: meetingId,
-          user_id: meeting.user_id,
-          title: meeting.title,
-          time: meeting.time,
-          duration: meeting.duration,
-          status: meeting.status,
-          host: meeting.host
-        }])
-        .select()
-        .maybeSingle();
-      
-      data = fallbackRes.data;
-      
-      if (fallbackRes.error) {
-        console.error('[Supabase Client] Fallback createMeeting failed:', fallbackRes.error.message);
-      }
+      throw new Error(`Could not save the meeting: ${error.message}`);
+    }
+    if (!data) {
+      throw new Error('Could not save the meeting: the database returned no meeting row.');
     }
 
-    if (data) {
-      // Set virtual fields so the frontend code handles permissions and waitroom checks correctly
-      if (!data.passcode) data.passcode = passcode;
-      if (!data.admin_id) data.admin_id = meeting.user_id;
-    } else {
-      // Create a simulated local meeting object to ensure the app continues to function perfectly
-      const localMeeting = {
-        id: meetingId,
-        user_id: meeting.user_id,
-        title: meeting.title,
-        time: meeting.time,
-        duration: meeting.duration,
-        status: meeting.status,
-        host: meeting.host,
-        passcode,
-        admin_id: meeting.user_id,
-        require_waiting_room: requireWaitingRoom
-      };
+    // Set fields so the frontend code handles permissions and waitroom checks correctly
+    if (!data.passcode) data.passcode = passcode;
+    if (!data.admin_id) data.admin_id = meeting.user_id;
 
-      // Save to localStorage list
-      try {
-        const local = localStorage.getItem('giin_meetings');
-        const meetingsList = local ? JSON.parse(local) : [];
-        if (!meetingsList.some((m: any) => m.id === localMeeting.id)) {
-          meetingsList.push(localMeeting);
-          localStorage.setItem('giin_meetings', JSON.stringify(meetingsList));
-        }
-      } catch (e) {
-        console.warn('[Supabase Client] Failed to save local-only meeting to localStorage:', e);
-      }
+    // Create the LiveKit room for this meeting (best-effort: retried on join).
+    await ensureMeetingRoom(meetingId, meeting.title, meeting.user_id);
 
-      console.log('[Supabase Client] Created local-only meeting due to DB insert failure:', localMeeting);
-      return localMeeting;
-    }
     return data;
   },
 
@@ -403,54 +399,38 @@ export const mockAuth = {
     }
   },
 
-  // Send message with local cache fallback
+  // Send a message. Requires a signed-in user: guests cannot send messages,
+  // and a message is never faked locally. Throws when the database insert
+  // fails so the UI can show the failure instead of a phantom message.
   sendMessage: async (message: { thread_id: string; sender_name: string; text: string; user_id?: string }) => {
-    const tempId = 'msg_' + Math.random().toString(36).substring(2, 11);
-    const localMsg = {
-      id: tempId,
-      created_at: new Date().toISOString(),
-      ...message
-    };
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData?.session) {
+      throw new Error('Sign in to send messages. Guests can read and join, but messaging requires an account.');
+    }
 
-    // Save to localStorage immediately (optimistic local persistence)
+    const { data, error } = await supabase
+      .from('messages')
+      .insert([message])
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Could not send the message: ${error.message}`);
+    }
+    if (!data) {
+      throw new Error('Could not send the message: the database returned no message row.');
+    }
+
+    // Keep a local copy as a read cache (it never pretends to be the message itself).
     try {
       const localMsgsRaw = localStorage.getItem(`giin_chat_messages_${message.thread_id}`);
       const localMsgs = localMsgsRaw ? JSON.parse(localMsgsRaw) : [];
-      localMsgs.push(localMsg);
+      localMsgs.push(data);
       localStorage.setItem(`giin_chat_messages_${message.thread_id}`, JSON.stringify(localMsgs));
     } catch (e) {
-      console.warn('[Supabase Client] Failed to save message to localStorage:', e);
+      console.warn('[Supabase Client] Failed to cache the sent message locally:', e);
     }
-
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .insert([message])
-        .select()
-        .single();
-        
-      if (error) {
-        console.warn('[Supabase Client] Failed to send message to DB. Retaining in local storage.', error.message);
-        return localMsg;
-      }
-      
-      // Replace the temp local message with the real database message if successful
-      if (data) {
-        try {
-          const localMsgsRaw = localStorage.getItem(`giin_chat_messages_${message.thread_id}`);
-          const localMsgs = localMsgsRaw ? JSON.parse(localMsgsRaw) : [];
-          const updated = localMsgs.map((lm: any) => lm.id === tempId ? data : lm);
-          localStorage.setItem(`giin_chat_messages_${message.thread_id}`, JSON.stringify(updated));
-        } catch (e) {
-          console.warn('[Supabase Client] Failed to update local storage with DB message:', e);
-        }
-        return data;
-      }
-      return localMsg;
-    } catch (err: any) {
-      console.warn('[Supabase Client] Exception in sendMessage. Retaining in local storage.', err.message);
-      return localMsg;
-    }
+    return data;
   },
 
   // Fetch directory contacts belonging to the same workspace domain
@@ -466,198 +446,88 @@ export const mockAuth = {
     return data || [];
   },
 
-  // Fetch meeting details (passcode verification with virtual fallback for older databases)
+  // Fetch meeting details. Unknown or malformed meeting IDs return an error —
+  // never a virtual meeting — so the waitroom and the call can tell the user
+  // the meeting does not exist.
   getMeetingDetails: async (meetingId: string) => {
-    try {
-      const safeId = meetingId || 'virtual-meeting';
-      // Validate UUID format before running database query (prevents syntax error 22P02)
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      const isValidUuid = meetingId ? uuidRegex.test(meetingId) : false;
-
-      let data = null;
-      let error = null;
-
-      if (isValidUuid) {
-        const res = await supabase
-          .from('meetings')
-          .select('*')
-          .eq('id', meetingId)
-          .maybeSingle();
-        data = res.data;
-        error = res.error;
-      }
-
-      if (error || !data) {
-        // Fallback: Generate virtual meeting details so guests can still connect even if the table doesn't exist, has restrictive RLS, or uses a virtual ID
-        const passcode = getDeterministicPasscode(safeId);
-
-        const localSettingsRaw = localStorage.getItem(`giin_meeting_settings_${safeId}`);
-        const requireWaitingRoom = localSettingsRaw ? JSON.parse(localSettingsRaw).require_waiting_room : true;
-
-        return {
-          data: {
-            id: safeId,
-            title: 'Secure Video Meeting',
-            passcode,
-            admin_id: null,
-            status: 'In Progress',
-            require_waiting_room: requireWaitingRoom
-          },
-          error: null
-        };
-      }
-
-      if (data) {
-        // Deterministically generate a virtual passcode if database columns aren't created yet
-        if (!data.passcode) {
-          data.passcode = getDeterministicPasscode(safeId);
-        }
-        if (!data.admin_id) {
-          data.admin_id = data.user_id; // Default host is the creator
-        }
-        const localSettingsRaw = localStorage.getItem(`giin_meeting_settings_${safeId}`);
-        if (localSettingsRaw) {
-          data.require_waiting_room = JSON.parse(localSettingsRaw).require_waiting_room;
-        } else {
-          data.require_waiting_room = data.require_waiting_room ?? true;
-        }
-      }
-      return { data, error: null };
-    } catch (err: any) {
-      console.warn('[Supabase Client] Exception in getMeetingDetails, falling back to virtual session.', err.message);
-      const safeId = meetingId || 'virtual-meeting';
-      const passcode = getDeterministicPasscode(safeId);
-      const localSettingsRaw = localStorage.getItem(`giin_meeting_settings_${safeId}`);
-      const requireWaitingRoom = localSettingsRaw ? JSON.parse(localSettingsRaw).require_waiting_room : true;
-      return {
-        data: {
-          id: safeId,
-          title: 'Secure Video Meeting',
-          passcode,
-          admin_id: null,
-          status: 'In Progress',
-          require_waiting_room: requireWaitingRoom
-        },
-        error: null
-      };
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!meetingId || !uuidRegex.test(meetingId)) {
+      return { data: null, error: { message: 'This meeting link is not valid. The meeting may have been deleted.' } };
     }
+
+    const { data, error } = await supabase
+      .from('meetings')
+      .select('*')
+      .eq('id', meetingId)
+      .maybeSingle();
+
+    if (error) {
+      return { data: null, error };
+    }
+    if (!data) {
+      return { data: null, error: { message: 'Meeting does not exist or has been deleted.' } };
+    }
+
+    if (!data.admin_id) {
+      data.admin_id = data.user_id; // Default host is the creator
+    }
+    const localSettingsRaw = localStorage.getItem(`giin_meeting_settings_${meetingId}`);
+    if (localSettingsRaw) {
+      try {
+        data.require_waiting_room = JSON.parse(localSettingsRaw).require_waiting_room;
+      } catch (e) { /* keep the database value */ }
+    } else {
+      data.require_waiting_room = data.require_waiting_room ?? true;
+    }
+    return { data, error: null };
   },
 
-  // Add participant to Waiting Room (with virtual backup if table is missing or RLS restricts access)
+  // Add a participant to the waiting room. Always writes the real
+  // meeting_participants row — guests included (the table allows public
+  // inserts) — and throws when the write fails, so a join is never faked.
   joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant', status?: 'Waiting' | 'Admitted' | 'Declined') => {
     const finalStatus = status || (role === 'Admin' ? 'Admitted' : 'Waiting');
-    
-    // Check if the user is authenticated. Guests (unauthenticated users) do not have database accounts
-    // and will always trigger 403 RLS violations. We bypass the DB insert for them immediately.
-    let isGuest = !userId;
-    let currentSessionUserId: string | null = null;
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData?.session) {
-        isGuest = true;
-      } else {
-        currentSessionUserId = sessionData.session.user.id;
-      }
-    } catch (e) {
-      isGuest = true;
-    }
 
-    // Bypass database insert for participants joining themselves to prevent 403 RLS Forbidden console errors
-    const isParticipantJoiningSelf = role === 'Participant' && userId === currentSessionUserId;
-    const shouldBypassDb = isGuest || isParticipantJoiningSelf || isMeetingParticipantsTableMissing;
-
-    if (shouldBypassDb) {
-      return {
-        id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
+    const { data, error } = await supabase
+      .from('meeting_participants')
+      .insert([{
         meeting_id: meetingId,
         user_id: userId || null,
         name: name,
         status: finalStatus,
         role: role
-      };
-    }
+      }])
+      .select()
+      .maybeSingle();
 
-    try {
-      const { data, error } = await supabase
-        .from('meeting_participants')
-        .insert([{
-          meeting_id: meetingId,
-          user_id: userId || null,
-          name: name,
-          status: finalStatus,
-          role: role
-        }])
-        .select()
-        .maybeSingle();
-      
-      if (error) {
-        if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
-          isMeetingParticipantsTableMissing = true;
-        }
-        console.warn('[Supabase Client] Failed to join waitroom. Falling back to virtual session.', error.message);
-        return {
-          id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
-          meeting_id: meetingId,
-          user_id: userId || null,
-          name: name,
-          status: finalStatus,
-          role: role
-        };
-      }
-
-      return data || {
-        id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
-        meeting_id: meetingId,
-        user_id: userId || null,
-        name: name,
-        status: finalStatus,
-        role: role
-      };
-    } catch (err: any) {
-      console.warn('[Supabase Client] Exception in joinMeetingRoom. Falling back to virtual session.', err.message);
-      return {
-        id: 'virtual-participant-' + Math.random().toString(36).substr(2, 9),
-        meeting_id: meetingId,
-        user_id: userId || null,
-        name: name,
-        status: finalStatus,
-        role: role
-      };
+    if (error) {
+      throw new Error(`Could not join the meeting: ${error.message}`);
     }
+    if (!data) {
+      throw new Error('Could not join the meeting: the database returned no participant row.');
+    }
+    return data;
   },
 
-  // Check waiting status for participant (resilient to missing database tables)
+  // Check waiting status for a participant. On any database error the
+  // participant stays 'Waiting' (fail closed) — never auto-admitted.
   checkParticipantStatus: async (participantId: string) => {
-    if (isMeetingParticipantsTableMissing) {
-      return 'Admitted';
-    }
     try {
-      if (participantId.startsWith('virtual-participant-')) {
-        return 'Admitted'; // Virtual bypass for local testing
-      }
       const { data, error } = await supabase
         .from('meeting_participants')
         .select('status')
         .eq('id', participantId)
         .maybeSingle();
-      if (error) {
-        if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
-          isMeetingParticipantsTableMissing = true;
-        }
-        return 'Admitted';
-      }
+      if (error) throw error;
       return data?.status || 'Waiting';
     } catch (err: any) {
       console.warn('[Supabase Client] Error checking participant status:', err.message);
-      return 'Admitted';
+      return 'Waiting';
     }
   },
 
-  // Get waiting participants for Host approval (resilient to missing database tables)
+  // Get waiting participants for Host approval
   getWaitingParticipants: async (meetingId: string) => {
-    if (isMeetingParticipantsTableMissing) {
-      return [];
-    }
     try {
       const { data, error } = await supabase
         .from('meeting_participants')
@@ -666,9 +536,7 @@ export const mockAuth = {
         .eq('status', 'Waiting')
         .order('updated_at', { ascending: true });
       if (error) {
-        if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
-          isMeetingParticipantsTableMissing = true;
-        }
+        console.warn('[Supabase Client] Error getting waiting list:', error.message);
         return [];
       }
       return data || [];
@@ -680,26 +548,15 @@ export const mockAuth = {
 
   // Update participant status (Admit/Decline)
   updateParticipantStatus: async (participantId: string, status: 'Admitted' | 'Declined') => {
-    if (isMeetingParticipantsTableMissing) {
-      return { data: null, error: null };
-    }
     const { data, error } = await supabase
       .from('meeting_participants')
       .update({ status, updated_at: new Date() })
       .eq('id', participantId);
-    if (error) {
-      if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
-        isMeetingParticipantsTableMissing = true;
-      }
-    }
     return { data, error };
   },
 
-  // Get active admitted participants in the call room (resilient to missing database tables)
+  // Get active admitted participants in the call room
   getAdmittedParticipants: async (meetingId: string) => {
-    if (isMeetingParticipantsTableMissing) {
-      return [];
-    }
     try {
       const { data, error } = await supabase
         .from('meeting_participants')
@@ -707,9 +564,7 @@ export const mockAuth = {
         .eq('meeting_id', meetingId)
         .eq('status', 'Admitted');
       if (error) {
-        if (error.code === '42P01' || error.message?.includes('meeting_participants')) {
-          isMeetingParticipantsTableMissing = true;
-        }
+        console.warn('[Supabase Client] Error getting admitted list:', error.message);
         return [];
       }
       return data || [];
@@ -719,17 +574,12 @@ export const mockAuth = {
     }
   },
 
-  // Change meeting admin / designate new host (resilient to column absence)
+  // Change meeting admin / designate new host
   changeMeetingAdmin: async (meetingId: string, newAdminId: string) => {
     const { data, error } = await supabase
       .from('meetings')
       .update({ admin_id: newAdminId })
       .eq('id', meetingId);
-    
-    if (error && error.message.includes('admin_id')) {
-      console.warn('[Supabase Client] Skipping db admin delegate since column is missing.');
-      return { data: { success: true }, error: null };
-    }
     return { data, error };
   },
 

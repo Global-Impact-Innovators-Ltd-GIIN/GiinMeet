@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Key, EyeOff, Send, Lock, ShieldAlert, PhoneOff } from 'lucide-react';
+import { EyeOff, Send, Lock, ShieldAlert, PhoneOff } from 'lucide-react';
 
-interface E2EEMessage {
+interface PrivateMessage {
   id: string;
   sender: string;
   text: string;
@@ -16,62 +16,22 @@ interface PrivateSpaceProps {
   onExit: () => void;
 }
 
+// A local-only ephemeral notes space. This is a DEMO, not a secure channel:
+// messages stay in this browser, vanish 60 seconds after they are sent, and
+// are never sent to anyone. There is no end-to-end encryption here — the
+// "peer" and "handshake" the old version showed were simulated.
 export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
   viewerName,
   viewerEmail,
   meetingTitle,
   onExit
 }) => {
-  const [messages, setMessages] = useState<E2EEMessage[]>([]);
+  const [messages, setMessages] = useState<PrivateMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
-  const [handshakeLogs, setHandshakeLogs] = useState<string[]>([]);
-  const [handshakeStep, setHandshakeStep] = useState<1 | 2 | 3 | 4>(1);
-  const [isE2EEReady, setIsE2EEReady] = useState(false);
   const [watermarkPos, setWatermarkPos] = useState({ x: 20, y: 40 });
   const [securityLog, setSecurityLog] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
-  // Simulated peer IP
-  const simulatedIP = '192.168.4.112';
-
-  // E2EE Handshake sequence visualization using Web Crypto API concepts
-  useEffect(() => {
-    const logs = [
-      '⚡ [WebCrypto] Initializing peer-to-peer secure socket...',
-      '🔑 [WebCrypto] Generating ECDH local keypair (curve P-256)...',
-      '📦 [WebCrypto] local publicKey derived: 04a8b7c2d9e3f8a5c...',
-      '🔄 [WebCrypto] Initiating peer Diffie-Hellman key exchange...',
-      '📥 [WebCrypto] Remote publicKey received from Lucas Lima...',
-      '🔗 [WebCrypto] Deriving shared secret encryption key...',
-      '🔐 [WebCrypto] AES-GCM 256-bit symmetric session key established.',
-      '💎 [E2EE] Communication channel fully encrypted.'
-    ];
-
-    let logIdx = 0;
-    const interval = setInterval(() => {
-      if (logIdx < logs.length) {
-        setHandshakeLogs(prev => [...prev, logs[logIdx]]);
-        logIdx++;
-        setHandshakeStep(Math.min(Math.ceil(logIdx / 2), 4) as any);
-      } else {
-        clearInterval(interval);
-        setIsE2EEReady(true);
-        // Load initial secure messages
-        setMessages([
-          { 
-            id: 'm1', 
-            sender: 'Lucas Lima', 
-            text: 'Sensitive parameters: our Q3 pricing variables are restricted to this room.', 
-            timestamp: new Date(), 
-            expiresIn: 60 
-          }
-        ]);
-      }
-    }, 900);
-
-    return () => clearInterval(interval);
-  }, []);
 
   // DRM Safeguards: Block Right-Click and Copy listeners
   useEffect(() => {
@@ -82,7 +42,7 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
 
     const blockCopy = (e: ClipboardEvent) => {
       e.preventDefault();
-      triggerSecurityToast('Text copying is restricted inside E2EE rooms.');
+      triggerSecurityToast('Text copying is restricted in this private space.');
     };
 
     const blockKeyDown = (e: KeyboardEvent) => {
@@ -117,10 +77,8 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
 
   // Ephemeral messaging 60-second deletion timer loop
   useEffect(() => {
-    if (!isE2EEReady) return;
-
     const interval = setInterval(() => {
-      setMessages(prev => 
+      setMessages(prev =>
         prev
           .map(msg => ({ ...msg, expiresIn: msg.expiresIn - 1 }))
           .filter(msg => msg.expiresIn > 0)
@@ -128,7 +86,7 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isE2EEReady]);
+  }, []);
 
   // Scroll chat bottom
   useEffect(() => {
@@ -142,9 +100,9 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || !isE2EEReady) return;
+    if (!chatInput.trim()) return;
 
-    const newMsg: E2EEMessage = {
+    const newMsg: PrivateMessage = {
       id: Math.random().toString(36).substr(2, 9),
       sender: 'You',
       text: chatInput,
@@ -154,18 +112,6 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
 
     setMessages(prev => [...prev, newMsg]);
     setChatInput('');
-
-    // Simulate reply
-    setTimeout(() => {
-      const botReply: E2EEMessage = {
-        id: Math.random().toString(36).substr(2, 9),
-        sender: 'Lucas Lima',
-        text: 'Acknowledged. Ephemeral copy received, destroying logs...',
-        timestamp: new Date(),
-        expiresIn: 60
-      };
-      setMessages(prev => [...prev, botReply]);
-    }, 1500);
   };
 
   return (
@@ -178,11 +124,11 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
       borderRadius: 'var(--radius-lg)',
       position: 'relative',
       overflow: 'hidden',
-      border: '2px solid #EF4444', // Red border indicating confidential security E2EE
+      border: '2px solid #EF4444',
       userSelect: 'none', // Programmatic block text select CSS
       animation: 'pop-in var(--transition-normal)'
     }}>
-      
+
       {/* DRM Watermark layer: drifts slowly */}
       <div style={{
         position: 'absolute',
@@ -198,7 +144,7 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
         userSelect: 'none',
         transition: 'all 3.8s ease-in-out'
       }}>
-        CONFIDENTIAL &bull; {viewerEmail} &bull; IP: {simulatedIP}
+        CONFIDENTIAL &bull; {viewerEmail}
       </div>
 
       {/* Security alert toast */}
@@ -238,22 +184,22 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span className="badge" style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#EF4444', border: '1px solid rgba(239,68,68,0.4)' }}>
-            BLACK BOX VAULT
+            PRIVATE SPACE
           </span>
           <h3 style={{ fontSize: '1.1rem', color: 'white', fontFamily: 'var(--font-heading)' }}>
-            E2EE: {meetingTitle}
+            Private Space: {meetingTitle}
           </h3>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#EF4444' }}>
           <Lock size={14} />
-          <span>E2EE Active (AES-GCM)</span>
+          <span>Local-only demo</span>
         </div>
       </div>
 
       {/* Main split work space */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        
-        {/* Left pane: Crypto Logs / Key Exchanges */}
+
+        {/* Left pane: About this space */}
         <div style={{
           flex: 1,
           padding: '2rem',
@@ -265,53 +211,34 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
         }}>
           <div>
             <h4 style={{ fontSize: '1.1rem', fontFamily: 'var(--font-heading)', color: 'white', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Key size={18} color="var(--color-accent)" />
-              <span>Cryptographic Handshake Status</span>
+              <Lock size={18} color="var(--color-accent)" />
+              <span>About this space</span>
             </h4>
 
-            {/* Steps visual badges */}
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-              {[1, 2, 3, 4].map(s => (
-                <div 
-                  key={s}
-                  style={{
-                    flex: 1,
-                    height: '6px',
-                    borderRadius: '3px',
-                    backgroundColor: handshakeStep >= s ? '#10B981' : '#1E293B',
-                    transition: 'all 0.4s ease'
-                  }}
-                />
-              ))}
-            </div>
-
-            {/* Handshake logger console */}
             <div style={{
               backgroundColor: '#020305',
               border: '1px solid #1E293B',
               borderRadius: '6px',
               padding: '1rem',
-              fontFamily: 'monospace',
-              fontSize: '0.8rem',
-              color: '#34D399',
-              minHeight: '200px',
+              fontSize: '0.85rem',
+              color: 'var(--text-muted)',
+              lineHeight: 1.5,
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.5rem',
-              overflowY: 'auto'
+              gap: '0.5rem'
             }}>
-              {handshakeLogs.map((log, idx) => (
-                <div key={idx}>{log}</div>
-              ))}
-              {!isE2EEReady && (
-                <div style={{ color: 'var(--text-muted)', animation: 'pulse-ring 1s infinite' }}>
-                  Connecting peer tunnels...
-                </div>
-              )}
+              <p style={{ margin: 0 }}>
+                This is a local demo space. Notes you write here stay in this browser and
+                disappear 60 seconds after you send them.
+              </p>
+              <p style={{ margin: 0 }}>
+                They are not sent to anyone and are not end-to-end encrypted. There is no
+                peer connected here.
+              </p>
             </div>
           </div>
 
-          {/* Secure details card */}
+          {/* Guardrails card */}
           <div style={{
             padding: '1.25rem',
             borderRadius: 'var(--radius-md)',
@@ -321,12 +248,12 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
             flexDirection: 'column',
             gap: '0.5rem'
           }}>
-            <h5 style={{ color: 'white', fontWeight: 600, fontSize: '0.9rem' }}>Room Security Guardrails</h5>
+            <h5 style={{ color: 'white', fontWeight: 600, fontSize: '0.9rem' }}>Room Guardrails</h5>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-accent)', fontWeight: 600 }}>Active session: {viewerName}</span>
             <ul style={{ fontSize: '0.75rem', color: 'var(--text-muted)', paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-              <li>Direct P2P communication (No logs stored on server)</li>
+              <li>Notes stay in this browser only (nothing is sent anywhere)</li>
               <li>Right-click, copy-paste, and key screenshots disabled</li>
-              <li>Chat logs automatically vanish 60 seconds after delivery</li>
+              <li>Notes automatically vanish 60 seconds after delivery</li>
               <li>Visible digital username watermarking enabled</li>
             </ul>
           </div>
@@ -341,13 +268,13 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
         }}>
           <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #1E293B', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-            <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Secured chat channel</span>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Local notes</span>
           </div>
 
           {/* Message List */}
           <div style={{ flex: 1, padding: '1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {messages.map((m) => (
-              <div 
+              <div
                 key={m.id}
                 style={{
                   alignSelf: m.sender === 'You' ? 'flex-end' : 'flex-start',
@@ -367,7 +294,7 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
                 }}>
                   {m.text}
                 </div>
-                
+
                 {/* Deletion Countdown timer badge */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.2rem', fontSize: '0.65rem', color: 'rgba(239, 68, 68, 0.7)' }}>
                   <EyeOff size={11} />
@@ -375,7 +302,7 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
                 </div>
               </div>
             ))}
-            {isE2EEReady && messages.length === 0 && (
+            {messages.length === 0 && (
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '2rem 0' }}>
                 All logs vanished. Chat is empty.
               </div>
@@ -385,10 +312,9 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
 
           {/* Form */}
           <form onSubmit={handleSendMessage} style={{ padding: '1rem', borderTop: '1px solid #1E293B', display: 'flex', gap: '0.5rem' }}>
-            <input 
-              type="text" 
-              placeholder={isE2EEReady ? "Write secure message..." : "Handshaking..."}
-              disabled={!isE2EEReady}
+            <input
+              type="text"
+              placeholder="Write a note..."
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               style={{
@@ -401,9 +327,8 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
                 fontSize: '0.85rem'
               }}
             />
-            <button 
-              type="submit" 
-              disabled={!isE2EEReady}
+            <button
+              type="submit"
               style={{
                 backgroundColor: '#EF4444',
                 color: 'white',
@@ -414,8 +339,7 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                cursor: isE2EEReady ? 'pointer' : 'not-allowed',
-                opacity: isE2EEReady ? 1 : 0.6
+                cursor: 'pointer'
               }}
             >
               <Send size={15} />
@@ -434,10 +358,10 @@ export const PrivateSpace: React.FC<PrivateSpaceProps> = ({
         justifyContent: 'space-between'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          <span>Session Key Ref: ECDH-256-AES-GCM-TOKEN</span>
+          <span>Local-only demo — notes are not sent or encrypted end-to-end.</span>
         </div>
 
-        <button 
+        <button
           onClick={onExit}
           className="premium-btn premium-btn-danger"
           style={{ padding: '0.5rem 1.25rem', fontSize: '0.85rem' }}

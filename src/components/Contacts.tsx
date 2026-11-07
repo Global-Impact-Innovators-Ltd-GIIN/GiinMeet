@@ -4,7 +4,7 @@ import {
   Briefcase, ArrowLeft, BarChart2, MapPin, Clock, Plus, 
   Paperclip, Lock, Shield
 } from 'lucide-react';
-import { mockAuth, supabase } from '../supabaseClient';
+import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode } from '../supabaseClient';
 import { encryptMessage } from '../services/e2ee';
 
 interface Contact {
@@ -71,7 +71,7 @@ export const Contacts: React.FC<ContactsProps> = ({
   // Interaction History State
   const [interactionHistory, setInteractionHistory] = useState<{ type: string; date: string; duration?: string }[]>([]);
 
-  // E2EE Drop Box drag-over state
+  // Encrypted file Drop Box drag-over state
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -96,7 +96,7 @@ export const Contacts: React.FC<ContactsProps> = ({
     const loadWorkspaceContacts = async () => {
       if (!userDomain) return;
       try {
-        const dbProfiles = await mockAuth.getContacts(userDomain);
+        const dbProfiles = await giinApi.getContacts(userDomain);
         if (dbProfiles) {
           const mapped: Contact[] = dbProfiles.map((p: any) => {
             const avatar = p.avatar_url || (p.name ? p.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U');
@@ -314,7 +314,7 @@ export const Contacts: React.FC<ContactsProps> = ({
         ? crypto.randomUUID() 
         : Math.random().toString(36).substring(2, 15) + '-' + Math.random().toString(36).substring(2, 15);
       
-      const passcode = Math.random().toString(36).substr(2, 6).toUpperCase();
+      const passcode = generateMeetingPasscode();
       
       const dbMeet = {
         id: meetingId,
@@ -329,11 +329,17 @@ export const Contacts: React.FC<ContactsProps> = ({
       };
 
       // Create meeting in Supabase
-      await supabase.from('meetings').insert([dbMeet]);
+      const { error: insertError } = await supabase.from('meetings').insert([dbMeet]);
+      if (insertError) {
+        throw new Error(`Could not schedule the meeting: ${insertError.message}`);
+      }
+
+      // Create the LiveKit room for this meeting (best-effort: retried on join).
+      await ensureMeetingRoom(meetingId, dbMeet.title, currentUser.id);
 
       // Register both current user and target contact in waitroom
-      await mockAuth.joinMeetingRoom(meetingId, currentUser.name, currentUser.id, 'Admin', 'Admitted');
-      await mockAuth.joinMeetingRoom(meetingId, selectedContact.name, selectedContactId, 'Participant', 'Waiting');
+      await giinApi.joinMeetingRoom(meetingId, currentUser.name, currentUser.id, 'Admin', 'Admitted');
+      await giinApi.joinMeetingRoom(meetingId, selectedContact.name, selectedContactId, 'Participant', 'Waiting');
 
       // 2. Format custom invite payload
       const invitePayload = `[MEET_INVITE:${dbMeet.title}|${scheduledDate}|${scheduledTime}|${meetingId}|${passcode}]`;
@@ -343,7 +349,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       const dbText = await encryptMessage(invitePayload, dmThreadId);
 
       // Send to messages
-      await mockAuth.sendMessage({
+      await giinApi.sendMessage({
         thread_id: dmThreadId,
         sender_name: currentUser.name || 'You',
         text: dbText,
@@ -373,7 +379,7 @@ export const Contacts: React.FC<ContactsProps> = ({
     return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00`;
   };
 
-  // E2EE File Upload and Drop Handlers
+  // Encrypted File Upload and Drop Handlers
   const handleFileDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingFile(false);
@@ -404,7 +410,7 @@ export const Contacts: React.FC<ContactsProps> = ({
           const dmThreadId = 'dm_' + [currentUser.id, selectedContactId].sort().join('_');
           const dbText = await encryptMessage(filePayload, dmThreadId);
 
-          await mockAuth.sendMessage({
+          await giinApi.sendMessage({
             thread_id: dmThreadId,
             sender_name: currentUser.name || 'You',
             text: dbText,
@@ -1140,7 +1146,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                 </span>
               </div>
 
-              {/* E2EE File Drop Box zone */}
+              {/* Encrypted File Drop Box zone */}
               <div 
                 onDragOver={(e) => {
                   e.preventDefault();

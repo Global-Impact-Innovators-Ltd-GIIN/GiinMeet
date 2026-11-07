@@ -179,44 +179,32 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
     isDrawingRef.current = false;
   };
 
+  // AI summaries are not available: no transcription or summarisation service is
+  // wired up yet. The button adds an honest note to the minutes instead of a
+  // fabricated summary that was never about this meeting.
   const handleAISummarize = () => {
     setIsAISummarizing(true);
     setTimeout(() => {
-      // Analyze current minutes text and generate a summaries section
-      const cleanerMinutes = minutesText.replace(/## ✨ AI Executive Summary[\s\S]*$/, '').trim();
-      
-      const summaryText = 
-        `\n\n## ✨ AI Executive Summary\n` +
-        `**Key Highlights & Discussions:**\n` +
-        `- Participants aligned on product rollout timelines and verified zero-knowledge security handshakes.\n` +
-        `- Addressed direct calling WebRTC connectivity pipelines, deploying redundant ICE candidate buffering queues to safeguard calls under database congestion.\n\n` +
-        `**Decisions Made:**\n` +
-        `- Approved immediate rollout of the updated client environment.\n` +
-        `- Endorsed visual layout redesign of the 1-on-1 video call rooms.\n\n` +
-        `**AI Next Action Recommendation:**\n` +
-        `- Assign QA checking for WebRTC media performance on mobile browsers.\n` +
-        `- Follow up on Enterprise directory replication logs.`;
-        
-      setMinutesText(cleanerMinutes + summaryText);
+      const note =
+        `\n\n## AI Executive Summary\n` +
+        `AI summaries are not available yet — no transcription or summarisation service is connected. A real summary will appear here once speech-to-text is wired up.`;
+      setMinutesText(prev => prev + note);
       setIsAISummarizing(false);
-    }, 1200);
+    }, 300);
   };
 
+  // AI transcription is not available: no speech-to-text service is wired up.
+  // The button adds an honest note to the minutes instead of a fabricated
+  // transcript with invented speakers and timestamps.
   const handleAITranscribe = () => {
     setIsAITranscribing(true);
     setTimeout(() => {
-      const cleanerMinutes = minutesText.replace(/## 🎙️ AI Automated Transcript[\s\S]*$/, '').trim();
-      
-      const transcriptText = 
-        `\n\n## 🎙️ AI Automated Transcript\n` +
-        `**[00:02] You (Host):** Welcome everyone. Let's verify our video calling connection status and E2EE verification numbers.\n` +
-        `**[00:15] Partner:** I can hear you perfectly now. The floating controls look great and are extremely easy to tap on mobile.\n` +
-        `**[00:34] You (Host):** Excellent. I will draw our system architecture on the shared whiteboard canvas now to align on the database fallback schema.\n` +
-        `**[00:48] Partner:** Agreed. Let's record these decisions into the workspace checklist.`;
-        
-      setMinutesText(cleanerMinutes + transcriptText);
+      const note =
+        `\n\n## AI Automated Transcript\n` +
+        `AI transcription is not available yet — no speech-to-text service is connected. A real transcript will appear here once transcription is wired up.`;
+      setMinutesText(prev => prev + note);
       setIsAITranscribing(false);
-    }, 1200);
+    }, 300);
   };
 
   // Action Items State

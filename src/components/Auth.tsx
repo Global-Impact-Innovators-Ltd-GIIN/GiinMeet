@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Mail, Lock, User, ArrowRight, Globe, Phone, ArrowLeft } from 'lucide-react';
-import { mockAuth, supabase, getTransparentLogo } from '../supabaseClient';
-import { generate6DigitOTP, sendTwilioSMS, sendResendEmail } from '../services/authIntegration';
+import { giinApi, supabase, getTransparentLogo } from '../supabaseClient';
 
 const WORLD_DIALING_CODES = [
   { code: '+93', name: 'Afghanistan', iso: 'AF' },
@@ -215,9 +214,6 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
   const [workspaceDiscovery, setWorkspaceDiscovery] = useState<{ domain: string; name: string; isPersonal?: boolean } | null>(null);
   const [customWorkspaceName, setCustomWorkspaceName] = useState('');
 
-  // Simulated Alert Overlay State
-  const [otpNotification, setOtpNotification] = useState<{ destination: string; code: string; channel: string } | null>(null);
-
   // Transparent logo loading state
   const [logoUrl, setLogoUrl] = useState('/logo.png');
   useEffect(() => {
@@ -226,25 +222,6 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
 
   // Refs for the 6 OTP input boxes
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
-
-  // Listen for the custom window event from the auth integration service
-  useEffect(() => {
-    const handleOtpEvent = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      setOtpNotification(customEvent.detail);
-      
-      // Auto-clear notification alert after 10 seconds
-      const timer = setTimeout(() => {
-        setOtpNotification(null);
-      }, 10000);
-      return () => clearTimeout(timer);
-    };
-
-    window.addEventListener('giin_otp_delivered', handleOtpEvent);
-    return () => {
-      window.removeEventListener('giin_otp_delivered', handleOtpEvent);
-    };
-  }, []);
 
   // Timer countdown hook for Resend link
   useEffect(() => {
@@ -290,29 +267,28 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
     }
   };
 
-  // Dispatch SMS verification code
+  // Dispatch SMS verification code through real Supabase phone auth. The code
+  // is sent by Supabase/Twilio as configured in the dashboard — it is never
+  // generated here and never shown on screen.
   const handleSendOTP = async () => {
     if (!phone) return;
     setIsLoading(true);
     setValidationError('');
-    
+
     try {
-      const code = generate6DigitOTP();
-      const destination = `${countryCode} ${phone}`;
-      
-      // Dispatch verification code via Twilio
-      await sendTwilioSMS(destination, code);
-      
+      const workspaceArg = customWorkspaceName.trim() || 'Personal Workspace';
+      await giinApi.signInWithPhone(`${countryCode} ${phone}`, workspaceArg);
+
       setOtpSent(true);
       setResendTimer(60);
-      
+
       // Focus the first OTP grid box after render
       setTimeout(() => {
         otpRefs.current[0]?.focus();
       }, 100);
-    } catch (err) {
-      console.error('Error generating verification code:', err);
-      setValidationError('Failed to generate verification code. Please try again.');
+    } catch (err: any) {
+      console.error('Error sending verification code:', err);
+      setValidationError(err?.message || 'Failed to send the verification code. Phone sign-in may not be set up yet — try signing in with email instead.');
     } finally {
       setIsLoading(false);
     }
@@ -339,7 +315,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
 
     try {
       const workspaceArg = customWorkspaceName.trim() || 'Personal Workspace';
-      const { data } = await mockAuth.verifyOTP(`${countryCode} ${phone}`, enteredCode, name || undefined, workspaceArg);
+      const { data } = await giinApi.verifyOTP(`${countryCode} ${phone}`, enteredCode, name || undefined, workspaceArg);
       
       if (data.user) {
         onAuthSuccess({
@@ -352,9 +328,9 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
       } else {
         setValidationError('Invalid verification code. Please check the code and try again.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error verifying OTP:', err);
-      setValidationError('OTP verification failed. Please try again.');
+      setValidationError(err?.message || 'OTP verification failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -364,16 +340,18 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
+    if (!password) {
+      setValidationError('Please enter your password.');
+      return;
+    }
 
     setIsLoading(true);
+    setValidationError('');
     try {
       const workspaceArg = workspaceDiscovery?.isPersonal ? (customWorkspaceName.trim() || 'Personal Workspace') : undefined;
       if (isLogin) {
-        const { data } = await mockAuth.signIn(email, workspaceArg);
+        const { data } = await giinApi.signIn(email, password, workspaceArg);
         if (data.user) {
-          // Trigger a simulated Resend API notification email upon login success
-          await sendResendEmail(data.user.email, 'Logged in to your workspace successfully!');
-          
           onAuthSuccess({
             id: data.user.id,
             email: data.user.email,
@@ -383,11 +361,8 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
           });
         }
       } else {
-        const { data } = await mockAuth.signUp(email, name || email.split('@')[0], workspaceArg);
+        const { data } = await giinApi.signUp(email, password, name || email.split('@')[0], workspaceArg);
         if (data.user) {
-          // Trigger a simulated Resend welcome email upon registration
-          await sendResendEmail(data.user.email, 'Welcome to GIIN MEET! Verify your corporate profile');
-
           onAuthSuccess({
             id: data.user.id,
             email: data.user.email,
@@ -397,16 +372,20 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
           });
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setValidationError(err?.message || 'Sign-in failed. Please check your email and password and try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Google SSO simulated gateway
+  // Google sign-in through real Supabase OAuth. Google must be enabled in the
+  // Supabase dashboard (Authentication > Providers > Google); when it is not,
+  // this fails with a clear message instead of inventing a signed-in session.
   const handleGoogleSSO = async () => {
     setIsLoading(true);
+    setValidationError('');
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -421,29 +400,11 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
         throw new Error('No redirect URL returned from Supabase OAuth.');
       }
     } catch (err: any) {
-      console.warn('[Auth] Real Google OAuth redirect failed, falling back to simulated session.', err.message);
-      // High-fidelity fallback
-      setTimeout(() => {
-        const targetEmail = email.trim() || 'sofia.brant@gmail.com';
-        const domain = targetEmail.split('@')[1] || 'gmail.com';
-        const defaultName = targetEmail.split('@')[0].split('.').map(n => n.charAt(0).toUpperCase() + n.slice(1)).join(' ');
-        const isPersonalDomain = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'aol.com', 'zoho.com', 'mail.com'].includes(domain.toLowerCase());
-        
-        const workspace = isPersonalDomain 
-          ? (customWorkspaceName.trim() || 'Personal Workspace')
-          : `${domain.split('.')[0].toUpperCase()} Enterprise Workspace`;
-
-        sendResendEmail(targetEmail, 'Welcome to GIIN MEET! Signed up via Google SSO');
-
-        onAuthSuccess({
-          id: 'mock-google-id-' + Math.random().toString(36).substr(2, 5),
-          email: targetEmail,
-          name: name || defaultName,
-          workspaceName: workspace,
-          domain: domain
-        });
-        setIsLoading(false);
-      }, 1200);
+      console.error('[Auth] Google sign-in failed:', err);
+      setValidationError(
+        err?.message || 'Google sign-in failed. Google may not be enabled for this project yet — use email sign-in instead.'
+      );
+      setIsLoading(false);
     }
   };
 
@@ -484,80 +445,6 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
       position: 'relative',
       overflow: 'hidden'
     }}>
-      {/* Sliding OTP API Notification Banner */}
-      {otpNotification && (
-        <div style={{
-          position: 'absolute',
-          top: '24px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: '90%',
-          maxWidth: '400px',
-          backgroundColor: '#0F172A',
-          border: '1.5px solid var(--color-accent)',
-          borderRadius: '12px',
-          padding: '1rem',
-          boxShadow: '0 20px 40px -10px rgba(0, 0, 0, 0.7)',
-          zIndex: 9999,
-          color: 'white',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.6rem',
-          borderLeft: '5px solid var(--color-accent)',
-          animation: 'slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{
-                backgroundColor: 'rgba(250, 189, 2, 0.15)',
-                color: 'var(--color-accent)',
-                padding: '4px 8px',
-                borderRadius: '6px',
-                fontSize: '0.7rem',
-                fontWeight: 700
-              }}>
-                {otpNotification.channel} API
-              </span>
-              <span style={{ fontWeight: 700, fontSize: '0.8rem' }}>Incoming Message</span>
-            </div>
-            <button 
-              onClick={() => setOtpNotification(null)}
-              style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontSize: '1rem' }}
-            >
-              &times;
-            </button>
-          </div>
-          <div style={{ fontSize: '0.85rem', color: '#E2E8F0', lineHeight: 1.4 }}>
-            Your 6-digit verification code is <strong style={{ color: 'var(--color-accent)', fontSize: '1.1rem', letterSpacing: '0.05em' }}>{otpNotification.code}</strong>. Valid for 5 minutes.
-          </div>
-          
-          {authMode === 'phone' && otpSent && (
-            <button 
-              onClick={() => {
-                const digits = otpNotification.code.split('');
-                setOtpCode(digits);
-                setOtpNotification(null);
-                setTimeout(() => otpRefs.current[5]?.focus(), 50);
-              }}
-              style={{
-                alignSelf: 'flex-end',
-                padding: '0.35rem 0.8rem',
-                borderRadius: '6px',
-                backgroundColor: 'var(--color-accent)',
-                color: 'black',
-                border: 'none',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              Autofill Verification Code
-            </button>
-          )}
-        </div>
-      )}
-
       {/* Decorative background grid */}
       <div style={{
         position: 'absolute',
@@ -886,7 +773,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                   className="premium-btn premium-btn-accent" 
                   style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700, marginTop: '0.5rem' }}
                 >
-                  {isLoading ? <span>Generating Code...</span> : <span>Send Verification Code</span>}
+                  {isLoading ? <span>Sending Code...</span> : <span>Send Verification Code</span>}
                 </button>
               </div>
             ) : (

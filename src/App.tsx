@@ -17,7 +17,7 @@ import { PrivateSpace } from './components/PrivateSpace';
 import { Waitroom } from './components/Waitroom';
 import { Superadmin } from './components/Superadmin';
 import { MeetingLobby } from './components/MeetingLobby';
-import { mockAuth, supabase, getTransparentLogo } from './supabaseClient';
+import { giinApi, supabase, getTransparentLogo } from './supabaseClient';
 import { encryptMessage, decryptMessage } from './services/e2ee';
 
 
@@ -327,48 +327,6 @@ function App() {
           .from('group_members')
           .select('group_id, groups(id, name)')
           .eq('user_id', user.id);
-
-        // Auto-seed demo group if the user has no groups in the DB (100% local to prevent RLS errors)
-        const hasSeededGroup = localStorage.getItem(`giin_seeded_group_${user.id}`) === 'true';
-        if ((!memberships || memberships.length === 0) && !hasSeededGroup) {
-          console.log('[App] Seeding demo group locally...');
-          localStorage.setItem(`giin_seeded_group_${user.id}`, 'true');
-
-          const newThread: ChatThread = {
-            id: 'group_demo-group-id',
-            name: 'Global Impact Innovators Official',
-            avatar: 'GI',
-            avatarBg: '#10B981',
-            isGroup: true,
-            status: 'Online',
-            unreadCount: 0,
-            messages: [
-              {
-                id: 'demo-msg-1',
-                sender: 'System Assistant',
-                text: 'Welcome to GIIN Meet! This is your official collaborative space.',
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                self: false
-              },
-              {
-                id: 'demo-msg-2',
-                sender: 'GIIN Bot',
-                text: 'You can start an instant meeting or schedule a team sync using the Dashboard.',
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                self: false
-              }
-            ]
-          };
-
-          setThreads(prev => {
-            if (!prev.some(t => t.id === newThread.id)) {
-              const updated = [newThread, ...prev];
-              localStorage.setItem('giin_chat_threads', JSON.stringify(updated));
-              return updated;
-            }
-            return prev;
-          });
-        }
 
         const userGroups = memberships?.map((m: any) => m.groups).filter(Boolean) || [];
         const userGroupIds = new Set(userGroups.map(g => g.id));
@@ -774,7 +732,7 @@ function App() {
       if (session?.user) {
         let profile = null;
         try {
-          const { data } = await mockAuth.getProfile(session.user.id);
+          const { data } = await giinApi.getProfile(session.user.id);
           profile = data;
         } catch (err) {
           console.warn('Failed to fetch profile in checkSession:', err);
@@ -802,7 +760,7 @@ function App() {
 
           try {
             await supabase.from('profiles').insert([newProfile]);
-            const { data } = await mockAuth.getProfile(session.user.id);
+            const { data } = await giinApi.getProfile(session.user.id);
             profile = data;
           } catch (err) {
             console.error('Self-healing profile creation failed:', err);
@@ -813,10 +771,10 @@ function App() {
         const isSuperadmin = isSuperAdminEmail;
 
         if (isSuperAdminEmail && profile && !profile.is_superadmin) {
-          mockAuth.updateProfileSuperadmin(session.user.id, true);
+          giinApi.updateProfileSuperadmin(session.user.id, true);
         } else if (!isSuperAdminEmail && profile?.is_superadmin) {
           // Reset database role if unauthorized user has superadmin flag
-          mockAuth.updateProfileSuperadmin(session.user.id, false);
+          giinApi.updateProfileSuperadmin(session.user.id, false);
         }
 
         const authenticatedUser = {
@@ -863,7 +821,7 @@ function App() {
       if (session?.user) {
         let profile = null;
         try {
-          const { data } = await mockAuth.getProfile(session.user.id);
+          const { data } = await giinApi.getProfile(session.user.id);
           profile = data;
         } catch (err) {
           console.warn('Failed to fetch profile in onAuthStateChange:', err);
@@ -891,7 +849,7 @@ function App() {
 
           try {
             await supabase.from('profiles').insert([newProfile]);
-            const { data } = await mockAuth.getProfile(session.user.id);
+            const { data } = await giinApi.getProfile(session.user.id);
             profile = data;
           } catch (err) {
             console.error('Self-healing profile creation failed:', err);
@@ -902,10 +860,10 @@ function App() {
         const isSuperadmin = isSuperAdminEmail;
 
         if (isSuperAdminEmail && profile && !profile.is_superadmin) {
-          mockAuth.updateProfileSuperadmin(session.user.id, true);
+          giinApi.updateProfileSuperadmin(session.user.id, true);
         } else if (!isSuperAdminEmail && profile?.is_superadmin) {
           // Reset database role if unauthorized user has superadmin flag
-          mockAuth.updateProfileSuperadmin(session.user.id, false);
+          giinApi.updateProfileSuperadmin(session.user.id, false);
         }
 
         const authenticatedUser = {
@@ -965,45 +923,7 @@ function App() {
             setMeetingHistory(cached);
           }
 
-          let data = await mockAuth.getMeetings(user.id);
-          
-          // Auto-seed demo meetings if database has no meetings (100% local to prevent RLS errors)
-          const hasSeededMeetings = localStorage.getItem(`giin_seeded_meetings_${user.id}`) === 'true';
-          if ((!data || data.length === 0) && !hasSeededMeetings) {
-            console.log('[App] Seeding demo meetings locally...');
-            localStorage.setItem(`giin_seeded_meetings_${user.id}`, 'true');
-            const demoMeetings: Meeting[] = [
-              {
-                id: 'demo-meeting-launch',
-                title: 'GIIN Meet Official Launch',
-                time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-                duration: '45 mins',
-                status: 'Scheduled',
-                host: 'You',
-                passcode: 'ABCD'
-              },
-              {
-                id: 'demo-meeting-sync',
-                title: 'Weekly Innovation Sync',
-                time: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-                duration: '30 mins',
-                status: 'Completed',
-                host: 'You',
-                passcode: 'WXYZ'
-              }
-            ];
-
-            // Immediately set state and update localStorage, bypassing DB re-query
-            const merged = [...demoMeetings];
-            cached.forEach((cm: any) => {
-              if (!merged.some(m => m.id === cm.id)) {
-                merged.push(cm);
-              }
-            });
-            setMeetingHistory(merged);
-            localStorage.setItem('giin_meetings', JSON.stringify(merged));
-            return;
-          }
+          let data = await giinApi.getMeetings(user.id);
 
           if (data && data.length > 0) {
             const mapped: Meeting[] = data.map((m: any) => ({
@@ -1218,7 +1138,7 @@ function App() {
         let saved = null;
         if (existingMeetingId) {
           // Fetch existing meeting details
-          const { data } = await mockAuth.getMeetingDetails(existingMeetingId);
+          const { data } = await giinApi.getMeetingDetails(existingMeetingId);
           if (data) {
             saved = {
               id: existingMeetingId,
@@ -1243,7 +1163,7 @@ function App() {
             host: user.name || 'You',
             require_waiting_room: requireWaitingRoom
           };
-          saved = await mockAuth.createMeeting(newDbMeet);
+          saved = await giinApi.createMeeting(newDbMeet);
         }
 
         if (saved) {
@@ -1254,7 +1174,7 @@ function App() {
             return next;
           });
           // Register the host in the meeting participants list as Admitted
-          await mockAuth.joinMeetingRoom(saved.id, user.name, user.id, 'Admin', 'Admitted');
+          await giinApi.joinMeetingRoom(saved.id, user.name, user.id, 'Admin', 'Admitted');
           
           const mapped: Meeting = {
             id: saved.id,
@@ -1275,12 +1195,18 @@ function App() {
             if (dmThreadId.startsWith('dm_')) {
               dbText = await encryptMessage(inviteMsg, dmThreadId);
             }
-            await mockAuth.sendMessage({
-              thread_id: dmThreadId,
-              sender_name: user.name || 'You',
-              text: dbText,
-              user_id: user.id
-            });
+            // The invite DM must not block starting the meeting: if it fails
+            // to send, the call still goes ahead and the failure is logged.
+            try {
+              await giinApi.sendMessage({
+                thread_id: dmThreadId,
+                sender_name: user.name || 'You',
+                text: dbText,
+                user_id: user.id
+              });
+            } catch (inviteErr: any) {
+              console.warn('[GiinMeet] Could not send the call invite message:', inviteErr?.message);
+            }
 
             if (dmThreadId.startsWith('dm_')) {
               const parts = dmThreadId.split('_');
@@ -1327,34 +1253,17 @@ function App() {
             return;
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to start meeting/call:', err);
+        window.alert(`Could not start the meeting: ${err?.message || 'the meeting could not be saved.'} Please check your connection and try again.`);
       }
     } else {
-      const generatedId = existingMeetingId || Math.random().toString(36).substr(2, 9);
-      const newMeet: Meeting = {
-        id: generatedId,
-        title: finalTitle,
-        time: new Date().toISOString(),
-        duration: 'Active now',
-        status: 'In Progress',
-        host: 'You',
-        passcode: 'ABCD'
-      };
-      setMeetingHistory(prev => [newMeet, ...prev.filter(m => m.id !== generatedId)]);
-      setActiveMeetingId(generatedId);
-      
-      if (isMeeting) {
-        setLobbyMeetingData({
-          id: generatedId,
-          title: finalTitle,
-          passcode: 'ABCD',
-          host: 'You',
-          isVideoOn: isVideo
-        });
-        setCurrentView('lobby');
-        return;
-      }
+      // Guests cannot start meetings: hosting needs a signed-in account so the
+      // meeting, its passcode and its video room can be stored. Never invent a
+      // local-only meeting — it could never connect.
+      console.warn('[GiinMeet] A guest tried to start a meeting. Sign-in is required to host a meeting.');
+      window.alert('Sign in to start a meeting. Guests can join a meeting from an invite link.');
+      return;
     }
 
     setCurrentView('meeting');
@@ -1364,7 +1273,7 @@ function App() {
     setActiveCallTitle(null);
     if (activeMeetingId) {
       try {
-        await mockAuth.updateMeetingNotes(activeMeetingId, 'Meeting completed successfully.', 0, 'Completed');
+        await giinApi.updateMeetingNotes(activeMeetingId, 'Meeting completed successfully.', 0, 'Completed');
       } catch (err) {
         console.error('Failed to update end status of meeting in database:', err);
       }
@@ -1399,9 +1308,15 @@ function App() {
       });
       stopRingSound();
       
-      // Auto-join meeting room as Admitted for the receiver, bypassing the waitroom!
+      // Register the receiver in the meeting participants list. A failure here
+      // must not block accepting the call: the token route registers the
+      // participant again when the video connection is set up.
       if (user) {
-        await mockAuth.joinMeetingRoom(incomingCall.meetingId, user.name, user.id, 'Participant', 'Admitted');
+        try {
+          await giinApi.joinMeetingRoom(incomingCall.meetingId, user.name, user.id, 'Participant', 'Admitted');
+        } catch (err: any) {
+          console.warn('[GiinMeet] Could not register the receiver in the meeting participants list:', err?.message);
+        }
       }
 
       setActiveCallTitle(`Call with ${incomingCall.callerName}`);
@@ -1494,53 +1409,48 @@ function App() {
 
 
   const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean }) => {
-    let savedMeet = null;
-    if (user && user.id) {
-      try {
-        const newDbMeet = {
-          user_id: user.id,
-          title: meet.title,
-          time: meet.time,
-          duration: meet.duration,
-          status: 'Scheduled',
-          host: user.name || 'You',
-          require_waiting_room: meet.requireWaitingRoom ?? true
-        };
-        savedMeet = await mockAuth.createMeeting(newDbMeet);
-      } catch (err) {
-        console.error('Failed to schedule meeting in database:', err);
-      }
+    if (!user || !user.id) {
+      window.alert('Sign in to schedule a meeting.');
+      return null;
     }
+    try {
+      const newDbMeet = {
+        user_id: user.id,
+        title: meet.title,
+        time: meet.time,
+        duration: meet.duration,
+        status: 'Scheduled',
+        host: user.name || 'You',
+        require_waiting_room: meet.requireWaitingRoom ?? true
+      };
+      const savedMeet = await giinApi.createMeeting(newDbMeet);
 
-    const finalMeet: Meeting = savedMeet ? {
-      id: savedMeet.id,
-      title: savedMeet.title,
-      time: savedMeet.time,
-      duration: savedMeet.duration || '40m limit',
-      status: 'Scheduled',
-      host: savedMeet.host || 'You',
-      passcode: savedMeet.passcode
-    } : {
-      id: Math.random().toString(36).substr(2, 9),
-      title: meet.title,
-      time: meet.time,
-      duration: meet.duration,
-      status: 'Scheduled',
-      host: user?.name || 'You',
-      passcode: 'ABCD'
-    };
+      const finalMeet: Meeting = {
+        id: savedMeet.id,
+        title: savedMeet.title,
+        time: savedMeet.time,
+        duration: savedMeet.duration || '40m limit',
+        status: 'Scheduled',
+        host: savedMeet.host || 'You',
+        passcode: savedMeet.passcode
+      };
 
-    setMeetingHistory(prev => [finalMeet, ...prev]);
+      setMeetingHistory(prev => [finalMeet, ...prev]);
 
-    const newNotif = {
-      id: Math.random().toString(36).substr(2, 9),
-      text: `Scheduled new meeting: "${finalMeet.title}"`,
-      time: 'Just now',
-      read: false
-    };
-    setNotifications(prev => [newNotif, ...prev]);
+      const newNotif = {
+        id: Math.random().toString(36).substr(2, 9),
+        text: `Scheduled new meeting: "${finalMeet.title}"`,
+        time: 'Just now',
+        read: false
+      };
+      setNotifications(prev => [newNotif, ...prev]);
 
-    return finalMeet;
+      return finalMeet;
+    } catch (err: any) {
+      console.error('Failed to schedule meeting in database:', err);
+      window.alert(`Could not schedule the meeting: ${err?.message || 'the meeting could not be saved.'} Please check your connection and try again.`);
+      return null;
+    }
   };
 
   const handleAuthSuccess = (authenticatedUser: { id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean; avatar_url?: string }) => {
@@ -1578,7 +1488,7 @@ function App() {
 
     if (activeMeetingId) {
       try {
-        await mockAuth.updateMeetingNotes(activeMeetingId, notes, actionItemsCount);
+        await giinApi.updateMeetingNotes(activeMeetingId, notes, actionItemsCount);
       } catch (err) {
         console.error('Failed to update meeting notes in database:', err);
       }
@@ -1614,7 +1524,7 @@ function App() {
 
     if (user && user.id) {
       try {
-        await mockAuth.updateProfile(user.id, name, email, avatarUrl, role, timezone, location, skills, phone, workspaceName, domain, socialHandles);
+        await giinApi.updateProfile(user.id, name, email, avatarUrl, role, timezone, location, skills, phone, workspaceName, domain, socialHandles);
         const updatedUser = {
           ...user,
           name,
@@ -1635,18 +1545,6 @@ function App() {
         console.error('Failed to update profile in database:', err);
       }
     }
-  };
-
-  const handleUpgradeSuccess = () => {
-    setIsPremium(true);
-    // Add premium notification
-    const newNotif = {
-      id: Math.random().toString(36).substr(2, 9),
-      text: 'Congratulations! Your GIIN MEET Pro account is now active.',
-      time: 'Just now',
-      read: false
-    };
-    setNotifications(prev => [newNotif, ...prev]);
   };
 
   const handleDowngrade = () => {
@@ -1937,7 +1835,7 @@ function App() {
               {!isSidebarCollapsed && <span>Contacts</span>}
             </button>
 
-            {/* Private Space E2EE Vault Link */}
+            {/* Private Space Link */}
             <button 
               onClick={() => setCurrentView('private')}
               className={`sidebar-btn ${currentView === 'private' ? 'active' : ''}`}
@@ -2569,9 +2467,8 @@ function App() {
           )}
 
           {currentView === 'billing' && (
-            <Billing 
+            <Billing
               isPremium={isPremium}
-              onUpgradeSuccess={handleUpgradeSuccess}
               onDowngrade={handleDowngrade}
             />
           )}
@@ -2821,7 +2718,7 @@ function App() {
               Calling {dialingState.targetUserName}
             </h3>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: 0 }}>
-              Connecting end-to-end encrypted call...
+              Connecting secure call...
             </p>
             <div className="calling-overlay-buttons">
               <button onClick={handleCancelCall} className="calling-overlay-btn calling-btn-decline" style={{ margin: '0 auto', maxWidth: '200px' }}>
@@ -2847,7 +2744,7 @@ function App() {
               {incomingCall.callerName}
             </p>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-              Zero-Knowledge E2EE Meeting Room
+              Secure Meeting Room
             </p>
             <div className="calling-overlay-buttons">
               <button onClick={handleDeclineCall} className="calling-overlay-btn calling-btn-decline">
