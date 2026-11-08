@@ -359,7 +359,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
                 </button>
               </div>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                The passcode is included in the link; guests still verify it before joining.
+                The passcode is included in the link, so guests join without typing it — they only see a passcode prompt if the link&apos;s code is wrong or missing.
               </span>
             </div>
 

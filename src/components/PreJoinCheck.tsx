@@ -22,7 +22,20 @@ import {
 // The Proceed button is gated on the essentials: a display name, a live
 // network, and no hard camera/mic failure — unless the user explicitly
 // chooses "join without camera/microphone", in which case they enter with
-// those devices off and the room is told so.
+// those devices off and the room is told so. The speaker test NEVER gates
+// proceeding: it cannot auto-pass (only the user knows if they heard the
+// tone), so it resolves to "played, awaiting your answer" instead.
+//
+// Every check is BOUNDED (Fix Round 5, item 4): a permission prompt, a
+// network probe or a getUserMedia call that never settles used to leave
+// this screen stuck on "Checking…" forever — on a phone, where a dismissed
+// permission prompt or a saved desktop deviceId can stall it, with no
+// escape. Each step now resolves to pass/fail within a fixed timeout, and
+// a failed/timed-out camera/mic always offers the join-without-devices
+// escape. The screen is also its own scroll container (see the return
+// JSX): html/body have overflow:hidden and a vertically-centred flex box
+// pushed tall content above the viewport on a ~390px phone with no way to
+// scroll to the Continue button.
 
 type CheckStatus = 'checking' | 'pass' | 'warn' | 'fail';
 
@@ -38,8 +51,8 @@ interface PreJoinCheckProps {
 const fixFor = (kind: 'camera' | 'mic', errName?: string): string => {
   if (errName === 'NotAllowedError')
     return kind === 'camera'
-      ? 'Camera blocked — click the camera icon in the browser address bar, allow the camera, then press Retry.'
-      : 'Microphone blocked — click the microphone icon in the browser address bar, allow the microphone, then press Retry.';
+      ? 'Camera blocked — click the camera icon in the browser address bar, allow the camera, then press Retry. On a phone, use the browser site settings (the lock/tune icon by the address) instead.'
+      : 'Microphone blocked — click the microphone icon in the browser address bar, allow the microphone, then press Retry. On a phone, use the browser site settings (the lock/tune icon by the address) instead.';
   if (errName === 'NotFoundError')
     return kind === 'camera'
       ? 'No camera was found on this device — plug one in or join without a camera below.'
@@ -66,7 +79,13 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   const [displayName, setDisplayName] = useState(initialDisplayName || user?.name || '');
   const [cameraStatus, setCameraStatus] = useState<CheckStatus>('checking');
   const [micStatus, setMicStatus] = useState<CheckStatus>('checking');
-  const [speakerStatus, setSpeakerStatus] = useState<CheckStatus>('checking');
+  // Speaker starts as 'warn' ("not tested yet"), NOT 'checking': nothing
+  // has played yet, so showing "Checking…" on load was a lie that never
+  // resolved until the user pressed a button. It only reads 'checking'
+  // while a tone is actually playing, and leaves that state on a timer.
+  const [speakerStatus, setSpeakerStatus] = useState<CheckStatus>('warn');
+  const [speakerPlayed, setSpeakerPlayed] = useState(false);
+  const [speakerSkipped, setSpeakerSkipped] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<CheckStatus>('checking');
   const [cameraPerm, setCameraPerm] = useState('unknown');
   const [micPerm, setMicPerm] = useState('unknown');
@@ -87,9 +106,14 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
+  const speakerTimerRef = useRef<number | null>(null);
 
   const stopStream = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (speakerTimerRef.current) {
+      window.clearTimeout(speakerTimerRef.current);
+      speakerTimerRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -102,8 +126,41 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   };
 
   // Run all device + network checks. Re-runnable with Retry.
+  // EVERY step is bounded: a permission prompt, a network probe or a
+  // getUserMedia call that never settles used to leave camera/mic/network
+  // on "Checking…" forever (notably on phones, where a dismissed
+  // permission prompt or a saved desktop deviceId can stall it), with the
+  // "join without devices" escape hidden because it only appeared on
+  // 'fail'. Each step now resolves to pass/fail within a fixed timeout.
   useEffect(() => {
     let active = true;
+
+    // getUserMedia with a hard timeout. If the prompt is dismissed or the
+    // browser stalls, the promise may never settle — so a late-arriving
+    // stream is stopped immediately instead of leaking a live camera.
+    const timeoutError = () => Object.assign(new Error('getUserMedia timed out'), { name: 'TimeoutError' });
+    const boundedGum = (useSaved: boolean): Promise<MediaStream> => {
+      const savedCam = useSaved ? localStorage.getItem('giin_selected_camera') || '' : '';
+      const savedMic = useSaved ? localStorage.getItem('giin_selected_mic') || '' : '';
+      const p = navigator.mediaDevices.getUserMedia({
+        video: savedCam ? { deviceId: { exact: savedCam }, width: 640, height: 480 } : { width: 640, height: 480 },
+        audio: savedMic
+          ? { deviceId: { exact: savedMic }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          : { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      let settled = false;
+      p.then((s) => { if (settled) s.getTracks().forEach((t) => t.stop()); }).catch(() => {});
+      return new Promise<MediaStream>((resolve, reject) => {
+        const to = window.setTimeout(() => {
+          if (!settled) { settled = true; reject(timeoutError()); }
+        }, 15000);
+        p.then((s) => {
+          if (!settled) { settled = true; window.clearTimeout(to); resolve(s); }
+        }).catch((e) => {
+          if (!settled) { settled = true; window.clearTimeout(to); reject(e); }
+        });
+      });
+    };
 
     const runChecks = async () => {
       setCameraStatus('checking');
@@ -114,11 +171,20 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       setMicHeard(false);
 
       // Permissions state (best-effort: not every browser supports it).
+      // Bounded: on some mobile browsers permissions.query never settles,
+      // which used to stall every check below it.
       try {
         const nav: any = navigator as any;
         if (nav.permissions?.query) {
-          const cam = await nav.permissions.query({ name: 'camera' as any });
-          const mic = await nav.permissions.query({ name: 'microphone' as any });
+          const permTimeout = new Promise<never>((_, reject) =>
+            window.setTimeout(() => reject(new Error('permissions-timeout')), 3000));
+          const [cam, mic] = await Promise.race([
+            Promise.all([
+              nav.permissions.query({ name: 'camera' as any }),
+              nav.permissions.query({ name: 'microphone' as any }),
+            ]),
+            permTimeout,
+          ]) as any;
           if (active) {
             setCameraPerm(cam.state);
             setMicPerm(mic.state);
@@ -127,27 +193,46 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       } catch (e) { /* permission state is advisory only */ }
 
       // Network: online state + a real round-trip probe.
+      // Bounded (8 s): an unsettled fetch used to leave the network check
+      // on "Checking…" forever, and Proceed requires a network pass.
       const t0 = performance.now();
+      const ctrl = new AbortController();
+      const netTimer = window.setTimeout(() => ctrl.abort(), 8000);
       try {
-        await fetch(window.location.origin, { method: 'HEAD', cache: 'no-store' });
+        await fetch(window.location.origin, { method: 'HEAD', cache: 'no-store', signal: ctrl.signal });
         if (!active) return;
         setNetworkMs(Math.round(performance.now() - t0));
         setNetworkStatus(navigator.onLine ? 'pass' : 'fail');
       } catch (e) {
         if (!active) return;
         setNetworkStatus('fail');
+      } finally {
+        window.clearTimeout(netTimer);
       }
 
-      // Camera + microphone, together, from the saved device choices.
+      // Camera + microphone, together.
+      if (!navigator.mediaDevices?.getUserMedia) {
+        if (!active) return;
+        const msg = 'This browser cannot access a camera or microphone here — join without camera/microphone below, or try Chrome on this phone.';
+        setCameraStatus('fail');
+        setMicStatus('fail');
+        setCameraError(msg);
+        setMicError(msg);
+        return;
+      }
       try {
-        const savedCam = localStorage.getItem('giin_selected_camera') || '';
-        const savedMic = localStorage.getItem('giin_selected_mic') || '';
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: savedCam ? { deviceId: { exact: savedCam }, width: 640, height: 480 } : { width: 640, height: 480 },
-          audio: savedMic
-            ? { deviceId: { exact: savedMic }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-            : { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
+        let stream: MediaStream;
+        try {
+          stream = await boundedGum(true);
+        } catch (firstErr: any) {
+          // A deviceId saved on another device (e.g. the desktop) makes a
+          // phone reject with OverconstrainedError/NotFoundError. Retry
+          // once with the phone's own default devices before failing.
+          const savedAny = localStorage.getItem('giin_selected_camera') || localStorage.getItem('giin_selected_mic');
+          const retryable = savedAny && (firstErr?.name === 'OverconstrainedError' || firstErr?.name === 'NotFoundError');
+          if (!retryable) throw firstErr;
+          stream = await boundedGum(false);
+        }
         if (!active) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -191,16 +276,20 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       } catch (err: any) {
         if (!active) return;
         const name = err?.name || '';
-        const isCam = /camera|video/i.test(err?.message || '') || name === 'NotFoundError';
         // getUserMedia fails as a whole, so we cannot tell which device
         // failed from the error alone: mark both as failed with the
         // specific fix, and let Retry re-run after the user fixes it.
         // A denial is usually both devices at once (same permission prompt).
         setCameraStatus('fail');
         setMicStatus('fail');
-        setCameraError(fixFor('camera', name));
-        setMicError(fixFor('mic', name));
-        void isCam;
+        if (name === 'TimeoutError') {
+          const msg = 'The camera/microphone check timed out — the browser may still be waiting for permission, or the device is busy. Press Retry, or join without camera/microphone below.';
+          setCameraError(msg);
+          setMicError(msg);
+        } else {
+          setCameraError(fixFor('camera', name));
+          setMicError(fixFor('mic', name));
+        }
       }
     };
 
@@ -212,25 +301,82 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 
+  // The camera preview <video> only mounts once the camera passes, which
+  // is AFTER runChecks tries to assign srcObject (at that point the
+  // element does not exist yet, so the preview stayed black even on a
+  // pass). Attach the live stream when the element actually exists.
+  useEffect(() => {
+    if (cameraStatus === 'pass' && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [cameraStatus]);
+
   const playSpeakerTest = () => {
+    if (speakerTimerRef.current) window.clearTimeout(speakerTimerRef.current);
+    setSpeakerFailed(false);
+    setSpeakerSkipped(false);
+    setSpeakerPlayed(false);
+    setSpeakerStatus('checking');
+    // Bounded: if the audio context cannot start (mobile browsers suspend
+    // it, the tab is muted, …) the row must not sit on "Checking…"
+    // forever — after 3 s it reports honestly instead.
+    speakerTimerRef.current = window.setTimeout(() => {
+      setSpeakerStatus((s) => (s === 'checking' ? 'warn' : s));
+    }, 3000);
     try {
-      const ctx = audioCtxRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
-      if (!audioCtxRef.current) audioCtxRef.current = ctx;
-      if (ctx.state === 'suspended') void ctx.resume();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.9);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.9);
-      setSpeakerStatus('checking');
+      let ctx = audioCtxRef.current;
+      if (!ctx || ctx.state === 'closed') {
+        ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioCtxRef.current = ctx;
+      }
+      const play = async () => {
+        try {
+          if (ctx!.state === 'suspended') {
+            await Promise.race([ctx!.resume(), new Promise((r) => window.setTimeout(r, 2000))]);
+          }
+          const osc = ctx!.createOscillator();
+          const gain = ctx!.createGain();
+          osc.connect(gain);
+          gain.connect(ctx!.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, ctx!.currentTime);
+          gain.gain.setValueAtTime(0.12, ctx!.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx!.currentTime + 0.9);
+          osc.start();
+          osc.stop(ctx!.currentTime + 0.9);
+          setSpeakerPlayed(true);
+          // The tone lasts 0.9 s. The test can never auto-pass — only the
+          // user knows if they heard it — so once the tone has played the
+          // row stops saying "Checking…" and waits for the user's answer.
+          if (speakerTimerRef.current) window.clearTimeout(speakerTimerRef.current);
+          speakerTimerRef.current = window.setTimeout(() => {
+            setSpeakerStatus((s) => (s === 'checking' ? 'warn' : s));
+          }, 1200);
+        } catch (e) {
+          setSpeakerStatus('fail');
+        }
+      };
+      void play();
     } catch (e) {
       setSpeakerStatus('fail');
     }
+  };
+
+  const resolveSpeaker = (heard: boolean) => {
+    if (speakerTimerRef.current) window.clearTimeout(speakerTimerRef.current);
+    setSpeakerHeard(heard);
+    setSpeakerFailed(!heard);
+    setSpeakerStatus(heard ? 'pass' : 'fail');
+  };
+
+  // Honest skip: speakers are not required to join, and a skipped test is
+  // recorded as skipped ('warn'), never as a pass.
+  const skipSpeaker = () => {
+    if (speakerTimerRef.current) window.clearTimeout(speakerTimerRef.current);
+    setSpeakerSkipped(true);
+    setSpeakerHeard(false);
+    setSpeakerFailed(false);
+    setSpeakerStatus('warn');
   };
 
   const canProceed =
@@ -295,9 +441,16 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   );
 
   return (
-    <div className="flex-center" style={{ minHeight: '100dvh', padding: '1.5rem', backgroundColor: 'var(--bg-app)' }}>
-      <div style={{ maxWidth: '640px', width: '100%', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    // Own scroll container, NOT a vertically-centred flex box: html/body
+    // have overflow:hidden (index.css) and .flex-center uses
+    // align-items:center, so on a ~390px phone this screen's tall content
+    // was centred past the top of the viewport with no way to scroll down
+    // to the Continue button. This div scrolls itself (height 100dvh +
+    // overflow-y:auto) and stacks from the top, so every row and the
+    // Continue button are reachable on a phone.
+    <div style={{ height: '100dvh', overflowY: 'auto', padding: '1rem 1rem 2rem', backgroundColor: 'var(--bg-app)' }}>
+      <div style={{ maxWidth: '640px', width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
           <button onClick={onBack} className="premium-btn premium-btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <ArrowLeft size={16} />
             <span>Back</span>
@@ -387,18 +540,21 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             icon={<Volume2 size={16} />}
             title="Speakers"
             status={speakerFailed ? 'fail' : speakerHeard ? 'pass' : speakerStatus}
-            detail={speakerHeard ? 'You confirmed the test sound — your speakers work.' : 'Play the test sound and confirm you hear it.'}
+            detail={speakerHeard ? 'You confirmed the test sound — your speakers work.' : speakerSkipped ? 'Speaker test skipped — speakers are not required to join.' : speakerPlayed ? "Test sound played — tap 'I heard it' or 'I didn't hear it' below." : 'Play the test sound and confirm you hear it.'}
             fix={speakerFailed ? 'You did not hear the test sound — check your volume, that the right speakers/headphones are selected, and that the browser tab is not muted, then play it again.' : undefined}
           >
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
               <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={playSpeakerTest}>
                 <Volume2 size={14} /> Play test sound
               </button>
-              <button type="button" className="premium-btn premium-btn-accent" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => { setSpeakerHeard(true); setSpeakerFailed(false); setSpeakerStatus('pass'); }}>
+              <button type="button" className="premium-btn premium-btn-accent" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => resolveSpeaker(true)}>
                 I heard it
               </button>
-              <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => { setSpeakerFailed(true); setSpeakerHeard(false); setSpeakerStatus('fail'); }}>
+              <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => resolveSpeaker(false)}>
                 I didn&apos;t hear it
+              </button>
+              <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={skipSpeaker}>
+                Skip this test
               </button>
             </div>
           </Row>
@@ -411,17 +567,22 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
           />
         </div>
 
-        {(cameraStatus === 'fail' || micStatus === 'fail') && (
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-main)' }}>
-            <input type="checkbox" checked={joinWithoutDevices} onChange={() => setJoinWithoutDevices(!joinWithoutDevices)} style={{ marginTop: '3px' }} />
-            <span>
-              <strong>Join without camera / microphone</strong>
-              <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>You will join with video and audio off. You can turn them on later from inside the meeting if the device starts working.</span>
-            </span>
-          </label>
-        )}
+        {/* Always offered, not only after a camera/mic failure: on a phone
+            the checks can fail, time out, or the user may simply want to
+            join audio-only — the escape must exist whatever state the
+            checks are in. */}
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-main)' }}>
+          <input type="checkbox" checked={joinWithoutDevices} onChange={() => setJoinWithoutDevices(!joinWithoutDevices)} style={{ marginTop: '3px' }} />
+          <span>
+            <strong>Join without camera / microphone</strong>
+            <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>You will join with video and audio off. You can turn them on later from inside the meeting if the device starts working.</span>
+          </span>
+        </label>
 
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        {/* Sticky action bar: the Continue button stays pinned to the
+            bottom of the phone screen while the checks scroll above it,
+            so it is reachable without scrolling to the very end. */}
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', position: 'sticky', bottom: 0, backgroundColor: 'var(--bg-app)', paddingTop: '0.5rem', paddingBottom: '0.25rem', zIndex: 5 }}>
           <button type="button" className="premium-btn premium-btn-secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setRunId((n) => n + 1)}>
             <RefreshCw size={16} /> Retry checks
           </button>
