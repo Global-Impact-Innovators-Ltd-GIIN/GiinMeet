@@ -115,6 +115,7 @@ interface MeetingRoomProps {
   onSaveWorkspaceData?: (notes: string, actionItemsCount: number) => void;
   currentUser: { id: string; name: string; email: string } | null;
   initialVideoState?: boolean;
+  initialMutedState?: boolean;
   isP2PCall?: boolean;
   isHost?: boolean;
   isMinimized?: boolean;
@@ -128,6 +129,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   onSaveWorkspaceData, 
   currentUser,
   initialVideoState = true,
+  initialMutedState = false,
   isP2PCall = false,
   isHost = false,
   isMinimized = false,
@@ -145,7 +147,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // --- CONSOLIDATED HOOK STATES & REFS BLOCK (Prevents TDZ errors) ---
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(initialMutedState);
   const [isVideoOn, setIsVideoOn] = useState(initialVideoState);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -665,6 +667,23 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => {
     activePanelRef.current = activePanel;
   });
+
+  // On unmount (leaving the room for good), remove our participant row so
+  // we do not linger as 'Admitted' forever. Best-effort: the tab may be
+  // closing, so the request may not complete — the host can still kick a
+  // stale row. This effect has EMPTY deps on purpose: it runs its cleanup
+  // only on unmount. The LiveKit connect effect's cleanup also runs on
+  // engine switches and token refreshes, so the row must NOT be removed
+  // there — a token refresh is not a leave.
+  useEffect(() => {
+    return () => {
+      try {
+        const rowId = localStorage.getItem(`giin_participant_row_${meetingId}`);
+        giinApi.removeParticipant(meetingId, rowId || myKey);
+      } catch (e) { /* best effort */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keyboard shortcuts. Deliberately no dependency array: the listener is
   // re-registered every render so the handlers always see fresh state
@@ -1941,23 +1960,38 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       .on('broadcast', { event: 'waitroom-request' }, (payload: any) => {
         if (isAdmin) {
           const data = payload.payload;
-          
+          // Admit by the DATABASE participant row id when the guest has
+          // one — the signalling key alone matches no database row, so the
+          // old admit updated zero rows and the guest stayed 'Waiting'
+          // forever in the database (the 4s poll could never see Admitted).
+          const admitKey = data.participantRowId || data.senderKey;
+
           if (isMeetingLocked) {
-            handleAdmitParticipant(data.senderKey, 'Declined');
+            handleAdmitParticipant(admitKey, 'Declined');
             return;
           }
-          
-          const isPreviouslyAdmitted = admittedKeys.has(data.senderKey) || 
+
+          const isPreviouslyAdmitted = admittedKeys.has(data.senderKey) ||
+            admittedKeys.has(admitKey) ||
             JSON.parse(localStorage.getItem(`admitted_keys_${meetingId}`) || '[]').includes(data.senderKey);
- 
+
           if (!isWaitingRoomEnabled || isPreviouslyAdmitted) {
-            handleAdmitParticipant(data.senderKey, 'Admitted');
+            handleAdmitParticipant(admitKey, 'Admitted');
             return;
           }
- 
+
           setWaitingList(prev => {
-            if (prev.some(p => p.id === data.senderKey)) return prev;
-            return [...prev, { id: data.senderKey, name: data.name }];
+            // One entry per guest: a guest first announces with their
+            // signalling key, then with their database row id — keep the
+            // row id on the same entry so Admit updates the real row.
+            const existing = prev.find(p => p.id === data.senderKey || (data.participantRowId && p.participantRowId === data.participantRowId));
+            if (existing) {
+              if (data.participantRowId && existing.participantRowId !== data.participantRowId) {
+                return prev.map(p => p.id === existing.id ? { ...p, participantRowId: data.participantRowId } : p);
+              }
+              return prev;
+            }
+            return [...prev, { id: data.senderKey, name: data.name, participantRowId: data.participantRowId || undefined }];
           });
         }
       })
@@ -3854,14 +3888,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                 <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{w.name}</span>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button
-                    onClick={() => handleAdmitParticipant(w.id, 'Admitted')}
+                    onClick={() => handleAdmitParticipant(w.participantRowId || w.id, 'Admitted')}
                     className="premium-btn premium-btn-accent"
                     style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
                   >
                     Admit
                   </button>
                   <button
-                    onClick={() => handleAdmitParticipant(w.id, 'Declined')}
+                    onClick={() => handleAdmitParticipant(w.participantRowId || w.id, 'Declined')}
                     className="premium-btn premium-btn-danger"
                     style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px', backgroundColor: '#EF4444' }}
                   >

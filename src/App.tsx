@@ -141,7 +141,11 @@ function App() {
         return view;
       }
     }
-    return localStorage.getItem('giin_view') || 'dashboard';
+    // A refresh in the lobby or mid-meeting cannot be restored: the
+    // lobby data and the live meeting state are not persisted, so the
+    // lobby would render a blank panel. Fall back to the dashboard.
+    const storedView = localStorage.getItem('giin_view');
+    return storedView && !['lobby', 'meeting'].includes(storedView) ? storedView : 'dashboard';
   });
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('giin_theme') === 'dark';
@@ -963,6 +967,7 @@ function App() {
   // Active call states
   const [activeCallTitle, setActiveCallTitle] = useState<string | null>(null);
   const [activeCallVideoState, setActiveCallVideoState] = useState<boolean>(true);
+  const [activeCallMuted, setActiveCallMuted] = useState<boolean>(false);
 
   // Chat redirect helper
   const [targetContactId, setTargetContactId] = useState<string | null>(null);
@@ -1137,20 +1142,53 @@ function App() {
       try {
         let saved = null;
         if (existingMeetingId) {
-          // Fetch existing meeting details
-          const { data } = await giinApi.getMeetingDetails(existingMeetingId);
-          if (data) {
-            saved = {
-              id: existingMeetingId,
-              title: data.title || finalTitle,
-              time: new Date().toISOString(),
-              duration: 'Active now',
-              status: 'In Progress',
-              host: data.host || user.name || 'You',
-              passcode: data.passcode,
-              require_waiting_room: data.require_waiting_room ?? true
-            };
+          // Joining an existing meeting: the input may be a full invite
+          // link (.../#/join?id=<uuid>&passcode=<code>), a bare meeting
+          // UUID, or — the old bug — a 6-character passcode or anything
+          // else. A passcode alone cannot identify a meeting, and an
+          // unparseable input must fail loudly instead of silently
+          // creating a brand-new meeting the user never asked for.
+          const rawInput = existingMeetingId.trim();
+          let joinId: string | null = null;
+          let joinPasscode: string | null = null;
+          const idMatch = rawInput.match(/[?&]id=([0-9a-f-]{36})/i);
+          if (idMatch) {
+            joinId = idMatch[1];
+            const pcMatch = rawInput.match(/[?&]passcode=([A-Za-z0-9]+)/i);
+            if (pcMatch) joinPasscode = pcMatch[1];
+          } else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawInput)) {
+            joinId = rawInput;
           }
+          if (!joinId) {
+            window.alert('That meeting code or link was not recognised. Paste the full invite link or the meeting ID (the long code with dashes) — a 6-character passcode alone is not enough to find a meeting.');
+            return;
+          }
+          // Fetch existing meeting details
+          const { data } = await giinApi.getMeetingDetails(joinId);
+          if (!data) {
+            window.alert('That meeting could not be found. It may have been deleted — check the link or code and try again.');
+            return;
+          }
+          // Only the meeting's creator / admin may (re)start it as host.
+          // Anyone else goes through the waiting room like any other
+          // joiner: passcode + host admission. Never register a joiner
+          // as Admin — the old code did, which bypassed both.
+          const isCallerHost = data.admin_id === user.id || data.user_id === user.id;
+          if (!isCallerHost) {
+            const joinHash = `#/join?id=${joinId}` + (joinPasscode ? `&passcode=${joinPasscode}` : '');
+            window.location.hash = joinHash;
+            return;
+          }
+          saved = {
+            id: joinId,
+            title: data.title || finalTitle,
+            time: new Date().toISOString(),
+            duration: 'Active now',
+            status: 'In Progress',
+            host: data.host || user.name || 'You',
+            passcode: data.passcode,
+            require_waiting_room: data.require_waiting_room ?? true
+          };
         }
 
         if (!saved) {
@@ -1178,6 +1216,15 @@ function App() {
           if (hostRow?.id) {
             try { localStorage.setItem(`giin_participant_row_${saved.id}`, hostRow.id); } catch (e) {}
           }
+          // Remember that this browser's user is the host of this
+          // meeting, so a refresh mid-meeting routes straight back in
+          // instead of deadlocking in the waiting room (the host is
+          // the only admitter). Cleared on leave/end in handleEndMeeting.
+          try {
+            localStorage.setItem(`admitted_meeting_${saved.id}`, 'true');
+            localStorage.setItem(`admitted_meeting_title_${saved.id}`, saved.title || 'GIIN MEET Call');
+            localStorage.setItem(`admitted_meeting_name_${saved.id}`, user.name || 'You');
+          } catch (e) {}
           
           const mapped: Meeting = {
             id: saved.id,
@@ -1274,16 +1321,29 @@ function App() {
 
   const handleEndMeeting = async () => {
     setActiveCallTitle(null);
-    if (activeMeetingId) {
+    const endedId = activeMeetingId;
+    if (endedId) {
       try {
-        await giinApi.updateMeetingNotes(activeMeetingId, 'Meeting completed successfully.', 0, 'Completed');
+        await giinApi.updateMeetingNotes(endedId, 'Meeting completed successfully.', 0, 'Completed');
       } catch (err) {
         console.error('Failed to update end status of meeting in database:', err);
       }
+      // Clear this meeting's admission-bypass flags so a later visit
+      // to the same meeting ID does not skip the passcode and waiting
+      // room forever (the flag is per-meeting and was never cleared).
+      try {
+        localStorage.removeItem(`admitted_meeting_${endedId}`);
+        localStorage.removeItem(`admitted_meeting_title_${endedId}`);
+        localStorage.removeItem(`admitted_meeting_name_${endedId}`);
+        localStorage.removeItem(`giin_participant_row_${endedId}`);
+        localStorage.removeItem(`admitted_keys_${endedId}`);
+      } catch (e) {}
       setActiveMeetingId(null);
     }
+    // Only the meeting that just ended becomes Completed — the old code
+    // marked EVERY In Progress meeting Completed, including live ones.
     setMeetingHistory(prev => 
-      prev.map(m => m.status === 'In Progress' ? { ...m, status: 'Completed', duration: 'Ended call' } : m)
+      prev.map(m => m.id === endedId ? { ...m, status: 'Completed', duration: 'Ended call' } : m)
     );
     if (!user) {
       setGuestUser(null);
@@ -2375,10 +2435,11 @@ function App() {
               passcode={lobbyMeetingData.passcode}
               hostName={lobbyMeetingData.host}
               currentUser={user}
-              onJoin={(videoOn, _audioOn) => {
+              onJoin={(videoOn, audioOn) => {
                 setActiveCallTitle(lobbyMeetingData.title);
                 setActiveMeetingId(lobbyMeetingData.id);
                 setActiveCallVideoState(videoOn);
+                setActiveCallMuted(!audioOn);
                 setCurrentView('meeting');
                 setLobbyMeetingData(null);
               }}
@@ -2397,6 +2458,7 @@ function App() {
               onSaveWorkspaceData={handleSaveWorkspaceData}
               currentUser={user}
               initialVideoState={activeCallVideoState}
+              initialMutedState={activeCallMuted}
               isP2PCall={isP2PCall}
               isHost={createdMeetings.includes(activeMeetingId) || meetingHistory.some(m => m.id === activeMeetingId && (m.host === 'You' || m.host === user?.name))}
               isMinimized={currentView !== 'meeting'}

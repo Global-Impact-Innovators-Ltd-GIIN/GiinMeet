@@ -128,7 +128,12 @@ export const Waitroom: React.FC<WaitroomProps> = ({
         event: 'waitroom-request',
         payload: {
           senderKey: guestKey,
-          name: displayName
+          name: displayName,
+          // The database participant row id, once we have it. The host
+          // admits by this id — the signalling key alone matches no
+          // database row, so the host's admit used to leave the guest
+          // stuck on 'Waiting' in the database forever.
+          participantRowId: participantId || undefined
         }
       });
     }, 2000);
@@ -170,6 +175,20 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     setLoading(true);
     try {
       if (meetingDetails?.require_waiting_room === false) {
+        // Immediately admit — but still write the participant row, so the
+        // host sees this guest in the room and host controls (kick) work.
+        // The old code returned without a row, leaving the guest invisible
+        // to the host's participant list. Best-effort: admission itself
+        // does not depend on the write.
+        try {
+          const data = await giinApi.joinMeetingRoom(meetingId, name, user?.id, 'Participant', 'Admitted');
+          if (data) {
+            setParticipantId(data.id);
+            try { localStorage.setItem(`giin_participant_row_${meetingId}`, data.id); } catch (e) {}
+          }
+        } catch (e: any) {
+          console.warn('[Waitroom] Could not write participant row for immediate admit:', e?.message);
+        }
         // Immediately admit!
         setWaitingStatus('Admitted');
         localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
@@ -228,6 +247,16 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           <button onClick={onBack} className="premium-btn premium-btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
             <ArrowLeft size={16} />
             <span>Go Back</span>
+          </button>
+          <button
+            onClick={() => {
+              setErrorMsg('');
+              joinWaitingRoom(displayName || user?.name || 'Guest', meetingDetails?.passcode);
+            }}
+            className="premium-btn premium-btn-primary"
+            style={{ width: '100%', justifyContent: 'center' }}
+          >
+            <span>Try Again</span>
           </button>
         </div>
       </div>

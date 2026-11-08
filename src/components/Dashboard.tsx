@@ -572,7 +572,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <input 
                   type="text" 
                   className="premium-input" 
-                  placeholder="e.g. giin-abc-xyz"
+                  placeholder="Paste the full invite link or the meeting ID"
                   value={meetingCode}
                   onChange={(e) => {
                     setMeetingCode(e.target.value);
@@ -580,6 +580,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   }}
                   required
                 />
+                <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                  Paste the invite link from the host, or the meeting ID (the long code with dashes). A 6-character passcode alone cannot find a meeting — you enter that in the waiting room.
+                </span>
                 {joinError && (
                   <div style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                     <AlertCircle size={14} />
