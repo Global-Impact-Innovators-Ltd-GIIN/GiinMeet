@@ -41,13 +41,25 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const [waitingStatus, setWaitingStatus] = useState<'Waiting' | 'Admitted' | 'Declined' | 'None'>('None');
   const [guestKey] = useState(() => user?.id || crypto.randomUUID());
 
-  // If already admitted once, bypass waitroom completely!
+  // If already admitted once, bypass waitroom completely — unless the
+  // meeting has since ENDED, in which case the old link must not
+  // re-enter (the flag is per-browser and was never cleared on the
+  // guest's side). Check the meeting status first.
   useEffect(() => {
-    if (localStorage.getItem(`admitted_meeting_${meetingId}`) === 'true') {
+    if (localStorage.getItem(`admitted_meeting_${meetingId}`) !== 'true') return;
+    (async () => {
+      try {
+        const { data } = await giinApi.getMeetingDetails(meetingId);
+        if (data && (data as any).status === 'Completed') {
+          setErrorMsg('This meeting has ended. The invite link no longer works.');
+          setLoading(false);
+          return;
+        }
+      } catch (e) { /* status check failed: fall through to normal flow */ }
       const savedTitle = localStorage.getItem(`admitted_meeting_title_${meetingId}`) || 'GIIN MEET Call';
       const savedName = localStorage.getItem(`admitted_meeting_name_${meetingId}`) || displayName || user?.name || 'Guest';
       onAdmitted(savedTitle, user?.id || guestKey, savedName);
-    }
+    })();
   }, [meetingId, onAdmitted, user]);
 
   // Load meeting details on mount
@@ -59,6 +71,15 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           setErrorMsg('Meeting does not exist or has been deleted.');
         } else {
           setMeetingDetails(data);
+          // An ended meeting stays ended: stop here with a plain message
+          // instead of letting the guest wait forever for a host who
+          // will never admit them (the token route rejects ended
+          // meetings too, as a second line of defence).
+          if ((data as any).status === 'Completed') {
+            setErrorMsg('This meeting has ended. The invite link no longer works.');
+            setLoading(false);
+            return;
+          }
           // Host bypass (server truth): the meeting's creator never verifies
           // a passcode and never waits. Admit them straight into the room.
           if (user?.id && isMeetingHost(data, user.id)) {
