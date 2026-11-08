@@ -10,6 +10,7 @@ import {
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
 import { DeviceSettingsModal } from './DeviceSettingsModal';
+import { getParticipantInitials } from '../utils/getParticipantInitials';
 
 // Web Audio API Synthesized sound effects
 let audioCtx: AudioContext | null = null;
@@ -2340,7 +2341,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           const mapped: Participant[] = list
             .filter((p: any) => p.user_id !== currentUser?.id && p.id !== currentUser?.id)
             .map((p: any) => {
-              const initials = p.name ? p.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
+              const initials = getParticipantInitials(p.name);
               let hash = 0;
               for (let i = 0; i < (p.name || '').length; i++) {
                 hash = (p.name || '').charCodeAt(i) + ((hash << 5) - hash);
@@ -2764,7 +2765,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             const exists = prev.some(p => p.id === senderKey || p.userId === senderKey || p.id === canonicalKey || p.userId === canonicalKey);
             if (exists) return prev;
             
-            const initials = data.name ? data.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
+            const initials = getParticipantInitials(data.name);
             let hash = 0;
             for (let i = 0; i < (data.name || '').length; i++) {
               hash = (data.name || '').charCodeAt(i) + ((hash << 5) - hash);
@@ -4451,7 +4452,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       avatarName = label;
     }
 
-    const initials = avatarName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+    const initials = getParticipantInitials(avatarName);
 
     return (
       <div 
@@ -5193,7 +5194,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     color: 'white',
                     border: '1px solid rgba(255, 255, 255, 0.1)'
                   }}>
-                    {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase() : 'Y'}
+                    {getParticipantInitials(currentUser?.name)}
                   </div>
                   <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Camera Off</span>
                 </div>
@@ -5292,7 +5293,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       color: 'white',
                       border: '2px solid rgba(255, 255, 255, 0.1)'
                     }}>
-                      {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase() : 'Y'}
+                      {getParticipantInitials(currentUser?.name)}
                     </div>
                     <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 500 }}>Webcam Off</span>
                   </div>
@@ -5439,7 +5440,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       color: 'white',
                       border: '2px solid rgba(255,255,255,0.1)'
                     }}>
-                      {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}
+                      {getParticipantInitials(currentUser?.name)}
                     </div>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{localCameraRecovering ? 'Camera reconnecting…' : 'Camera Off'}</span>
                   </div>
@@ -5654,7 +5655,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         color: 'white',
                         border: '2px solid rgba(255,255,255,0.1)'
                       }}>
-                        {p.avatar || p.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                        {p.avatar || getParticipantInitials(p.name)}
                       </div>
                       <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                         {tile.connecting ? 'Connecting...' : 'Camera Off'}

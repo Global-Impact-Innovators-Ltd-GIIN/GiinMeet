@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { DeviceSettingsModal } from './DeviceSettingsModal';
 import { buildJoinLink } from '../supabaseClient';
+import { getParticipantInitials } from '../utils/getParticipantInitials';
 
 interface MeetingLobbyProps {
   meetingId: string;
@@ -179,7 +180,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
                   fontWeight: 700,
                   color: 'var(--color-secondary)'
                 }}>
-                  {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('') : 'G'}
+                  {getParticipantInitials(currentUser?.name)}
                 </div>
                 <div>
                   <h4 style={{ color: 'white', fontSize: '1rem', margin: '0 0 0.25rem 0' }}>Camera is Off</h4>
