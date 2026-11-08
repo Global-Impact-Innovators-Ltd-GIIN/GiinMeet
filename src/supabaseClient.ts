@@ -793,6 +793,27 @@ export const giinApi = {
     }
   },
 
+  // Upload a file shared in meeting chat. Uses the 'chat-files' storage
+  // bucket (public read, authenticated upload). The bucket must exist —
+  // create it in the Supabase dashboard (Storage > New bucket
+  // 'chat-files', public) — until then this throws an honest error and
+  // the UI says file sharing is not set up yet instead of faking it.
+  uploadChatFile: async (meetingId: string, file: File) => {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = `${meetingId}/${Date.now()}-${safeName}`;
+    const { error } = await supabase.storage
+      .from('chat-files')
+      .upload(filePath, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+    if (error) {
+      throw new Error(`Could not upload the file: ${error.message}. The 'chat-files' storage bucket may not be set up yet.`);
+    }
+    const { data: publicUrlData } = supabase.storage.from('chat-files').getPublicUrl(filePath);
+    if (!publicUrlData?.publicUrl) {
+      throw new Error('Could not get a shareable link for the uploaded file.');
+    }
+    return { url: publicUrlData.publicUrl, name: file.name };
+  },
+
   // Get all users in the system (for Superadmin)
   getAllProfiles: async () => {
     const { data } = await supabase
@@ -833,7 +854,7 @@ export const giinApi = {
   getAllMeetings: async () => {
     const { data } = await supabase
       .from('meetings')
-      .select('*');
+      .select(MEETING_PUBLIC_COLUMNS);
     return data || [];
   },
 

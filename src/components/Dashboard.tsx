@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw } from 'lucide-react';
-import { buildJoinLink, generateMeetingPasscode } from '../supabaseClient';
+import { buildJoinLink, generateMeetingPasscode, downloadICS, giinApi } from '../supabaseClient';
 
 interface Meeting {
   id: string;
@@ -19,6 +19,7 @@ interface DashboardProps {
   meetingHistory: Meeting[];
   onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null }) => Promise<Meeting | null>;
   userName: string;
+  userDomain?: string;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -28,6 +29,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   meetingHistory,
   onAddMeeting,
   userName,
+  userDomain,
 }) => {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -50,28 +52,76 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [meetingTime, setMeetingTime] = useState('');
   const [meetingCode, setMeetingCode] = useState('');
   const [joinError, setJoinError] = useState('');
+  // Recurring meetings: a series is real separate meetings (one per
+  // occurrence), all sharing the same passcode, so each occurrence has
+  // its own join link and waiting room.
+  const [scheduleRecurrence, setScheduleRecurrence] = useState<'none' | 'weekly' | 'monthly'>('none');
+  const [scheduleRecurrenceCount, setScheduleRecurrenceCount] = useState(4);
+  const [seriesCreated, setSeriesCreated] = useState(0);
+  // Invite by contact / email from the dashboard (copy link + mailto;
+  // no mail provider is configured, so nothing is ever "sent" silently).
+  const [inviteMeeting, setInviteMeeting] = useState<Meeting | null>(null);
+  const [inviteContacts, setInviteContacts] = useState<any[]>([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteNote, setInviteNote] = useState('');
+  // Attendance (recorded in this browser during the meeting).
+  const [attendanceMeetingId, setAttendanceMeetingId] = useState<string | null>(null);
+
+  // Fetch the host-only passcode for a meeting (the passcode column is
+  // hidden from anon reads), then run the callback with the full link.
+  const withHostPasscode = async (meeting: Meeting) => {
+    const passcode = meeting.passcode ?? (await giinApi.getMeetingPasscode(meeting.id));
+    return { ...meeting, passcode: passcode ?? null };
+  };
 
   const handleScheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!meetingTitle || !meetingTime) return;
 
-    const saved = await onAddMeeting({
-      title: meetingTitle,
-      time: new Date(meetingTime).toISOString(),
-      duration: '40m limit',
-      requireWaitingRoom,
-      passcode: schedulePasscodeEnabled ? schedulePasscode : null
-    });
+    const baseTime = new Date(meetingTime);
+    const passcode = schedulePasscodeEnabled ? schedulePasscode : null;
+    const occurrences = scheduleRecurrence === 'none' ? 1 : Math.max(2, Math.min(12, scheduleRecurrenceCount));
+    let firstSaved: Meeting | null = null;
+    let created = 0;
+    for (let i = 0; i < occurrences; i++) {
+      const t = new Date(baseTime);
+      if (scheduleRecurrence === 'weekly') t.setDate(t.getDate() + 7 * i);
+      if (scheduleRecurrence === 'monthly') t.setMonth(t.getMonth() + i);
+      const saved = await onAddMeeting({
+        title: meetingTitle,
+        time: t.toISOString(),
+        duration: '40m limit',
+        requireWaitingRoom,
+        passcode
+      });
+      if (saved) {
+        created++;
+        if (!firstSaved) firstSaved = saved;
+      }
+    }
 
-    if (saved) {
-      setScheduledMeetingDetails(saved);
+    if (firstSaved) {
+      setScheduledMeetingDetails(firstSaved);
+      setSeriesCreated(created);
       setMeetingTitle('');
       setMeetingTime('');
       setRequireWaitingRoom(true);
       setSchedulePasscodeEnabled(true);
       setSchedulePasscode('');
+      setScheduleRecurrence('none');
+      setScheduleRecurrenceCount(4);
       setShowScheduleModal(false);
       setShowSuccessModal(true);
+    }
+  };
+
+  const openInviteModal = async (meeting: Meeting) => {
+    setInviteMeeting(meeting);
+    setInviteEmail('');
+    setInviteNote('');
+    if (userDomain) {
+      const contacts = await giinApi.getContacts(userDomain);
+      setInviteContacts(contacts || []);
     }
   };
 
@@ -251,8 +301,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '380px', overflowY: 'auto', paddingRight: '0.5rem' }}>
             {meetingHistory.map((meeting) => (
-              <div 
-                key={meeting.id}
+              <React.Fragment key={meeting.id}>
+              <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -314,9 +364,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </button>
                   ) : meeting.status === 'Scheduled' ? (
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <button 
-                        onClick={() => {
-                          const shareableLink = buildJoinLink(meeting.id, meeting.passcode);
+                      <button
+                        onClick={async () => {
+                          const full = await withHostPasscode(meeting);
+                          downloadICS(full);
+                        }}
+                        className="premium-btn premium-btn-secondary"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        title="Download a calendar file (.ics) for this meeting"
+                      >
+                        <Calendar size={14} />
+                        <span>.ics</span>
+                      </button>
+                      <button
+                        onClick={() => openInviteModal(meeting)}
+                        className="premium-btn premium-btn-secondary"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        title="Invite someone by email or from your contacts"
+                      >
+                        <UserPlus size={14} />
+                        <span>Invite</span>
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const full = await withHostPasscode(meeting);
+                          const shareableLink = buildJoinLink(full.id, full.passcode);
                           navigator.clipboard.writeText(shareableLink);
                           setCopiedHistoryId(meeting.id);
                           setTimeout(() => setCopiedHistoryId(null), 2000);
@@ -337,12 +409,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </button>
                     </div>
                   ) : (
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      Host: {meeting.host}
-                    </span>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        Host: {meeting.host}
+                      </span>
+                      <button
+                        onClick={() => setAttendanceMeetingId(attendanceMeetingId === meeting.id ? null : meeting.id)}
+                        className="premium-btn premium-btn-secondary"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px' }}
+                        title="Who joined, when, and how long they stayed (recorded in this browser during the meeting)"
+                      >
+                        Attendance
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
+              {attendanceMeetingId === meeting.id && (
+                <div style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.5rem' }}>Attendance — {meeting.title}</h4>
+                  {(() => {
+                    try {
+                      const raw = localStorage.getItem(`giin_attendance_${meeting.id}`);
+                      if (!raw) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No attendance was recorded for this meeting in this browser.</p>;
+                      const map = JSON.parse(raw);
+                      const rows = Object.values(map) as { name: string; joinedAt: number; leftAt: number | null }[];
+                      if (rows.length === 0) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No attendance was recorded for this meeting in this browser.</p>;
+                      const fmt = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      const dur = (a: number, b: number | null) => {
+                        const mins = Math.max(0, Math.round(((b || Date.now()) - a) / 60000));
+                        return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+                      };
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          {rows.map((r, i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', gap: '0.5rem' }}>
+                              <span style={{ fontWeight: 600 }}>{r.name}</span>
+                              <span style={{ color: 'var(--text-muted)' }}>joined {fmt(r.joinedAt)} · {r.leftAt ? `left ${fmt(r.leftAt)}` : 'still in room at end'} · {dur(r.joinedAt, r.leftAt)}</span>
+                            </div>
+                          ))}
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Recorded in this browser during the meeting, not a server log.</span>
+                        </div>
+                      );
+                    } catch (e) {
+                      return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Attendance could not be read.</p>;
+                    }
+                  })()}
+                </div>
+              )}
+              </React.Fragment>
             ))}
           </div>
         </div>
@@ -391,7 +506,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 
                 <ul style={{ color: 'white', fontSize: '0.85rem', paddingLeft: '1.25rem', marginBottom: '2rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <li>Unlimited meeting durations (up to 24h)</li>
-                  <li>Upt to 300 participant rooms</li>
+                  <li>Up to 8 participants per room (today's limit)</li>
                   <li>Pro customization virtualization tools</li>
                   <li>Direct AI chat assistant response</li>
                 </ul>
@@ -503,6 +618,39 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
 
               <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Repeat</label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <select
+                    className="premium-input"
+                    value={scheduleRecurrence}
+                    onChange={(e) => setScheduleRecurrence(e.target.value as 'none' | 'weekly' | 'monthly')}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="none">Does not repeat</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                  {scheduleRecurrence !== 'none' && (
+                    <input
+                      type="number"
+                      min={2}
+                      max={12}
+                      className="premium-input"
+                      value={scheduleRecurrenceCount}
+                      onChange={(e) => setScheduleRecurrenceCount(parseInt(e.target.value) || 4)}
+                      title="Number of occurrences"
+                      style={{ width: '70px', textAlign: 'center' }}
+                    />
+                  )}
+                </div>
+                {scheduleRecurrence !== 'none' && (
+                  <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                    Creates {scheduleRecurrenceCount} separate meetings ({scheduleRecurrence}), each with its own join link. They share one passcode.
+                  </span>
+                )}
+              </div>
+
+              <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Security & Admission</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
                   <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
@@ -587,6 +735,105 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Invite Modal — by email or from workspace contacts. The invite
+          itself is a shareable link plus a pre-filled email in the user's
+          own mail app (mailto:); no email is ever sent automatically,
+          because no mail provider is configured. */}
+      {inviteMeeting && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div className="glass-panel" style={{
+            width: '450px',
+            backgroundColor: 'var(--bg-card)',
+            padding: '2rem',
+            animation: 'pop-in var(--transition-normal)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem'
+          }}>
+            <h3 style={{ fontSize: '1.4rem', fontFamily: 'var(--font-heading)', margin: 0 }}>Invite to “{inviteMeeting.title}”</h3>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                type="email"
+                className="premium-input"
+                placeholder="person@example.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button
+                className="premium-btn premium-btn-secondary"
+                onClick={async () => {
+                  if (!inviteEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail.trim())) {
+                    setInviteNote('Enter a valid email address first.');
+                    return;
+                  }
+                  const full = await withHostPasscode(inviteMeeting);
+                  const link = buildJoinLink(full.id, full.passcode);
+                  const subject = encodeURIComponent(`Invitation: ${full.title} — GIIN Meet`);
+                  const body = encodeURIComponent(`Please join my GIIN Meet video meeting:\nTopic: ${full.title}\nTime: ${new Date(full.time).toLocaleString()}\nJoin link: ${link}\nMeeting ID: ${full.id}\nPasscode: ${full.passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
+                  window.location.href = `mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`;
+                  setInviteNote('Your mail app opened with the invitation ready to send. No email is sent automatically — GIIN Meet has no mail provider configured yet.');
+                }}
+              >
+                Email Invite
+              </button>
+            </div>
+            {inviteContacts.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Or pick a workspace contact</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '180px', overflowY: 'auto' }}>
+                  {inviteContacts.map((c: any) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="premium-btn premium-btn-secondary"
+                      style={{ justifyContent: 'flex-start', fontSize: '0.85rem', padding: '0.5rem 0.75rem' }}
+                      onClick={() => {
+                        if (c.email) setInviteEmail(c.email);
+                        else setInviteNote(`${c.name || 'This contact'} has no email on their profile — copy the link instead.`);
+                      }}
+                    >
+                      {c.name || c.email} {c.email ? `(${c.email})` : '(no email)'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <button
+              className="premium-btn premium-btn-secondary"
+              style={{ width: '100%', justifyContent: 'center' }}
+              onClick={async () => {
+                const full = await withHostPasscode(inviteMeeting);
+                navigator.clipboard.writeText(buildJoinLink(full.id, full.passcode));
+                setInviteNote('Invite link copied — paste it anywhere (WhatsApp, chat, email).');
+              }}
+            >
+              <Copy size={14} /> Copy Invite Link
+            </button>
+            {inviteNote && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>{inviteNote}</span>}
+            <button
+              className="premium-btn premium-btn-primary"
+              style={{ width: '100%', justifyContent: 'center' }}
+              onClick={() => setInviteMeeting(null)}
+            >
+              Done
+            </button>
           </div>
         </div>
       )}
@@ -701,6 +948,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </h3>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
                 Your professional GIIN Meet room is ready.
+                {seriesCreated > 1 && ` This is a recurring series — ${seriesCreated} meetings were created (details below are for the first one).`}
               </p>
             </div>
 
@@ -804,6 +1052,18 @@ Media encrypted in transit (DTLS-SRTP).`;
             >
               {copiedSuccessId === 'details' ? <Check size={16} /> : <Copy size={16} />}
               <span>{copiedSuccessId === 'details' ? 'Invitation Details Copied' : 'Copy Invitation Email'}</span>
+            </button>
+
+            <button
+              onClick={async () => {
+                const full = await withHostPasscode(scheduledMeetingDetails);
+                downloadICS(full);
+              }}
+              className="premium-btn premium-btn-secondary"
+              style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem' }}
+            >
+              <Calendar size={16} />
+              <span>Add to Calendar (.ics)</span>
             </button>
 
             <button

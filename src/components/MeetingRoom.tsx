@@ -5,7 +5,7 @@ import {
   Clock, Pin, LayoutGrid, LayoutList,
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
   MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
-  LogOut, UserCheck, X, Hand
+  LogOut, UserCheck, X, Hand, Paperclip
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -3781,6 +3781,65 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
 
 
+  // Chat file sharing: upload to the 'chat-files' bucket, then post the
+  // file as a chat message (text is `📎 name — url`, rendered as a
+  // clickable link by renderChatText). Guests cannot send files — same
+  // as text chat, sending needs a signed-in session — and the file is
+  // only uploaded after that check, so a guest never uploads a file
+  // that can never be posted.
+  const handleAttachFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      triggerToast('That file is larger than 25 MB — chat files are limited to 25 MB.');
+      return;
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      triggerToast('Sign in to share files. Guests can read chat but cannot send messages or files.');
+      return;
+    }
+    triggerToast(`Uploading ${file.name}…`);
+    try {
+      const { url, name } = await giinApi.uploadChatFile(meetingId, file);
+      const senderName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Guest';
+      await giinApi.sendMessage({
+        thread_id: meetingId,
+        sender_name: senderName,
+        text: `📎 ${name} — ${url}`,
+        user_id: currentUser?.id
+      });
+      const list = await giinApi.getMessages(meetingId);
+      if (list) {
+        setMessages(list.map((msg: { id?: string; user_id: string; sender_name: string; text: string; created_at: string }) => ({
+          id: msg.id,
+          sender: msg.sender_name,
+          text: msg.text,
+          time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          self: currentUser ? (msg.user_id === currentUser.id) : false
+        })));
+      }
+    } catch (err: any) {
+      console.error('Failed to share the file:', err);
+      triggerToast(err?.message || 'Could not share the file. Please try again.');
+    }
+  };
+
+  // A file message (`📎 name — url`) renders as a real download link;
+  // anything else renders as plain text.
+  const renderChatText = (text: string) => {
+    const m = text.match(/^📎 (.+) — (https?:\/\/\S+)$/);
+    if (m) {
+      return (
+        <span>
+          📎 <a href={m[2]} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{m[1]}</a>
+        </span>
+      );
+    }
+    return text;
+  };
+
   const sendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     // The host can lock chat for everyone except the host. Enforce it here
@@ -5406,7 +5465,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     fontSize: '0.85rem',
                     lineHeight: 1.3
                   }}>
-                    {m.text}
+                    {renderChatText(m.text)}
                   </div>
                 </div>
               ))}
@@ -5414,6 +5473,25 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* Chat Input */}
             <form onSubmit={sendChatMessage} style={{ padding: '0.75rem', borderTop: '1px solid #1E293B', display: 'flex', gap: '0.5rem' }}>
+              <label
+                title="Share a file (up to 25 MB; signed-in users only)"
+                style={{
+                  background: '#1E293B',
+                  border: 'none',
+                  borderRadius: '4px',
+                  width: '34px',
+                  height: '34px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                <Paperclip size={16} />
+                <input type="file" onChange={handleAttachFile} style={{ display: 'none' }} />
+              </label>
               <input 
                 type="text" 
                 placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : "Send message to everyone..."} 

@@ -190,11 +190,32 @@ const WORLD_DIALING_CODES = [
 
 interface AuthProps {
   onAuthSuccess: (user: { id: string; email: string; name: string; workspaceName: string; domain: string }) => void;
+  // Set when the user arrived via the reset link in their email: show the
+  // new-password form instead of sign-in.
+  initialMode?: 'recover';
+  onPasswordResetDone?: () => void;
 }
 
-export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
+export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswordResetDone }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [authMode, setAuthMode] = useState<'email' | 'phone'>('email');
+
+  // Password reset states. The reset email is sent by Supabase
+  // (resetPasswordForEmail); delivery depends on email sending being
+  // configured in the Supabase dashboard — the UI says so honestly when
+  // the mail does not arrive.
+  const [resetView, setResetView] = useState<'none' | 'request' | 'sent' | 'recover'>(initialMode === 'recover' ? 'recover' : 'none');
+  const [resetEmail, setResetEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  // A recovery link lands here with type=recovery in the hash (Supabase
+  // also fires PASSWORD_RECOVERY, which App turns into initialMode).
+  useEffect(() => {
+    if (window.location.hash.includes('type=recovery')) {
+      setResetView('recover');
+    }
+  }, []);
 
   // Input states
   const [email, setEmail] = useState('');
@@ -408,6 +429,57 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
     }
   };
 
+  // Password reset: request the email, then set a new password from the link.
+  const handleRequestReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail.trim()) {
+      setValidationError('Enter the email address for your account.');
+      return;
+    }
+    setIsLoading(true);
+    setValidationError('');
+    try {
+      await giinApi.requestPasswordReset(resetEmail.trim());
+      setResetView('sent');
+    } catch (err: any) {
+      setValidationError(err?.message || 'Could not send the reset email. Email sending may not be set up for this project yet — contact the administrator.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSetNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 8) {
+      setValidationError('Choose a password of at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setValidationError('The two passwords do not match.');
+      return;
+    }
+    setIsLoading(true);
+    setValidationError('');
+    try {
+      await giinApi.updatePassword(newPassword);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (onPasswordResetDone) onPasswordResetDone();
+      if (user) {
+        onAuthSuccess({
+          id: user.id,
+          email: user.email || '',
+          name: user.user_metadata?.name || user.email?.split('@')[0] || 'Giin User',
+          workspaceName: user.user_metadata?.workspace_name || 'Personal Workspace',
+          domain: (user.email?.split('@')[1] || 'personal'),
+        });
+      }
+    } catch (err: any) {
+      setValidationError(err?.message || 'Could not set the new password. The reset link may have expired — request a new one.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // OTP inputs keyboard navigation
   const handleOtpChange = (index: number, value: string) => {
     if (value && !/^\d+$/.test(value)) return;
@@ -494,7 +566,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
         </div>
 
         {/* Auth Mode Tabs (Only visible when entering credentials, not in OTP entry view) */}
-        {!otpSent && (
+        {!otpSent && resetView === 'none' && (
           <div style={{
             display: 'flex',
             backgroundColor: '#090D16',
@@ -541,8 +613,107 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
           </div>
         )}
 
+        {/* Password reset views */}
+        {resetView === 'request' && (
+          <form onSubmit={handleRequestReset} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>Reset your password</h3>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+                Enter the email for your account and we will send you a link to choose a new password.
+              </p>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
+                Email Address
+              </label>
+              <div style={{ position: 'relative' }}>
+                <Mail size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="email"
+                  className="premium-input"
+                  placeholder="you@company.com"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
+                  required
+                />
+              </div>
+            </div>
+            {validationError && <div style={{ color: '#EF4444', fontSize: '0.8rem' }}>{validationError}</div>}
+            <button type="submit" disabled={isLoading} className="premium-btn premium-btn-accent" style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}>
+              {isLoading ? <span>Sending…</span> : <span>Send Reset Link</span>}
+            </button>
+            <button type="button" onClick={() => { setResetView('none'); setValidationError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+              Back to sign in
+            </button>
+          </form>
+        )}
+
+        {resetView === 'sent' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'center' }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>Check your email</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+              If an account exists for <strong style={{ color: 'white' }}>{resetEmail}</strong>, a password-reset link is on its way.
+              Open it and choose a new password. If nothing arrives within a few minutes, check spam — and note that delivery
+              needs email sending configured in the Supabase dashboard; if it is not set up, no email can arrive.
+            </p>
+            <button type="button" onClick={() => { setResetView('none'); setValidationError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+              Back to sign in
+            </button>
+          </div>
+        )}
+
+        {resetView === 'recover' && (
+          <form onSubmit={handleSetNewPassword} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>Choose a new password</h3>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+                You opened the reset link — set your new password below.
+              </p>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
+                New Password
+              </label>
+              <div style={{ position: 'relative' }}>
+                <Lock size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="password"
+                  className="premium-input"
+                  placeholder="At least 8 characters"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
+                  required
+                />
+              </div>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
+                Confirm New Password
+              </label>
+              <div style={{ position: 'relative' }}>
+                <Lock size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="password"
+                  className="premium-input"
+                  placeholder="Repeat the new password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
+                  required
+                />
+              </div>
+            </div>
+            {validationError && <div style={{ color: '#EF4444', fontSize: '0.8rem' }}>{validationError}</div>}
+            <button type="submit" disabled={isLoading} className="premium-btn premium-btn-accent" style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}>
+              {isLoading ? <span>Saving…</span> : <span>Set New Password</span>}
+            </button>
+          </form>
+        )}
+
         {/* Email form gateway */}
-        {authMode === 'email' && (
+        {authMode === 'email' && resetView === 'none' && (
           <form onSubmit={handleEmailSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {!isLogin && (
               <div>
@@ -642,6 +813,17 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                   required
                 />
               </div>
+              {isLogin && (
+                <div style={{ textAlign: 'right', marginTop: '0.4rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => { setResetEmail(email); setResetView('request'); setValidationError(''); }}
+                    style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
             </div>
 
             <button 
@@ -663,7 +845,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
         )}
 
         {/* Phone form gateway */}
-        {authMode === 'phone' && (
+        {authMode === 'phone' && resetView === 'none' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {otpSent && (
               <button 
@@ -860,7 +1042,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
         )}
 
         {/* SSO Button (Hidden in OTP verification code entry view) */}
-        {!otpSent && (
+        {!otpSent && resetView === 'none' && (
           <button 
             onClick={handleGoogleSSO}
             disabled={isLoading}
@@ -907,7 +1089,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
         )}
 
         {/* Toggle between Register/Login */}
-        {!otpSent && (
+        {!otpSent && resetView === 'none' && (
           <div style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             {isLogin ? (
               <span>

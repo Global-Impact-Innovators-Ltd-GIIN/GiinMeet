@@ -49,7 +49,7 @@ export const HelpCenter: React.FC = () => {
     {
       category: 'General',
       question: 'Is there a limit on meeting durations for free users?',
-      answer: 'Free users can host meetings for up to 40 minutes with 100 participants. Pro users enjoy unlimited session lengths (up to 24 hours) and up to 300 participants.'
+      answer: 'Meetings today support up to 8 participants per room, whatever the plan — that is the room limit built into the system. Free meetings are up to 40 minutes. Paid Pro and Enterprise tiers are coming soon; their larger participant numbers are targets, not limits that work today.'
     }
   ];
 
@@ -83,7 +83,7 @@ export const HelpCenter: React.FC = () => {
       let replyText = "I'm sorry, I didn't quite catch that. Could you please specify if you're asking about 'Pro upgrade', 'pricing', 'screen sharing', or 'security'?";
 
       if (questionText.includes('pro') || questionText.includes('upgrade') || questionText.includes('premium')) {
-        replyText = "Paid upgrades are coming soon. The Billing tab shows the Pro Plan ($9.99/mo, up to 300 participants) and the Enterprise Plan ($19.99/mo, up to 1000 participants) for reference, but no payment is taken yet.";
+        replyText = "Paid upgrades are coming soon. The Billing tab shows the Pro Plan ($9.99/mo) and the Enterprise Plan ($19.99/mo) for reference, but no payment is taken yet — and note that every meeting today is limited to 8 participants, whatever the plan says.";
       } else if (questionText.includes('screen') || questionText.includes('share') || questionText.includes('monitor')) {
         replyText = "During any active meeting, look at the bottom control bar and click the Monitor icon. Your desktop window is then shared live with the other participants.";
       } else if (questionText.includes('price') || questionText.includes('cost') || questionText.includes('money')) {

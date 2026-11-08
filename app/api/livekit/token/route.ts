@@ -248,13 +248,20 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Upsert the participant allocation row (derived identity/role/name).
+    // NOTE: the participants.role CHECK only allows HOST/SPEAKER/GUEST, so
+    // a co-host is stored as GUEST in this allocation row (the column is
+    // cosmetic — capacity and identity never read it). Co-host-ness lives
+    // on the meeting_participants row and in the token response's `role`.
+    // See giinmeet_cohost_role.sql: after Suku runs it, COHOST is allowed
+    // in both role columns, but this mapping stays as a safe default.
+    const storedRole = derivedRole === 'COHOST' ? 'GUEST' : derivedRole;
     const { error: participantError } = await supabase
       .from('participants')
       .upsert({
         room_id: room.id,
         user_id: identity,
         user_name: displayName,
-        role: derivedRole,
+        role: storedRole,
         status: 'JOINED',
       }, { onConflict: 'room_id,user_id' });
 

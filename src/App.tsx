@@ -129,6 +129,10 @@ function App() {
   });
 
   const [joinMeetingData, setJoinMeetingData] = useState<{ meetingId: string; passcode: string } | null>(null);
+  // Password recovery: Supabase fires PASSWORD_RECOVERY when the user
+  // opens the reset link from their email. While this is set, the Auth
+  // screen shows the new-password form instead of the dashboard.
+  const [passwordRecovery, setPasswordRecovery] = useState(() => window.location.hash.includes('type=recovery'));
   // Pre-join check state (defect #1): every link joiner runs the device /
   // network check before the passcode gate and the waiting room. The host
   // never sees it (hash router bypass). Reset whenever a new join starts.
@@ -882,6 +886,9 @@ function App() {
 
     // Listen to real auth session state updates
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true);
+      }
       if (session?.user) {
         let profile = null;
         try {
@@ -1789,6 +1796,16 @@ function App() {
     );
   }
 
+  if (passwordRecovery) {
+    return (
+      <Auth
+        initialMode="recover"
+        onAuthSuccess={handleAuthSuccess}
+        onPasswordResetDone={() => setPasswordRecovery(false)}
+      />
+    );
+  }
+
   if (user === null) {
     return <Auth onAuthSuccess={handleAuthSuccess} />;
   }
@@ -2548,6 +2565,7 @@ function App() {
               meetingHistory={meetingHistory}
               onAddMeeting={handleAddMeeting}
               userName={user?.name || userName}
+              userDomain={user?.domain}
             />
           )}
 
