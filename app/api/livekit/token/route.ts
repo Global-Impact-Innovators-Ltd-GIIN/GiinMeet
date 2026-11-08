@@ -157,7 +157,13 @@ export async function POST(req: NextRequest) {
           message: 'You have not been admitted to this meeting yet. Please wait for the host.',
         }, { status: 403 });
       }
-      identity = `guest-${grow.id}`;
+      // Guest identity is the participant row UUID itself. It must stay a
+      // plain UUID: public.participants.user_id is a UUID column, and the
+      // old `guest-<uuid>` identity broke the allocation upsert below with
+      // Postgres 22P02 "invalid input syntax for type uuid", so no guest
+      // could ever get a token (500 DB_ERROR). The row id is still unique
+      // per guest and only an admitted guest holds it.
+      identity = grow.id;
       if (grow.name) displayName = grow.name;
       if (isHostUser(grow.user_id)) derivedRole = 'HOST';
     }
@@ -247,6 +253,10 @@ export async function POST(req: NextRequest) {
     });
 
     const token = await at.toJwt();
+
+    // One info line per mint (no secrets): lets us confirm in Vercel logs
+    // that a real mint happened and which room/role it was for.
+    console.log('[Token API] Minted token', { room: room.slug, role: derivedRole, identityKind: accessToken ? 'user' : 'guest' });
 
     return NextResponse.json({
       token,
