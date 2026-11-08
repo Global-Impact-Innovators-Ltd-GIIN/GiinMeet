@@ -183,6 +183,10 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       const data = await giinApi.joinMeetingRoom(meetingId, name, user?.id);
       if (data) {
         setParticipantId(data.id);
+        // Remember our own participant row id. Guests have user_id NULL in
+        // the database, so this row id is the only reliable way to identify
+        // our own row later (e.g. when the host kicks us).
+        try { localStorage.setItem(`giin_participant_row_${meetingId}`, data.id); } catch (e) {}
       }
     } catch (err: any) {
       console.error('Could not join the waiting room:', err);

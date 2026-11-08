@@ -1174,7 +1174,10 @@ function App() {
             return next;
           });
           // Register the host in the meeting participants list as Admitted
-          await giinApi.joinMeetingRoom(saved.id, user.name, user.id, 'Admin', 'Admitted');
+          const hostRow: any = await giinApi.joinMeetingRoom(saved.id, user.name, user.id, 'Admin', 'Admitted');
+          if (hostRow?.id) {
+            try { localStorage.setItem(`giin_participant_row_${saved.id}`, hostRow.id); } catch (e) {}
+          }
           
           const mapped: Meeting = {
             id: saved.id,

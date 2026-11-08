@@ -574,14 +574,17 @@ export const giinApi = {
     return { data, error };
   },
 
-  // Remove a participant from the meeting (resilient to database errors)
-  removeParticipant: async (meetingId: string, userId: string) => {
+  // Remove a participant from the meeting (resilient to database errors).
+  // The key may be the meeting_participants row id (this is the only form
+  // that works for guests, whose user_id is NULL) or a user id (signed-in
+  // participants). Callers should prefer the row id.
+  removeParticipant: async (meetingId: string, participantKey: string) => {
     try {
       const { error } = await supabase
         .from('meeting_participants')
         .delete()
         .eq('meeting_id', meetingId)
-        .eq('user_id', userId);
+        .or(`id.eq.${participantKey},user_id.eq.${participantKey}`);
       return { success: !error };
     } catch (err: any) {
       console.warn('[Supabase Client] Failed to delete participant from database:', err.message);

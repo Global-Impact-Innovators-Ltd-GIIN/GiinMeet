@@ -239,6 +239,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // this visit. It must be a UUID: the token route registers the participant
   // by user_id, and a non-UUID guest key broke that upsert.
   const [myKey] = useState(() => currentUser?.id || crypto.randomUUID());
+  // Our own meeting_participants row id (set when we joined via the
+  // waiting room / host creation flow). Guests have user_id NULL in the
+  // database, so this row id — not myKey — is the only reliable way to
+  // identify our own row (e.g. when the host kicks us).
+  const [myParticipantRowId] = useState<string | null>(() => {
+    try { return localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { return null; }
+  });
   const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
   const initPeerConnectionRef = useRef<((peerKey: string, forceAudioOnly?: boolean) => void) | null>(null);
   const makingOfferRef = useRef<{ [peerKey: string]: boolean }>({});
@@ -1058,13 +1065,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // AI summary is not available: no transcription or summarisation service is
   // wired up yet. The panel says so instead of showing a pre-written summary
-  // that was never about this meeting.
+  // that was never about this meeting. Set immediately — there is nothing
+  // to "analyze", so no fake spinner or delay.
   const generateAiSummary = () => {
-    setIsGeneratingSummary(true);
-    setTimeout(() => {
-      setAiSummary('AI summaries are not available yet — no transcription service is connected. This panel will show a real summary once speech-to-text is wired up.');
-      setIsGeneratingSummary(false);
-    }, 300);
+    setAiSummary('AI summaries are not available yet — no transcription service is connected. This panel will show a real summary once speech-to-text is wired up.');
+    setIsGeneratingSummary(false);
   };
 
   // Q&A Hub Functions
@@ -1287,6 +1292,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           const mapped = list.map((msg: any) => {
             const isSelf = currentUser ? (msg.user_id === currentUser.id) : false;
             return {
+              id: msg.id,
               sender: msg.sender_name,
               text: msg.text,
               time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -1313,13 +1319,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (msg && msg.thread_id === meetingId) {
             const isSelf = currentUser ? (msg.user_id === currentUser.id) : false;
             const mappedMsg = {
+              id: msg.id,
               sender: msg.sender_name,
               text: msg.text,
               time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               self: isSelf
             };
             setMessages(prev => {
-              if (prev.some(m => m.text === mappedMsg.text && m.sender === mappedMsg.sender)) return prev;
+              // Dedup by database row id. The old text+sender key dropped
+              // legitimately repeated messages ("ok" twice is two messages).
+              if (mappedMsg.id && prev.some(m => (m as any).id === mappedMsg.id)) return prev;
               return [...prev, mappedMsg];
             });
           }
@@ -1364,7 +1373,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               };
             });
           setParticipants(prev => {
-            const merged = [...mapped];
+            // Carry over the live media state we already know for each
+            // person. The database rows carry no mute/video state, so a
+            // fresh map would otherwise reset everyone to "unmuted, video
+            // on" on every poll.
+            const merged = mapped.map(m => {
+              const existing = prev.find(p => p.id === m.id || (m.userId ? p.userId === m.userId : false));
+              if (!existing) return m;
+              return { ...m, isMuted: existing.isMuted, isVideoOn: existing.isVideoOn, isSpeaking: existing.isSpeaking };
+            });
             prev.forEach(p => {
               // If it's a peer discovered over the signalling channel (not in the database list), preserve it so it is not wiped out by the database sync
               const isDynamic = p.id.startsWith('user-signals-') || !mapped.some(m => m.id === p.id || m.userId === p.userId);
@@ -1406,6 +1423,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       clearInterval(interval);
     };
   }, [meetingId, currentUser]);
+
+  // Keep the participants list honest: sync live media state (mute / video /
+  // speaking) from the signalling channel into the list. The database rows
+  // carry no media state, so without this the list always shows everyone
+  // unmuted with video on, and the host mute button always renders.
+  useEffect(() => {
+    setParticipants(prev => {
+      let changed = false;
+      const next = prev.map(p => {
+        const ps = peerStates[p.userId || ''] || peerStates[p.id || ''];
+        if (!ps) return p;
+        if (p.isMuted === ps.isMuted && p.isVideoOn === ps.isVideoOn && p.isSpeaking === ps.isSpeaking) return p;
+        changed = true;
+        return { ...p, isMuted: ps.isMuted, isVideoOn: ps.isVideoOn, isSpeaking: ps.isSpeaking };
+      });
+      return changed ? next : prev;
+    });
+  }, [peerStates]);
 
   // WebRTC mesh signaling engine
   useEffect(() => {
@@ -1809,11 +1844,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'remove-participant' }, async (payload: any) => {
         const data = payload.payload;
-        if (data.targetUserId === myKey) {
+        // Match by signalling key OR by our own meeting_participants row id
+        // (guests have user_id NULL, so their myKey never matches a user id).
+        if (data.targetUserId === myKey || (data.targetRowId && myParticipantRowId && data.targetRowId === myParticipantRowId)) {
           alert('You have been removed from the meeting by the host.');
-          // Delete our own row from the database (fully allowed by RLS since it is our own user_id)
+          // Delete our own row from the database (allowed by RLS).
           try {
-            await giinApi.removeParticipant(meetingId, myKey);
+            await giinApi.removeParticipant(meetingId, myParticipantRowId || myKey);
           } catch (e) {
             console.warn('Failed to delete own participant row on kick:', e);
           }
@@ -1841,32 +1878,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         });
       })
       .on('broadcast', { event: 'vote-poll' }, (payload: any) => {
-        if (isAdmin) {
-          const data = payload.payload;
-          setPolls(prev => {
-            return prev.map(p => {
-              if (p.id === data.pollId) {
-                const votes = [...p.votes];
-                votes[data.optionIndex] = (votes[data.optionIndex] || 0) + 1;
-                
-                // Broadcast updated results back to everyone
-                if (sigChannelRef.current) {
-                  sigChannelRef.current.send({
-                    type: 'broadcast',
-                    event: 'update-poll-results',
-                    payload: {
-                      pollId: p.id,
-                      votes: votes
-                    }
-                  });
-                }
-                
-                return { ...p, votes };
-              }
-              return p;
-            });
-          });
-        }
+        // Every client counts votes itself (with per-voter dedup), so polls
+        // work even when no admin is present. A voter changing their mind
+        // moves their vote instead of inflating the count.
+        const data = payload.payload;
+        applyPollVote(data.pollId, data.optionIndex, data.voterId);
       })
       .on('broadcast', { event: 'update-poll-results' }, (payload: any) => {
         const data = payload.payload;
@@ -3040,13 +3056,36 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  // Apply one vote to a poll, with per-voter dedup. Used both for our own
+  // vote (applied locally, since a broadcast is never echoed back to its
+  // sender) and for votes received from other participants. Every client
+  // runs the same logic, so all clients converge on the same totals
+  // without needing an admin to count.
+  const applyPollVote = (pollId: string, optionIndex: number, voterId: string) => {
+    if (!voterId) return;
+    setPolls(prev => prev.map(p => {
+      if (p.id !== pollId) return p;
+      const votedBy: { [voterId: string]: number } = { ...(p.votedBy || {}) };
+      const previousVote = votedBy[voterId];
+      if (previousVote === optionIndex) return p; // already counted
+      const votes = [...p.votes];
+      if (previousVote !== undefined && previousVote !== null) {
+        votes[previousVote] = Math.max(0, (votes[previousVote] || 0) - 1);
+      }
+      votes[optionIndex] = (votes[optionIndex] || 0) + 1;
+      votedBy[voterId] = optionIndex;
+      return { ...p, votes, votedBy };
+    }));
+  };
+
   const handleVotePoll = (pollId: string, optionIndex: number) => {
     setUserVotes(prev => ({ ...prev, [pollId]: optionIndex }));
+    applyPollVote(pollId, optionIndex, myKey);
     if (sigChannelRef.current) {
       sigChannelRef.current.send({
         type: 'broadcast',
         event: 'vote-poll',
-        payload: { pollId, optionIndex }
+        payload: { pollId, optionIndex, voterId: myKey }
       });
     }
   };
@@ -3079,6 +3118,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const sendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
+    // The host can lock chat for everyone except the host. Enforce it here
+    // as well as in the UI — a disabled input alone is not a lock.
+    if (isChatLocked && !isAdmin) return;
     if (!chatInput.trim()) return;
 
     const senderName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Guest';
@@ -3095,9 +3137,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       
       const list = await giinApi.getMessages(meetingId);
       if (list) {
-        const mapped = list.map((msg: { user_id: string; sender_name: string; text: string; created_at: string }) => {
+        const mapped = list.map((msg: { id?: string; user_id: string; sender_name: string; text: string; created_at: string }) => {
           const isSelf = currentUser ? (msg.user_id === currentUser.id) : false;
           return {
+            id: msg.id,
             sender: msg.sender_name,
             text: msg.text,
             time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -3562,7 +3605,8 @@ Media encrypted in transit (DTLS-SRTP).`;
           </div>
         )}
 
-        {/* Waiting Room Alert Overlay for Hosts */}
+        {/* Waiting Room Alert Overlay for Hosts — the full queue, not just
+            the first person waiting. */}
         {isAdmin && waitingList.length > 0 && (
           <div style={{
             position: 'absolute',
@@ -3572,34 +3616,42 @@ Media encrypted in transit (DTLS-SRTP).`;
             backgroundColor: '#00205B',
             border: '1px solid var(--color-accent)',
             color: 'white',
-            padding: '0.75rem 1.5rem',
+            padding: '0.75rem 1rem',
             borderRadius: 'var(--radius-md)',
             display: 'flex',
-            alignItems: 'center',
-            gap: '1.5rem',
+            flexDirection: 'column',
+            gap: '0.5rem',
             zIndex: 100,
             boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
-            animation: 'pop-in 0.3s ease'
+            animation: 'pop-in 0.3s ease',
+            maxHeight: '40vh',
+            overflowY: 'auto',
+            minWidth: '320px'
           }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>
-              {waitingList[0].name} is waiting in the waiting room.
+            <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
+              {waitingList.length} {waitingList.length === 1 ? 'person' : 'people'} waiting to join
             </span>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button 
-                onClick={() => handleAdmitParticipant(waitingList[0].id, 'Admitted')}
-                className="premium-btn premium-btn-accent" 
-                style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
-              >
-                Admit
-              </button>
-              <button 
-                onClick={() => handleAdmitParticipant(waitingList[0].id, 'Declined')}
-                className="premium-btn premium-btn-danger" 
-                style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px', backgroundColor: '#EF4444' }}
-              >
-                Decline
-              </button>
-            </div>
+            {waitingList.map((w: any) => (
+              <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{w.name}</span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => handleAdmitParticipant(w.id, 'Admitted')}
+                    className="premium-btn premium-btn-accent"
+                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
+                  >
+                    Admit
+                  </button>
+                  <button
+                    onClick={() => handleAdmitParticipant(w.id, 'Declined')}
+                    className="premium-btn premium-btn-danger"
+                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px', backgroundColor: '#EF4444' }}
+                  >
+                    Decline
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
         
@@ -4790,13 +4842,19 @@ Media encrypted in transit (DTLS-SRTP).`;
                                 sigChannelRef.current.send({
                                   type: 'broadcast',
                                   event: 'remove-participant',
-                                  payload: { targetUserId: p.userId }
+                                  // Both identifiers: the signalling key (signed-in users)
+                                  // and the database row id (the only one that works for guests,
+                                  // whose user_id is NULL).
+                                  payload: { targetUserId: p.userId, targetRowId: p.id }
                                 });
                               }
                               // Immediately clean up locally for instant UI feedback
                               cleanupPeer(p.userId!);
-                              // Attempt database delete
-                              await giinApi.removeParticipant(meetingId, p.userId!);
+                              // Delete the database row by its row id (works for guests too)
+                              const removed = await giinApi.removeParticipant(meetingId, p.id);
+                              if (!removed.success) {
+                                triggerToast(`Could not remove ${p.name} from the meeting list — please try again.`);
+                              }
                             }
                           }}
                           style={{
@@ -5636,32 +5694,19 @@ Media encrypted in transit (DTLS-SRTP).`;
                         </div>
 
                         <div style={{ marginTop: '0.5rem' }}>
-                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>💡 Key Decisions</div>
-                          <ul style={{ paddingLeft: '1.2rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                            <li>Resolved WebRTC screenshare channel issues by establishing Perfect Negotiation glare rollbacks.</li>
-                            <li>Selected custom layout constraints to match <strong>{localStorage.getItem('giin_ui_style') || 'glassmorphism'}</strong> branding.</li>
+                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📋 Meeting facts</div>
+                          <ul style={{ paddingLeft: '1.2rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            <li>Participants in this call: {participants.length + 1}</li>
+                            <li>Chat messages sent: {messages.length}</li>
+                            <li>Caption lines captured: {transcripts.length}</li>
+                            <li>Reactions and polls are shown live in the call, not in this summary.</li>
                           </ul>
                         </div>
 
                         <div style={{ marginTop: '0.5rem' }}>
-                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📌 Action Items</div>
-                          <ul style={{ listStyleType: 'none', paddingLeft: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                            <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                              <input type="checkbox" readOnly checked={false} /> <span style={{ fontSize: '0.75rem' }}><strong>@You</strong> - Validate WebRTC video filters under heavy packet loss profiles.</span>
-                            </li>
-                            <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                              <input type="checkbox" readOnly checked={false} /> <span style={{ fontSize: '0.75rem' }}><strong>@Admin</strong> - Finalize corner shape and typography metrics before staging deployment.</span>
-                            </li>
-                            <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                              <input type="checkbox" readOnly checked={false} /> <span style={{ fontSize: '0.75rem' }}><strong>@Team</strong> - Confirm next operations sync scheduled time.</span>
-                            </li>
-                          </ul>
-                        </div>
-
-                        <div style={{ marginTop: '0.5rem' }}>
-                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📝 Summary Notes</div>
+                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📝 Notes</div>
                           <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                            The conference was focused on platform modernization. Participants reviewed the interactive bento grids, skeuomorphic clicky controls, and 3D depth layers in spatial UI environments. The sketchpad doodle board was used for database fallback schema diagrams. Action items were resolved with clear ownership.
+                            {aiSummary}
                           </p>
                         </div>
                       </div>
