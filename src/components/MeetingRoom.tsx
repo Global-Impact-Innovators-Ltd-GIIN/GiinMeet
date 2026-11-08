@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Room as LiveKitRoom, RoomEvent } from 'livekit-client';
+import { Room as LiveKitRoom, RoomEvent, Track } from 'livekit-client';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
@@ -191,12 +191,57 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [engineType, setEngineType] = useState<'LIVEKIT' | 'P2P'>('LIVEKIT');
   const [livekitToken, setLivekitToken] = useState<string>('');
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  // Bumped to force the LiveKit connect effect to re-run (disconnect +
+  // reconnect with a fresh token) when the token nears expiry.
+  const [livekitReconnectNonce, setLivekitReconnectNonce] = useState(0);
   const [transitionPending, setTransitionPending] = useState<boolean>(false);
   const [p2pActive, setP2pActive] = useState<boolean>(false);
   const [livekitRemoteStreams, setLivekitRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
   const [isHandoffTransitioning, setIsHandoffTransitioning] = useState<{ [peerKey: string]: boolean }>({});
   const [swappedPeers, setSwappedPeers] = useState<string[]>([]);
   const livekitRoomRef = useRef<any>(null);
+  // The LiveKit screen-share publication, so it can be unpublished when
+  // sharing stops (and re-published after a token-refresh reconnect).
+  const livekitScreenTrackRef = useRef<MediaStreamTrack | null>(null);
+  // Guards the token-refresh reconnect so the 1s expiry interval cannot
+  // start it twice.
+  const tokenRefreshingRef = useRef(false);
+
+  // Publish (or replace) one local track on the LiveKit room. This is the
+  // single place that talks to LiveKit about local tracks: the connect
+  // effect, device switches, and screen share all go through here, so a
+  // camera/mic/screen change can never silently leave LiveKit serving a
+  // stale (stopped) track. Safe to call when LiveKit is not connected —
+  // it simply does nothing.
+  const publishLiveKitTrack = async (track: MediaStreamTrack, source: any) => {
+    const room = livekitRoomRef.current;
+    if (!room || !track) return;
+    try {
+      if (room.state !== 'connected') return;
+      const existing = room.localParticipant.getTrackPublication(source);
+      if (existing && existing.track) {
+        if (existing.track === track) return; // already published
+        await room.localParticipant.unpublishTrack(existing.track);
+      }
+      await room.localParticipant.publishTrack(track, { source });
+    } catch (e) {
+      console.warn('[LiveKit] Could not publish track:', e);
+    }
+  };
+
+  // Unpublish one local track from the LiveKit room (device switch / stop).
+  const unpublishLiveKitTrack = async (source: any) => {
+    const room = livekitRoomRef.current;
+    if (!room) return;
+    try {
+      const existing = room.localParticipant.getTrackPublication(source);
+      if (existing && existing.track) {
+        await room.localParticipant.unpublishTrack(existing.track);
+      }
+    } catch (e) {
+      console.warn('[LiveKit] Could not unpublish track:', e);
+    }
+  };
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const meetingRoomRef = useRef<HTMLDivElement | null>(null);
@@ -462,19 +507,42 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
         room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
           const peerKey = participant.identity;
-          if (track.kind === 'video' || track.kind === 'audio') {
-            setLivekitRemoteStreams(prev => {
+          if (track.kind !== 'video' && track.kind !== 'audio') return;
+          // A screen-share track is a separate stream from the person's
+          // camera. Mixing it into the camera MediaStream would make the
+          // video element show one track at random, so screen shares get
+          // their own stream map (remoteScreenStreams).
+          if (publication.source === Track.Source.ScreenShare) {
+            setRemoteScreenStreams(prev => {
               const currentStream = prev[peerKey] || new MediaStream();
               if (!currentStream.getTracks().some(t => t.id === track.mediaStreamTrack.id)) {
                 currentStream.addTrack(track.mediaStreamTrack);
               }
               return { ...prev, [peerKey]: currentStream };
             });
+            return;
           }
+          setLivekitRemoteStreams(prev => {
+            const currentStream = prev[peerKey] || new MediaStream();
+            if (!currentStream.getTracks().some(t => t.id === track.mediaStreamTrack.id)) {
+              currentStream.addTrack(track.mediaStreamTrack);
+            }
+            return { ...prev, [peerKey]: currentStream };
+          });
         });
 
         room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
           const peerKey = participant.identity;
+          if (publication.source === Track.Source.ScreenShare) {
+            setRemoteScreenStreams(prev => {
+              const currentStream = prev[peerKey];
+              if (currentStream) {
+                currentStream.removeTrack(track.mediaStreamTrack);
+              }
+              return { ...prev };
+            });
+            return;
+          }
           setLivekitRemoteStreams(prev => {
             const currentStream = prev[peerKey];
             if (currentStream) {
@@ -491,11 +559,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         await room.connect(livekitUrl, token);
         triggerToast('Connected to LiveKit SFU engine.');
 
+        // Publish whatever local tracks we have right now (camera / mic /
+        // an in-progress screen share). The helper skips anything already
+        // published, so reconnects are safe.
         if (stream) {
           const videoTrack = stream.getVideoTracks()[0];
           const audioTrack = stream.getAudioTracks()[0];
-          if (videoTrack) await room.localParticipant.publishTrack(videoTrack);
-          if (audioTrack) await room.localParticipant.publishTrack(audioTrack);
+          if (videoTrack) await publishLiveKitTrack(videoTrack, Track.Source.Camera);
+          if (audioTrack) await publishLiveKitTrack(audioTrack, Track.Source.Microphone);
+        }
+        if (livekitScreenTrackRef.current) {
+          await publishLiveKitTrack(livekitScreenTrackRef.current, Track.Source.ScreenShare);
         }
 
       } catch (err: any) {
@@ -520,36 +594,45 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         livekitRoomRef.current.disconnect();
         livekitRoomRef.current = null;
       }
+      // The room is gone, so its tracks are ended. Clear them now so the
+      // tiles fall back to avatars instead of holding a dead track — and so
+      // a token-refresh reconnect does not mix ended tracks with fresh ones.
+      setLivekitRemoteStreams({});
+      setRemoteScreenStreams({});
     };
-  }, [isMediaInitialized, engineType, meetingId, myKey, currentUser, isAdmin, stream]);
+    // NOTE: `stream` is deliberately NOT a dependency. Every stream change
+    // used to tear the LiveKit room down and reconnect it. Track changes
+    // (device switch, camera on/off, screen share) are now published
+    // directly via publishLiveKitTrack instead.
+    // `livekitReconnectNonce` IS a dependency: bumping it is how the token
+    // refresh forces a clean disconnect + reconnect with a fresh token.
+  }, [isMediaInitialized, engineType, meetingId, myKey, currentUser, isAdmin, livekitReconnectNonce]);
 
-  // Expiration Interceptor Check Loop
+  // Token expiry: refresh the LiveKit token instead of permanently
+  // downgrading to P2P. The token lasts 2 hours; when under 60 seconds
+  // remain, bump the reconnect nonce so the connect effect disconnects and
+  // reconnects with a fresh token (and republishes the local tracks). If
+  // that reconnect fails, the connect effect's own fallback downgrades to
+  // P2P — the call never dies silently.
   useEffect(() => {
     const interval = setInterval(() => {
       if (expiresAt && engineType === 'LIVEKIT') {
         const timeDiff = new Date(expiresAt).getTime() - Date.now();
-        if (timeDiff <= 30000 && timeDiff > 0 && !transitionPending) {
-          setTransitionPending(true);
-          setConnectionNotice('Your video token is expiring. You are connected peer-to-peer instead — video quality may be lower.');
-          triggerToast('LiveKit token expiring soon. Swapping seamlessly to P2P Mesh...');
-          
-          if (sigChannelRef.current) {
-            sigChannelRef.current.send({
-              type: 'broadcast',
-              event: 'transition-pending',
-              payload: {
-                senderKey: myKey
-              }
-            });
-          }
-          
-          startBackgroundP2P();
+        if (timeDiff <= 60000 && timeDiff > 0 && !tokenRefreshingRef.current) {
+          tokenRefreshingRef.current = true;
+          triggerToast('Refreshing your video connection…');
+          setLivekitReconnectNonce(n => n + 1);
         }
       }
-    }, 1000);
+    }, 5000);
 
     return () => clearInterval(interval);
-  }, [expiresAt, engineType, transitionPending, myKey]);
+  }, [expiresAt, engineType]);
+
+  // A fresh expiry means the refresh landed — allow a future refresh.
+  useEffect(() => {
+    tokenRefreshingRef.current = false;
+  }, [expiresAt]);
 
   useEffect(() => {
     if (meetingAdminId) {
@@ -712,20 +795,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const changeCamera = async (deviceId: string) => {
     setSelectedCamera(deviceId);
     localStorage.setItem('giin_selected_camera', deviceId);
-    
+
     if (isVideoOn) {
       try {
-        if (localVideoTrackRef.current) {
-          localVideoTrackRef.current.stop();
-        }
-        
+        // Acquire the new camera FIRST. Stopping the old track before the
+        // new one is acquired leaves the camera dead if getUserMedia fails.
         const videoStream = await navigator.mediaDevices.getUserMedia({
           video: { deviceId: { exact: deviceId }, width: 640, height: 480 }
         });
         const videoTrack = videoStream.getVideoTracks()[0];
+        const oldTrack = localVideoTrackRef.current;
         localVideoTrackRef.current = videoTrack;
         videoTrack.enabled = true;
-        
+        if (oldTrack && oldTrack !== videoTrack) {
+          oldTrack.stop();
+        }
+
         setStream(prev => {
           const newStream = prev || new MediaStream();
           newStream.getVideoTracks().forEach(t => newStream.removeTrack(t));
@@ -739,8 +824,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             videoSender.replaceTrack(videoTrack);
           }
         });
+
+        // Publish the new camera to LiveKit as well — otherwise LiveKit
+        // viewers keep receiving the old (now stopped) track.
+        await publishLiveKitTrack(videoTrack, Track.Source.Camera);
       } catch (err) {
         console.error('Failed to change camera:', err);
+        triggerToast('Could not switch camera — keeping the current one.');
       }
     }
   };
@@ -748,12 +838,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const changeMicrophone = async (deviceId: string) => {
     setSelectedMic(deviceId);
     localStorage.setItem('giin_selected_mic', deviceId);
-    
+
     try {
-      if (localAudioTrackRef.current) {
-        localAudioTrackRef.current.stop();
-      }
-      
+      // Acquire the new microphone FIRST (see changeCamera).
       const audioStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: { exact: deviceId },
@@ -763,9 +850,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       });
       const audioTrack = audioStream.getAudioTracks()[0];
+      const oldTrack = localAudioTrackRef.current;
       localAudioTrackRef.current = audioTrack;
       audioTrack.enabled = !isMuted;
-      
+      if (oldTrack && oldTrack !== audioTrack) {
+        oldTrack.stop();
+      }
+
       setStream(prev => {
         const newStream = prev || new MediaStream();
         newStream.getAudioTracks().forEach(t => newStream.removeTrack(t));
@@ -779,10 +870,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           audioSender.replaceTrack(audioTrack);
         }
       });
-      
+
+      // Publish the new microphone to LiveKit as well.
+      await publishLiveKitTrack(audioTrack, Track.Source.Microphone);
+
       setupSpeakingDetection(new MediaStream([audioTrack]), myKey, true);
     } catch (err) {
       console.error('Failed to change microphone:', err);
+      triggerToast('Could not switch microphone — keeping the current one.');
     }
   };
 
@@ -1151,6 +1246,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Breakout Rooms Functions
+  // Move into / out of a breakout room. The peer-to-peer mesh splits by
+  // signalling channel, but the LiveKit room does not split on its own —
+  // so entering a breakout disconnects LiveKit (otherwise voices and video
+  // from the other breakout rooms would keep leaking in), and returning to
+  // the main room reconnects it.
+  const enterBreakoutRoom = (roomNumber: number | null) => {
+    setBreakoutRoom(roomNumber);
+    if (roomNumber !== null) {
+      setEngineType('P2P');
+    } else {
+      setEngineType('LIVEKIT');
+    }
+  };
+
   const handleStartBreakouts = (roomsCount: number, durationMinutes: number) => {
     const assignments: { [peerKey: string]: number } = {};
     let roomIdx = 0;
@@ -1185,7 +1294,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         payload: {}
       });
     }
-    setBreakoutRoom(null);
+    enterBreakoutRoom(null);
     setBreakoutTimeRemaining(null);
   };
 
@@ -1983,13 +2092,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const data = payload.payload;
         const myAssignment = data.assignments[myKey];
         if (myAssignment) {
-          setBreakoutRoom(myAssignment);
+          enterBreakoutRoom(myAssignment);
           setBreakoutTimeRemaining(data.durationSeconds);
           alert(`You are being moved to Breakout Room ${myAssignment}.`);
         }
       })
       .on('broadcast', { event: 'end-breakout' }, () => {
-        setBreakoutRoom(null);
+        enterBreakoutRoom(null);
         setBreakoutTimeRemaining(null);
         alert('Breakout rooms have ended. Returning to main room.');
       })
@@ -2157,6 +2266,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       // Swap webcam video tracks with screen share tracks in all active peer connections
       const screenTrack = displayStream.getVideoTracks()[0];
+      livekitScreenTrackRef.current = screenTrack;
       
       screenSendersRef.current = {};
       Object.keys(pcsRef.current).forEach(peerKey => {
@@ -2164,6 +2274,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const sender = pc.addTrack(screenTrack, displayStream);
         screenSendersRef.current[peerKey] = sender;
       });
+
+      // Publish the screen to LiveKit too, so participants connected over
+      // the LiveKit engine see it — not just the peer-to-peer ones.
+      await publishLiveKitTrack(screenTrack, Track.Source.ScreenShare);
 
       // Broadcast screenshare media state changes
       if (sigChannelRef.current) {
@@ -2223,6 +2337,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setScreenStream(null);
     }
     screenVideoRef.current = null;
+    // Unpublish from LiveKit so remote tiles stop showing the screen.
+    livekitScreenTrackRef.current = null;
+    unpublishLiveKitTrack(Track.Source.ScreenShare);
 
     // Remove screenshare track senders from all peer connections
     Object.keys(screenSendersRef.current).forEach(peerKey => {
@@ -2498,6 +2615,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             const sender = pc.addTrack(audioTrack, stream || new MediaStream([audioTrack]));
           }
         });
+
+        // And publish it to LiveKit (the connect effect runs once, at
+        // connect time — a mic acquired after that is otherwise invisible
+        // to LiveKit viewers).
+        publishLiveKitTrack(audioTrack, Track.Source.Microphone);
       } catch (err) {
         console.error('Error acquiring audio:', err);
       }
@@ -2553,6 +2675,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 const sender = pc.addTrack(videoTrack, stream || new MediaStream([videoTrack]));
               }
             });
+
+            // And publish it to LiveKit (the connect effect does not re-run
+            // when the camera is switched on mid-call).
+            publishLiveKitTrack(videoTrack, Track.Source.Camera);
           } catch (err) {
             console.warn('Error acquiring video:', err);
             setIsVideoOn(false);
@@ -5145,7 +5271,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Jump to Room:</span>
                       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'center' }}>
                         <button 
-                          onClick={() => setBreakoutRoom(null)}
+                          onClick={() => enterBreakoutRoom(null)}
                           style={{
                             padding: '2px 6px',
                             fontSize: '0.7rem',
@@ -5163,7 +5289,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           return (
                             <button 
                               key={rNum}
-                              onClick={() => setBreakoutRoom(rNum)}
+                              onClick={() => enterBreakoutRoom(rNum)}
                               style={{
                                 padding: '2px 6px',
                                 fontSize: '0.7rem',
