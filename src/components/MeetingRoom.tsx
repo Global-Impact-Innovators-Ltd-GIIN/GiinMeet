@@ -214,6 +214,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Ref mirrors of local media state. The WebRTC signalling effect
+  // re-runs only when [passcode, stream, isMediaInitialized, breakoutRoom]
+  // change, so the isScreenSharing / isVideoOn / isMuted values inside
+  // its closures are frozen at the last run: every 6s its presence
+  // broadcast would otherwise re-send a STALE isScreenSharing=false and
+  // flip every receiver's screen-share layout back off, and mute/video
+  // toggles would broadcast the same stale flag. Broadcasts read these
+  // refs instead.
+  const isScreenSharingRef = useRef(false);
+  const isVideoOnRef = useRef(initialVideoState);
+  const isMutedRef = useRef(initialMutedState);
+  // Ref mirror of screenStream: stopScreenShare and initPeerConnection
+  // close over stale state where the stream is still null (see below).
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  useEffect(() => { isScreenSharingRef.current = isScreenSharing; }, [isScreenSharing]);
+  useEffect(() => { isVideoOnRef.current = isVideoOn; }, [isVideoOn]);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+
   const [meetingAdminId, setMeetingAdminId] = useState<string>('');
   const [passcode, setPasscode] = useState<string>(() => generateMeetingPasscode());
   const [isMediaInitialized, setIsMediaInitialized] = useState(false);
@@ -381,7 +399,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       name: string; 
       isVideoOn: boolean; 
       isMuted: boolean; 
-      isScreenSharing: boolean; 
+      isScreenSharing: boolean;
+      screenTrackId?: string | null;
       isSpeaking: boolean;
       latency?: number; 
       videoFilter?: string;
@@ -389,6 +408,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       isReconnecting?: boolean;
     } 
   }>({});
+
+  // Ref mirrors for the long-lived signalling handlers: ontrack and the
+  // media-state / presence handlers close over stale state, so they read
+  // peer state and remote streams through these refs instead.
+  const peerStatesRef = useRef(peerStates);
+  const remoteStreamsRef = useRef(remoteStreams);
+  useEffect(() => { peerStatesRef.current = peerStates; }, [peerStates]);
+  useEffect(() => { remoteStreamsRef.current = remoteStreams; }, [remoteStreams]);
 
   const [selectedCamera, setSelectedCamera] = useState(() => localStorage.getItem('giin_selected_camera') || '');
   const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('giin_selected_mic') || '');
@@ -525,6 +552,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Relocated states to consolidated top block
 
   // Connect to LiveKit SFU Engine
+  // Way back from P2P: once LiveKit fails the session is stuck on the
+  // peer-to-peer mesh (the connect effect early-returns unless the engine
+  // is LIVEKIT). The degraded banner offers this retry; it re-runs the
+  // connect effect, which fetches a fresh token, so a fixed server is
+  // picked up without rejoining the meeting.
+  const handleRetryLiveKit = () => {
+    triggerToast('Retrying the video server...');
+    setConnectionNotice(null);
+    setEngineType('LIVEKIT');
+    setLivekitReconnectNonce(n => n + 1);
+  };
+
   useEffect(() => {
     if (!isMediaInitialized || engineType !== 'LIVEKIT') return;
 
@@ -636,6 +675,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           throw new Error('The video server address is missing.');
         }
         await room.connect(livekitUrl, token);
+        setConnectionNotice(null); // A retry that lands clears the degraded banner.
         triggerToast('Connected to LiveKit SFU engine.');
 
         // Publish whatever local tracks we have right now (camera / mic /
@@ -1034,6 +1074,162 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const screenSendersRef = useRef<{ [peerKey: string]: RTCRtpSender }>({});
   const [remoteScreenStreams, setRemoteScreenStreams] = useState<{ [peerKey: string]: MediaStream }>({});
 
+  // Ref mirror of the remote screen-share map (defined above).
+  const remoteScreenStreamsRef = useRef(remoteScreenStreams);
+  // Per-peer provenance for received video tracks, and the
+  // audio-confirmed camera track id. A screen is captured with
+  // audio:false, so a screen track always arrives in a video-only stream;
+  // a camera track normally arrives with its mic track (mute only
+  // disables it, never removes it) -- except for a peer whose mic
+  // acquisition failed, whose camera is video-only too. The sender's
+  // screen track id (carried on the media-state / presence broadcasts)
+  // is what disambiguates that case.
+  const remoteCameraTrackIdsRef = useRef<{ [peerKey: string]: string }>({});
+  const remoteVideoMetaRef = useRef<{ [peerKey: string]: { [trackId: string]: { streamHadAudio: boolean } } }>({});
+  useEffect(() => { remoteScreenStreamsRef.current = remoteScreenStreams; }, [remoteScreenStreams]);
+
+  // Last time a (re)negotiation offer was actually sent to a peer, per
+  // peer. Lets start/stopScreenShare notice when the onnegotiationneeded
+  // event never fired (or its handler bailed early while signalling was
+  // unstable) and retry explicitly instead of leaving the remote side
+  // without the screen track.
+  const lastOfferAtRef = useRef<{ [peerKey: string]: number }>({});
+
+  // Send a fresh offer to one peer (explicit renegotiation). Used by the
+  // onnegotiationneeded handler and as a safety net after addTrack /
+  // removeTrack. No-ops unless the connection is stable and no offer is
+  // already in flight, so a double call can never produce a duplicate offer.
+  const renegotiatePeer = async (peerKey: string) => {
+    const pc = pcsRef.current[peerKey];
+    if (!pc || pc.signalingState === 'closed') return;
+    if (pc.signalingState !== 'stable' || makingOfferRef.current[peerKey]) return;
+    try {
+      makingOfferRef.current[peerKey] = true;
+      const offer = await pc.createOffer();
+      if (pc.signalingState !== 'stable') return;
+      await pc.setLocalDescription(offer);
+      lastOfferAtRef.current[peerKey] = Date.now();
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({
+          type: 'broadcast',
+          event: 'signal',
+          payload: { type: 'offer', targetKey: peerKey, senderKey: myKey, sdp: pc.localDescription }
+        });
+      }
+    } catch (err) {
+      console.error('[WebRTC] Renegotiation offer error:', err);
+    } finally {
+      makingOfferRef.current[peerKey] = false;
+    }
+  };
+
+  // Safety net: a track was just added/removed on this peer. If no offer
+  // went out within ~2.5s (missed onnegotiationneeded), renegotiate
+  // explicitly. `changedAt` is the time the track change happened.
+  const ensureRenegotiation = (peerKey: string, changedAt: number) => {
+    setTimeout(() => {
+      const pc = pcsRef.current[peerKey];
+      if (!pc || pc.signalingState === 'closed') return;
+      if (pc.signalingState !== 'stable') return;
+      if ((lastOfferAtRef.current[peerKey] || 0) >= changedAt) return;
+      void renegotiatePeer(peerKey);
+    }, 2500);
+  };
+
+  // Broadcast our current media state (mute / video / screen share) to the
+  // room, including the screen track id so receivers can recognise the
+  // screen track even if it arrives before the announcement. Reads live
+  // values from refs -- the signalling effect's closures are stale --
+  // with per-call overrides for the value that just changed (the ref
+  // only syncs after the next render). Returns false when there is no
+  // signalling channel yet; the 6s presence broadcast (also ref-driven)
+  // then delivers the true state once the channel exists.
+  const broadcastMediaState = (overrides?: { isVideoOn?: boolean; isMuted?: boolean; isScreenSharing?: boolean }) => {
+    if (!sigChannelRef.current) return false;
+    const sharing = overrides?.isScreenSharing ?? isScreenSharingRef.current;
+    sigChannelRef.current.send({
+      type: 'broadcast',
+      event: 'media-state',
+      payload: {
+        senderKey: myKey,
+        isVideoOn: overrides?.isVideoOn ?? isVideoOnRef.current,
+        isMuted: overrides?.isMuted ?? isMutedRef.current,
+        isScreenSharing: sharing,
+        screenTrackId: sharing ? (screenStreamRef.current?.getVideoTracks()[0]?.id ?? null) : null
+      }
+    });
+    return true;
+  };
+
+  // Re-route a peer's video tracks between the camera map and the screen
+  // map using the CURRENT sharing flag and screen track id. Fixes tracks
+  // that were misclassified because the announcement arrived after the
+  // track (or the flag flipped). `sharing` / `screenTrackId` are passed
+  // in because the peerStates ref only syncs after the next render.
+  const reclassifyScreenTracks = (peerKey: string, sharing: boolean, screenTrackId: string | null) => {
+    const camStream = remoteStreamsRef.current[peerKey];
+    const screenStreamObj = remoteScreenStreamsRef.current[peerKey];
+    const knownCameraId = remoteCameraTrackIdsRef.current[peerKey] || null;
+    // 1. Anything in the screen map that is not the known screen track is
+    //    a misclassified camera (or an ended track): move live ones back
+    //    to the camera map, drop ended ones.
+    if (screenStreamObj) {
+      const wronglyPlaced = screenStreamObj.getVideoTracks().filter(t => !sharing || (screenTrackId !== null && t.id !== screenTrackId));
+      if (wronglyPlaced.length > 0) {
+        const target = camStream || new MediaStream();
+        wronglyPlaced.forEach(t => {
+          screenStreamObj.removeTrack(t);
+          if (t.readyState === 'live' && !target.getTracks().some(x => x.id === t.id)) target.addTrack(t);
+        });
+        const nextCam = { ...remoteStreamsRef.current, [peerKey]: target };
+        remoteStreamsRef.current = nextCam;
+        setRemoteStreams(nextCam);
+        const nextScreen = { ...remoteScreenStreamsRef.current };
+        remoteScreenStreamsRef.current = nextScreen;
+        setRemoteScreenStreams(nextScreen);
+      }
+    }
+    // 2. Anything in the camera map that is the known screen track -- or
+    //    arrived video-only while the peer is sharing and is not the
+    //    audio-confirmed camera -- is a misclassified screen: move it over.
+    if (sharing) {
+      const currentCam = remoteStreamsRef.current[peerKey];
+      if (currentCam) {
+        const meta = remoteVideoMetaRef.current[peerKey] || {};
+        const misplaced = currentCam.getVideoTracks().filter(t =>
+          t.readyState === 'live' && (
+            (screenTrackId !== null && t.id === screenTrackId) ||
+            (screenTrackId === null && meta[t.id]?.streamHadAudio === false && t.id !== knownCameraId)
+          )
+        );
+        if (misplaced.length > 0) {
+          const target = remoteScreenStreamsRef.current[peerKey] || new MediaStream();
+          misplaced.forEach(t => {
+            currentCam.removeTrack(t);
+            if (!target.getTracks().some(x => x.id === t.id)) target.addTrack(t);
+          });
+          const nextCam = { ...remoteStreamsRef.current };
+          remoteStreamsRef.current = nextCam;
+          setRemoteStreams(nextCam);
+          const nextScreen = { ...remoteScreenStreamsRef.current, [peerKey]: target };
+          remoteScreenStreamsRef.current = nextScreen;
+          setRemoteScreenStreams(nextScreen);
+        }
+      }
+    }
+    // 3. Drop ended video tracks lingering in the camera map.
+    const cam = remoteStreamsRef.current[peerKey];
+    if (cam) {
+      const ended = cam.getVideoTracks().filter(t => t.readyState === 'ended');
+      if (ended.length > 0) {
+        ended.forEach(t => cam.removeTrack(t));
+        const nextCam = { ...remoteStreamsRef.current };
+        remoteStreamsRef.current = nextCam;
+        setRemoteStreams(nextCam);
+      }
+    }
+  };
+
   // Clean up a single peer connection
   const cleanupPeer = (peerKey: string) => {
     if (pcsRef.current[peerKey]) {
@@ -1042,6 +1238,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     if (screenSendersRef.current[peerKey]) {
       delete screenSendersRef.current[peerKey];
+    }
+    if (remoteCameraTrackIdsRef.current[peerKey]) {
+      delete remoteCameraTrackIdsRef.current[peerKey];
+    }
+    if (remoteVideoMetaRef.current[peerKey]) {
+      delete remoteVideoMetaRef.current[peerKey];
     }
     if (pcCandidatesRef.current[peerKey]) {
       delete pcCandidatesRef.current[peerKey];
@@ -1750,10 +1952,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         });
       }
       // If we are currently screensharing, we must also add the screen track!
-      if (isScreenSharing && screenStream) {
-        const screenTrack = screenStream.getVideoTracks()[0];
-        if (screenTrack) {
-          const sender = pc.addTrack(screenTrack, screenStream);
+      // NOTE: read the ref, not the isScreenSharing/screenStream state --
+      // this function closes over the signalling effect's render, so the
+      // state here is stale (sharing usually started after the effect last
+      // ran) and a peer joining mid-share would otherwise never receive it.
+      const liveScreenStream = screenStreamRef.current;
+      if (liveScreenStream) {
+        const screenTrack = liveScreenStream.getVideoTracks()[0];
+        if (screenTrack && screenTrack.readyState === 'live') {
+          const sender = pc.addTrack(screenTrack, liveScreenStream);
           screenSendersRef.current[peerKey] = sender;
         }
       }
@@ -1775,33 +1982,78 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       pc.ontrack = (event) => {
         const remoteStream = event.streams[0] || new MediaStream([event.track]);
-        const isVideo = event.track.kind === 'video';
-        const hasWebcamTrack = remoteStreams[peerKey] && remoteStreams[peerKey].getVideoTracks().length > 0;
-        
-        // It is screenshare if we already have a camera track, or the peer state says they are sharing and this is a video-only stream
-        const isScreen = isVideo && (
-          hasWebcamTrack || 
-          (peerStates[peerKey]?.isScreenSharing && remoteStream.getAudioTracks().length === 0)
-        );
-        
-        if (isScreen) {
-          setRemoteScreenStreams(prev => ({
-            ...prev,
-            [peerKey]: remoteStream
-          }));
-        } else {
-          const tracks = remoteStream.getTracks().map(track => {
-            if (track.kind === 'audio') return track;
-            return track;
-          });
-          const newStream = new MediaStream(tracks);
-          setRemoteStreams(prev => ({
-            ...prev,
-            [peerKey]: newStream
-          }));
-
-          setupSpeakingDetection(newStream, peerKey, false);
+        const track = event.track;
+        // Record provenance: whether this track arrived in a stream that
+        // also carried audio. A screen is captured with audio:false, so a
+        // screen track always arrives in a video-only stream; a camera
+        // track normally arrives with its mic track (mute only disables
+        // it, never removes it) -- except for a peer whose mic acquisition
+        // failed, whose camera is video-only too. Provenance plus the
+        // sender's screen track id (below) disambiguate that case.
+        if (track.kind === 'video') {
+          const meta = remoteVideoMetaRef.current[peerKey] || {};
+          meta[track.id] = { streamHadAudio: remoteStream.getAudioTracks().length > 0 };
+          remoteVideoMetaRef.current[peerKey] = meta;
         }
+        if (track.kind === 'video') {
+          // Classification. Read peer state through refs: this handler
+          // closes over the signalling effect's first render, so the
+          // `peerStates` / `remoteStreams` state variables here are stale
+          // (sharing flags from before the call) and the old checks could
+          // never see a peer start sharing.
+          const peerState = peerStatesRef.current[peerKey];
+          const peerSharing = !!peerState?.isScreenSharing;
+          const screenTrackId = peerState?.screenTrackId || null;
+          // An audio-confirmed camera track for this peer (only set when
+          // a video track arrived in a stream that also carried audio --
+          // a screen never does, so this can never point at one).
+          const knownCameraId = remoteCameraTrackIdsRef.current[peerKey] || null;
+          const streamHasAudio = remoteStream.getAudioTracks().length > 0;
+          // Primary signal: the sender's screen track id, which arrives
+          // on the media-state / presence broadcasts (before the offer in
+          // the normal case). Fallbacks: a video-only stream from a peer
+          // who is sharing, or any further video track once their camera
+          // is known. A no-mic peer's video-only CAMERA is only misread
+          // while the id is still unknown -- reclassifyScreenTracks sorts
+          // it out as soon as the id lands.
+          const isScreen =
+            (screenTrackId !== null && peerSharing && track.id === screenTrackId) ||
+            (peerSharing && !streamHasAudio) ||
+            (peerSharing && !!knownCameraId) ||
+            (!peerSharing && !streamHasAudio && !!knownCameraId);
+          if (isScreen) {
+            const storedScreen = remoteScreenStreamsRef.current[peerKey] || new MediaStream();
+            if (!storedScreen.getTracks().some(t => t.id === track.id)) storedScreen.addTrack(track);
+            const nextScreen = { ...remoteScreenStreamsRef.current, [peerKey]: storedScreen };
+            remoteScreenStreamsRef.current = nextScreen;
+            setRemoteScreenStreams(nextScreen);
+            return;
+          }
+          if (streamHasAudio) remoteCameraTrackIdsRef.current[peerKey] = track.id;
+        }
+        // Camera-side tracks (audio, or a video track classified as
+        // camera): merge into the stored camera stream, replacing tracks
+        // of the same kind(s) the incoming stream carries -- except a
+        // video-only track that is not the audio-confirmed camera, which
+        // is a screen track that arrived early and was tentatively filed
+        // here. Dropping it would lose it for good; reclassify moves it
+        // once the announcement lands.
+        const incomingKinds = new Set(remoteStream.getTracks().map(t => t.kind));
+        const metaForPeer = remoteVideoMetaRef.current[peerKey] || {};
+        const knownCameraIdNow = remoteCameraTrackIdsRef.current[peerKey] || null;
+        const stored = remoteStreamsRef.current[peerKey] || new MediaStream();
+        stored.getTracks().forEach(t => {
+          if (!incomingKinds.has(t.kind)) return;
+          if (t.kind === 'video' && metaForPeer[t.id]?.streamHadAudio === false && t.id !== knownCameraIdNow) return;
+          stored.removeTrack(t);
+        });
+        remoteStream.getTracks().forEach(t => {
+          if (!stored.getTracks().some(x => x.id === t.id)) stored.addTrack(t);
+        });
+        const nextStreams = { ...remoteStreamsRef.current, [peerKey]: stored };
+        remoteStreamsRef.current = nextStreams;
+        setRemoteStreams(nextStreams);
+        setupSpeakingDetection(stored, peerKey, false);
       };
 
       pc.onconnectionstatechange = () => {
@@ -1845,30 +2097,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       };
 
-      // Set up onnegotiationneeded for Perfect Negotiation
-      pc.onnegotiationneeded = async () => {
-        try {
-          makingOfferRef.current[peerKey] = true;
-          const offer = await pc.createOffer();
-          if (pc.signalingState !== 'stable') return;
-          await pc.setLocalDescription(offer);
-          if (sigChannelRef.current) {
-            sigChannelRef.current.send({
-              type: 'broadcast',
-              event: 'signal',
-              payload: {
-                type: 'offer',
-                targetKey: peerKey,
-                senderKey: myKey,
-                sdp: pc.localDescription
-              }
-            });
-          }
-        } catch (err) {
-          console.error('[WebRTC] Offer error:', err);
-        } finally {
-          makingOfferRef.current[peerKey] = false;
-        }
+      // Renegotiation (e.g. after addTrack/removeTrack for screen share)
+      // goes through the shared helper, which records when an offer
+      // actually went out so a missed onnegotiationneeded event can be
+      // retried explicitly.
+      pc.onnegotiationneeded = () => {
+        void renegotiatePeer(peerKey);
       };
 
       return pc;
@@ -1976,11 +2210,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               isVideoOn: data.isVideoOn,
               isMuted: data.isMuted,
               isScreenSharing: data.isScreenSharing,
+              screenTrackId: data.screenTrackId !== undefined ? data.screenTrackId : prev[senderKey]?.screenTrackId ?? null,
               isSpeaking: false
             }
           }));
 
           // A peer discovered over the signalling channel: add them to the participant list if not present yet.
+          // A late screen-share announcement can arrive after the track:
+          // move any misclassified track into (or out of) the screen map.
+          reclassifyScreenTracks(senderKey, !!data.isScreenSharing, data.screenTrackId ?? null);
+
           setParticipants(prev => {
             const exists = prev.some(p => p.id === senderKey || p.userId === senderKey);
             if (exists) return prev;
@@ -2282,10 +2521,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 ...current,
                 isVideoOn: data.isVideoOn,
                 isMuted: data.isMuted,
-                isScreenSharing: data.isScreenSharing
+                isScreenSharing: data.isScreenSharing,
+                screenTrackId: data.screenTrackId !== undefined ? data.screenTrackId : (current as any).screenTrackId ?? null
               }
             };
           });
+          // The track may have arrived before this announcement: re-route
+          // any video track it misclassified, in either direction.
+          reclassifyScreenTracks(data.senderKey, !!data.isScreenSharing, data.screenTrackId ?? null);
         }
       })
       .on('broadcast', { event: 'ping' }, (payload: any) => {
@@ -2325,9 +2568,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             payload: {
               senderKey: myKey,
               name: currentUser?.name || 'Guest',
-              isVideoOn,
-              isMuted,
-              isScreenSharing
+              // Read live values from refs: this closure is frozen at the
+              // signalling effect's last run and would otherwise re-broadcast
+              // a stale isScreenSharing=false every 6s.
+              isVideoOn: isVideoOnRef.current,
+              isMuted: isMutedRef.current,
+              isScreenSharing: isScreenSharingRef.current,
+              screenTrackId: isScreenSharingRef.current ? (screenStreamRef.current?.getVideoTracks()[0]?.id ?? null) : null
             }
           });
 
@@ -2353,9 +2600,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         payload: {
           senderKey: myKey,
           name: currentUser?.name || 'Guest',
-          isVideoOn,
-          isMuted,
-          isScreenSharing
+          // Live values from refs -- see the SUBSCRIBED announce above.
+          isVideoOn: isVideoOnRef.current,
+          isMuted: isMutedRef.current,
+          isScreenSharing: isScreenSharingRef.current,
+          screenTrackId: isScreenSharingRef.current ? (screenStreamRef.current?.getVideoTracks()[0]?.id ?? null) : null
         }
       });
     }, 6000);
@@ -2410,65 +2659,88 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Screen sharing track feed replacement injector (User gesture compliant)
   const startScreenShare = async (): Promise<boolean> => {
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
+      triggerToast('Screen sharing is not supported in this browser -- try Chrome or Edge on a laptop.');
+      return false;
+    }
     try {
       const constraints = getWebRTCScreenshareConstraints();
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: constraints.video,
         audio: false
       });
-      
+
+      const screenTrack = displayStream.getVideoTracks()[0];
+      if (!screenTrack) {
+        displayStream.getTracks().forEach(t => t.stop());
+        triggerToast('Screen sharing started but no video track was captured -- please try again.');
+        return false;
+      }
+
       setScreenStream(displayStream);
-      
+      screenStreamRef.current = displayStream;
+
       const video = document.createElement('video');
       video.srcObject = displayStream;
       video.autoplay = true;
       video.playsInline = true;
       video.muted = true;
-      
+
       video.onloadedmetadata = () => {
         video.play();
         screenVideoRef.current = video;
       };
 
       // Swap webcam video tracks with screen share tracks in all active peer connections
-      const screenTrack = displayStream.getVideoTracks()[0];
       livekitScreenTrackRef.current = screenTrack;
-      
+
       screenSendersRef.current = {};
+      const addedAt = Date.now();
       Object.keys(pcsRef.current).forEach(peerKey => {
         const pc = pcsRef.current[peerKey];
         const sender = pc.addTrack(screenTrack, displayStream);
         screenSendersRef.current[peerKey] = sender;
+        // addTrack must renegotiate the connection or remotes never receive
+        // the track. onnegotiationneeded normally does this; the safety net
+        // retries explicitly if it never fires.
+        ensureRenegotiation(peerKey, addedAt);
       });
 
       // Publish the screen to LiveKit too, so participants connected over
-      // the LiveKit engine see it — not just the peer-to-peer ones.
+      // the LiveKit engine see it -- not just the peer-to-peer ones.
       await publishLiveKitTrack(screenTrack, Track.Source.ScreenShare);
 
-      // Broadcast screenshare media state changes
-      if (sigChannelRef.current) {
-        sigChannelRef.current.send({
-          type: 'broadcast',
-          event: 'media-state',
-          payload: {
-            senderKey: myKey,
-            isVideoOn,
-            isMuted,
-            isScreenSharing: true
-          }
-        });
-      }
+      // Broadcast screenshare media state changes (with the screen track
+      // id so receivers can recognise the track even if it arrives first).
+      broadcastMediaState({ isScreenSharing: true });
 
       screenTrack.onended = () => {
         stopScreenShare();
         setIsScreenSharing(false);
       };
 
+      setIsScreenSharing(true);
+      triggerToast('Screen sharing started -- your screen is now visible in the room.');
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[Screen Share] Permission denied or failed.', err);
       screenVideoRef.current = null;
       setIsScreenSharing(false);
+      // Every failure path tells the user why -- a silent no-op here is
+      // what made sharing look broken when the picker was cancelled or
+      // permission was denied.
+      const reason = err?.name === 'NotAllowedError'
+        ? 'Screen sharing was blocked -- allow screen sharing in your browser and try again.'
+        : err?.name === 'NotFoundError'
+        ? 'No screen or window was available to share -- try again and pick a screen or window.'
+        : err?.name === 'NotReadableError'
+        ? 'Your screen could not be captured right now -- another app may be using it. Try again.'
+        : err?.name === 'AbortError'
+        ? 'Screen sharing was cancelled before it started.'
+        : err?.name === 'OverconstrainedError'
+        ? 'Your browser refused the screen capture settings -- try again.'
+        : `Screen sharing could not start (${err?.message || 'unknown error'}).`;
+      triggerToast(reason);
       return false;
     }
   };
@@ -2498,9 +2770,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, []);
 
   const stopScreenShare = () => {
-    if (screenStream) {
-      screenStream.getTracks().forEach(track => track.stop());
+    // Stop via the ref mirror: this is also called from the track's
+    // onended handler and the unmount cleanup, both of which close over
+    // stale state where `screenStream` is still null -- using the ref is
+    // what actually stops the capture.
+    const liveScreenStream = screenStreamRef.current || screenStream;
+    if (liveScreenStream) {
+      liveScreenStream.getTracks().forEach(track => track.stop());
       setScreenStream(null);
+      screenStreamRef.current = null;
     }
     screenVideoRef.current = null;
     // Unpublish from LiveKit so remote tiles stop showing the screen.
@@ -2508,12 +2786,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     unpublishLiveKitTrack(Track.Source.ScreenShare);
 
     // Remove screenshare track senders from all peer connections
+    const removedAt = Date.now();
     Object.keys(screenSendersRef.current).forEach(peerKey => {
       const sender = screenSendersRef.current[peerKey];
       const pc = pcsRef.current[peerKey];
       if (pc && sender) {
         try {
           pc.removeTrack(sender);
+          // Removing a track also needs renegotiation or remotes keep a
+          // dead track.
+          ensureRenegotiation(peerKey, removedAt);
         } catch (e) {
           console.warn(e);
         }
@@ -2522,18 +2804,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     screenSendersRef.current = {};
 
     // Broadcast screenshare media state changes
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'media-state',
-        payload: {
-          senderKey: myKey,
-          isVideoOn,
-          isMuted,
-          isScreenSharing: false
-        }
-      });
-    }
+    broadcastMediaState({ isScreenSharing: false });
   };
 
   // Admins check for waiting participants via realtime and fallback polling
@@ -2955,38 +3226,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       localAudioTrackRef.current.enabled = !nextMuted;
     }
 
-    // Broadcast audio state change using the active channel ref
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'media-state',
-        payload: {
-          senderKey: myKey,
-          isVideoOn,
-          isMuted: nextMuted,
-          isScreenSharing
-        }
-      });
-    }
+    // Broadcast audio state change (through the helper: it reads the live
+    // screen-share flag from a ref, so toggling mute mid-share cannot
+    // overwrite receivers with a stale isScreenSharing=false).
+    broadcastMediaState({ isMuted: nextMuted });
   };
 
   const toggleVideo = () => {
     const nextVideoOn = !isVideoOn;
     setIsVideoOn(nextVideoOn);
 
-    // Broadcast video state change using the active channel ref
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'media-state',
-        payload: {
-          senderKey: myKey,
-          isVideoOn: nextVideoOn,
-          isMuted,
-          isScreenSharing
-        }
-      });
-    }
+    // Broadcast video state change (through the helper -- see toggleMute).
+    broadcastMediaState({ isVideoOn: nextVideoOn });
   };
 
   const handleLeaveOrEnd = () => {
@@ -4229,8 +4480,8 @@ Media encrypted in transit (DTLS-SRTP).`;
               </div>
             </div>
           </div>
-        ) : participants.length === 0 ? (
-          /* Professional Fintech boardroom details dashboard when alone in a meeting */
+        ) : participants.length === 0 && !isScreenSharing ? (
+          /* Professional Fintech boardroom details dashboard when alone in a meeting (and not sharing your screen -- sharing uses the main screen-share layout below) */
           <div style={{
             flex: 1,
             display: 'flex',
@@ -4238,7 +4489,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             alignItems: 'center',
             justifyContent: 'center',
             padding: '2rem',
-            backgroundColor: '#07090E',
+            background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E',
             overflowY: 'auto'
           }}>
             {/* Centered: Your webcam tile */}
@@ -4484,6 +4735,25 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </div>
                 )}
 
+                {isSpeaking && !isMuted && (
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '12px',
+                    right: '12px',
+                    display: 'flex',
+                    gap: '3px',
+                    alignItems: 'center',
+                    backgroundColor: 'rgba(0,0,0,0.65)',
+                    padding: '6px',
+                    borderRadius: '6px',
+                    zIndex: 10
+                  }}>
+                    <span style={{ width: '3px', height: '10px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.7s ease infinite', transformOrigin: 'bottom' }} />
+                    <span style={{ width: '3px', height: '16px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.4s ease infinite', transformOrigin: 'bottom' }} />
+                    <span style={{ width: '3px', height: '8px', backgroundColor: 'var(--color-accent)', animation: 'wave-animation 0.8s ease infinite', transformOrigin: 'bottom' }} />
+                  </div>
+                )}
+
                 <div style={{
                   position: 'absolute',
                   bottom: '12px',
@@ -4501,6 +4771,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                 }}>
                   <span style={{ fontWeight: 600 }}>You (Host)</span>
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
+                  <span
+                    style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)' }}
+                    title={engineType === 'LIVEKIT' ? 'Connected through the LiveKit server' : 'Connected direct peer-to-peer (LiveKit unavailable)'}
+                  />
                 </div>
                 {activeReactions.filter(r => r.senderKey === myKey).map(r => (
                   <div 
@@ -4771,6 +5045,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                   }}>
                     <span style={{ fontWeight: 600 }}>{p.name}</span>
                     {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
+                    <span
+                      style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: pState.isReconnecting ? 'var(--color-accent)' : hasConnection ? (typeof pState.latency === 'number' ? (pState.latency < 150 ? '#10B981' : pState.latency < 400 ? 'var(--color-accent)' : '#EF4444') : '#10B981') : '#64748B' }}
+                      title={pState.isReconnecting ? 'Reconnecting...' : hasConnection ? (typeof pState.latency === 'number' ? `Connection latency ${pState.latency} ms` : 'Connected') : 'Connecting...' }
+                    />
                     {typeof pState.latency === 'number' && (
                       <span
                         style={{
@@ -4812,7 +5090,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   flex: 1,
                   display: 'flex',
                   overflow: 'hidden',
-                  backgroundColor: '#07090E'
+                  background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E'
                 }}>
                   {/* Main Screen Share Frame */}
                   <div style={{
@@ -4824,7 +5102,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     display: 'flex',
                     flexDirection: 'column',
                     backgroundColor: '#0A0D14',
-                    boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
+                    boxShadow: '0 8px 30px rgba(0,0,0,0.4), 0 0 32px rgba(250, 189, 2, 0.18)',
                     aspectRatio: window.innerWidth < 768 ? 'auto' : '16/9',
                     margin: window.innerWidth < 768 ? '0.5rem' : '1.5rem'
                   }}>
@@ -4933,12 +5211,33 @@ Media encrypted in transit (DTLS-SRTP).`;
                       zIndex: 25,
                       backdropFilter: 'blur(4px)'
                     }}>
+                      {isScreenSharing && (
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#EF4444', animation: 'pulse-red 1.5s infinite', flexShrink: 0 }} />
+                      )}
                       <Monitor size={14} color="var(--color-accent)" />
                       <span>
                         {isScreenSharing 
                           ? 'You are sharing your screen' 
                           : `${Object.keys(peerStates).find(k => peerStates[k].isScreenSharing) ? peerStates[Object.keys(peerStates).find(k => peerStates[k].isScreenSharing)!].name : 'Participant'} is sharing screen`}
                       </span>
+                        {isScreenSharing && (
+                          <button
+                            onClick={handleToggleScreenShare}
+                            style={{
+                              marginLeft: '0.4rem',
+                              backgroundColor: 'var(--color-accent)',
+                              color: 'black',
+                              border: 'none',
+                              borderRadius: '4px',
+                              padding: '0.2rem 0.6rem',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Stop sharing
+                          </button>
+                        )}
                     </div>
                   </div>
 
@@ -4970,7 +5269,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 alignItems: 'center',
                 justifyContent: 'center',
                 alignContent: 'center',
-                backgroundColor: '#07090E'
+                background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E'
               }}>
                 {localVideoCard}
                 {remoteVideoCards}
@@ -7813,6 +8112,15 @@ Media encrypted in transit (DTLS-SRTP).`;
           gap: '0.5rem'
         }}>
           <span>⚠ Connection degraded: {connectionNotice}</span>
+          {engineType === 'P2P' && (
+            <button
+              onClick={handleRetryLiveKit}
+              style={{ backgroundColor: 'var(--color-accent)', color: 'black', border: 'none', borderRadius: '6px', padding: '0.35rem 0.8rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}
+              title="Try connecting to the video server again with a fresh token"
+            >
+              Retry video server
+            </button>
+          )}
           <button
             onClick={() => setConnectionNotice(null)}
             style={{ background: 'none', border: 'none', color: '#FDE68A', cursor: 'pointer', fontSize: '1rem', marginLeft: 'auto', flexShrink: 0 }}
