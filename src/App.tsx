@@ -15,6 +15,7 @@ import { HelpCenter } from './components/HelpCenter';
 import { Auth } from './components/Auth';
 import { PrivateSpace } from './components/PrivateSpace';
 import { Waitroom } from './components/Waitroom';
+import { PreJoinCheck } from './components/PreJoinCheck';
 import { Superadmin } from './components/Superadmin';
 import { MeetingLobby } from './components/MeetingLobby';
 import { giinApi, supabase, getTransparentLogo, isMeetingHost } from './supabaseClient';
@@ -128,6 +129,26 @@ function App() {
   });
 
   const [joinMeetingData, setJoinMeetingData] = useState<{ meetingId: string; passcode: string } | null>(null);
+  // Pre-join check state (defect #1): every link joiner runs the device /
+  // network check before the passcode gate and the waiting room. The host
+  // never sees it (hash router bypass). Reset whenever a new join starts.
+  const [preJoinDone, setPreJoinDone] = useState(false);
+  const [preJoinName, setPreJoinName] = useState('');
+  const [preJoinVideoOn, setPreJoinVideoOn] = useState(true);
+  const [preJoinAudioOn, setPreJoinAudioOn] = useState(true);
+  const [joinMeetingTitle, setJoinMeetingTitle] = useState('GIIN MEET Call');
+  useEffect(() => {
+    if (!joinMeetingData) return;
+    setPreJoinDone(false);
+    setPreJoinName('');
+    setPreJoinVideoOn(true);
+    setPreJoinAudioOn(true);
+    let active = true;
+    giinApi.getMeetingDetails(joinMeetingData.meetingId).then(({ data }) => {
+      if (active && data?.title) setJoinMeetingTitle(data.title);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [joinMeetingData?.meetingId]);
 
   // Navigation & Theme
   const [currentView, setCurrentView] = useState<string>(() => {
@@ -1223,6 +1244,10 @@ function App() {
             window.location.hash = joinHash;
             return;
           }
+          // The passcode column is hidden from anon reads, so the
+          // host fetches it through the host-only server route for the
+          // lobby invite link below.
+          const hostPasscode = await giinApi.getMeetingPasscode(joinId);
           saved = {
             id: joinId,
             title: data.title || finalTitle,
@@ -1230,7 +1255,7 @@ function App() {
             duration: 'Active now',
             status: 'In Progress',
             host: data.host || user.name || 'You',
-            passcode: data.passcode,
+            passcode: hostPasscode || undefined,
             require_waiting_room: data.require_waiting_room ?? true
           };
         }
@@ -1368,10 +1393,32 @@ function App() {
     setActiveCallTitle(null);
     const endedId = activeMeetingId;
     if (endedId) {
-      try {
-        await giinApi.updateMeetingNotes(endedId, 'Meeting completed successfully.', 0, 'Completed');
-      } catch (err) {
-        console.error('Failed to update end status of meeting in database:', err);
+      // Ending a meeting for everyone is a HOST-ONLY act. App calls this
+      // for every leaver - including guests and non-hosts (leave button,
+      // end-for-all broadcast) - and the old code marked the meeting
+      // Completed (and overwrote its notes) on ANY leave. Now: only the
+      // host ends the meeting server-side (status Completed, notes
+      // PRESERVED, room deactivated, capacity slots freed). Everyone else
+      // just leaves locally; the meeting keeps running.
+      const leaver = userRef.current;
+      let isLeaverHost = false;
+      if (leaver?.id) {
+        try {
+          const { data } = await giinApi.getMeetingDetails(endedId);
+          if (data && isMeetingHost(data, leaver.id)) isLeaverHost = true;
+        } catch (e) { /* host check failed: fail closed, do not end */ }
+      }
+      if (isLeaverHost) {
+        try {
+          await giinApi.endMeeting(endedId);
+        } catch (err) {
+          console.error('Server end-meeting failed, falling back to a status-only update:', err);
+          try {
+            await giinApi.updateMeetingStatus(endedId, 'Completed');
+          } catch (e) {
+            console.error('Failed to update end status of meeting in database:', e);
+          }
+        }
       }
       // Clear this meeting's admission-bypass flags so a later visit
       // to the same meeting ID does not skip the passcode and waiting
@@ -1382,12 +1429,15 @@ function App() {
         localStorage.removeItem(`admitted_meeting_name_${endedId}`);
         localStorage.removeItem(`giin_participant_row_${endedId}`);
         localStorage.removeItem(`admitted_keys_${endedId}`);
+        localStorage.removeItem(`giin_display_name_${endedId}`);
       } catch (e) {}
       setActiveMeetingId(null);
+      setPreJoinDone(false);
+      setPreJoinName('');
     }
-    // Only the meeting that just ended becomes Completed — the old code
+    // Only the meeting that just ended becomes Completed - the old code
     // marked EVERY In Progress meeting Completed, including live ones.
-    setMeetingHistory(prev => 
+    setMeetingHistory(prev =>
       prev.map(m => m.id === endedId ? { ...m, status: 'Completed', duration: 'Ended call' } : m)
     );
     if (!user) {
@@ -1671,10 +1721,35 @@ function App() {
   const unreadNotifCount = notifications.filter(n => !n.read).length;
 
   if (currentView === 'join' && joinMeetingData) {
+    // Pre-join prerequisite check FIRST (defect #1): guests who follow a
+    // WhatsApp link used to go Waitroom -> MeetingRoom and never see any
+    // device check. The check runs before the passcode gate and the
+    // waiting room; the host never reaches this view (hash-router bypass
+    // sends the host straight into the room). The auto-admit path still
+    // runs the check first, because the Waitroom only mounts afterwards.
+    if (!preJoinDone) {
+      return (
+        <PreJoinCheck
+          meetingId={joinMeetingData.meetingId}
+          meetingTitle={joinMeetingTitle}
+          user={user}
+          onComplete={(displayName, videoOn, audioOn) => {
+            setPreJoinName(displayName);
+            setPreJoinVideoOn(videoOn);
+            setPreJoinAudioOn(audioOn);
+            setPreJoinDone(true);
+          }}
+          onBack={() => {
+            setCurrentView(user ? 'dashboard' : 'auth');
+          }}
+        />
+      );
+    }
     return (
       <Waitroom 
         meetingId={joinMeetingData.meetingId}
         initialPasscode={joinMeetingData.passcode}
+        initialDisplayName={preJoinName}
         user={user}
         onAdmitted={(title, _participantId, displayName) => {
           setIsP2PCall(false);
@@ -1705,6 +1780,8 @@ function App() {
           onEndMeeting={handleEndMeeting}
           onSaveWorkspaceData={handleSaveWorkspaceData}
           currentUser={guestUser}
+          initialVideoState={preJoinVideoOn}
+          initialMutedState={!preJoinAudioOn}
           isP2PCall={false}
           isHost={false}
         />

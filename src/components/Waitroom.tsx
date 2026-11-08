@@ -5,6 +5,10 @@ import { giinApi, supabase, isMeetingHost } from '../supabaseClient';
 interface WaitroomProps {
   meetingId: string;
   initialPasscode?: string;
+  // Display name already collected on the pre-join check screen. This is
+  // the single source: the check screen writes it, the Waitroom uses it —
+  // no second name store, no re-typing for guests who already gave it.
+  initialDisplayName?: string;
   user: { id: string; name: string; email: string } | null;
   onAdmitted: (meetingTitle: string, participantId: string, displayName: string) => void;
   onDeclined: () => void;
@@ -14,6 +18,7 @@ interface WaitroomProps {
 export const Waitroom: React.FC<WaitroomProps> = ({
   meetingId,
   initialPasscode = '',
+  initialDisplayName = '',
   user,
   onAdmitted,
   onDeclined,
@@ -28,8 +33,10 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const [passcodeValidated, setPasscodeValidated] = useState(false);
   const [passcodeError, setPasscodeError] = useState('');
 
-  // Profile entry states
-  const [displayName, setDisplayName] = useState(user?.name || '');
+  // Profile entry states — the name comes from the pre-join check screen
+  // (initialDisplayName) or the signed-in account; guests who skipped the
+  // check still get the form below.
+  const [displayName, setDisplayName] = useState(initialDisplayName || user?.name || '');
   const [participantId, setParticipantId] = useState<string>('');
   const [waitingStatus, setWaitingStatus] = useState<'Waiting' | 'Admitted' | 'Declined' | 'None'>('None');
   const [guestKey] = useState(() => user?.id || crypto.randomUUID());
@@ -69,11 +76,23 @@ export const Waitroom: React.FC<WaitroomProps> = ({
             onAdmitted(data.title || 'GIIN MEET Call', user.id, user.name || 'You');
             return;
           }
-          // Passcode: skip the form when the meeting has no passcode, and
-          // auto-accept the code when it arrived in the invite link - there
-          // is nothing to retype when you already followed a valid link.
-          if (!data.passcode || (initialPasscode && initialPasscode.toUpperCase() === String(data.passcode).toUpperCase())) {
-            setPasscodeValidated(true);
+          // Passcode: verified SERVER-side (see giinApi.verifyPasscode).
+          // The passcode is never compared in this component any more —
+          // the meetings table is publicly readable, so a client-side
+          // comparison was only ever a UI gate, not a secret. A code that
+          // arrived in the invite link is verified the same way; a meeting
+          // with no passcode at all skips the form.
+          try {
+            const verdict = await giinApi.verifyPasscode(meetingId, initialPasscode);
+            if (verdict.valid) {
+              setPasscodeValidated(true);
+            } else if (!verdict.hasPasscode) {
+              setPasscodeValidated(true);
+            }
+            // Otherwise the form stays up with the link's code prefilled
+            // so the user can correct it.
+          } catch (e: any) {
+            setPasscodeError(e?.message || 'Could not verify the passcode. Please check your connection and try again.');
           }
         }
       } catch (err) {
@@ -173,19 +192,27 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     };
   }, [participantId, waitingStatus, meetingDetails, displayName, onAdmitted, onDeclined, guestKey, meetingId]);
 
-  // Handle Passcode Validation
-  const handleVerifyPasscode = (e: React.FormEvent) => {
+  // Handle Passcode Validation — server-side only. The typed code is sent
+  // to /api/meetings/verify-passcode and only a true/false comes back;
+  // the real passcode never reaches this component.
+  const handleVerifyPasscode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!meetingDetails) return;
-
-    if (passcode.toUpperCase() === meetingDetails.passcode.toUpperCase()) {
-      setPasscodeValidated(true);
-      setPasscodeError('');
-      if (user?.name) {
-        joinWaitingRoom(user.name, meetingDetails.passcode);
+    setPasscodeError('');
+    setLoading(true);
+    try {
+      const verdict = await giinApi.verifyPasscode(meetingId, passcode);
+      if (verdict.valid) {
+        // Joining itself happens in the auto-join effect below, which
+        // uses the account name or the name from the pre-join check.
+        setPasscodeValidated(true);
+      } else {
+        setPasscodeError('Invalid passcode. Please check and try again.');
       }
-    } else {
-      setPasscodeError('Invalid passcode. Please check and try again.');
+    } catch (err: any) {
+      setPasscodeError(err?.message || 'Could not verify the passcode. Please check your connection and try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -235,15 +262,17 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     }
   };
 
-  // Signed-in users never type a display name: once the passcode step is
-  // done (or there is none), join straight away with the account name.
-  // Guests still get the name form below.
+  // Anyone who already has a display name — signed-in account name, or
+  // the name collected on the pre-join check screen — joins straight away
+  // once the passcode step is done (or there is none). Guests without a
+  // name yet still get the name form below.
   useEffect(() => {
     if (!passcodeValidated || waitingStatus !== 'None' || !meetingDetails) return;
-    if (user?.name) {
-      joinWaitingRoom(user.name, meetingDetails.passcode);
+    const effectiveName = user?.name || displayName.trim();
+    if (effectiveName) {
+      joinWaitingRoom(effectiveName, undefined);
     }
-  }, [passcodeValidated, waitingStatus, meetingDetails, user]);
+  }, [passcodeValidated, waitingStatus, meetingDetails, user, displayName]);
 
   const handleNameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -345,8 +374,10 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           </form>
         )}
 
-        {/* Step 2: Name Entry (Guest display name setup) - signed-in users auto-join with their account name */}
-        {passcodeValidated && waitingStatus === 'None' && !user?.name && (
+        {/* Step 2: Name Entry — only for guests who did not already give a
+            name on the pre-join check screen; signed-in users auto-join
+            with their account name. */}
+        {passcodeValidated && waitingStatus === 'None' && !user?.name && !initialDisplayName && (
           <form onSubmit={handleNameSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>

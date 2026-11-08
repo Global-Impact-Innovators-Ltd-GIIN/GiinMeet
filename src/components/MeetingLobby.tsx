@@ -29,6 +29,10 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
   const [isAudioOn, setIsAudioOn] = useState(true);
   const [copied, setCopied] = useState(false);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  // A denied / missing camera used to fail silently (console.warn only)
+  // and the user joined with a dead camera. Say plainly what is wrong
+  // and how to fix it.
+  const [cameraError, setCameraError] = useState('');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [selectedCamera, setSelectedCamera] = useState(() => localStorage.getItem('giin_selected_camera') || '');
   const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('giin_selected_mic') || '');
@@ -54,12 +58,21 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
       navigator.mediaDevices.getUserMedia(constraints)
         .then(stream => {
           setLocalStream(stream);
+          setCameraError('');
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
           }
         })
         .catch(err => {
           console.warn('Camera preview not available:', err);
+          const reason = err?.name === 'NotAllowedError'
+            ? 'Camera blocked — allow the camera in the browser address bar (click the camera icon), then press the camera button again. You can still join with the camera off.'
+            : err?.name === 'NotFoundError'
+            ? 'No camera was found on this device — you can still join with the camera off.'
+            : err?.name === 'NotReadableError'
+            ? 'Your camera is in use by another app — close that app, then press the camera button again.'
+            : 'Your camera could not be started — check the browser permission in the address bar. You can still join with the camera off.';
+          setCameraError(reason);
           setIsVideoOn(false);
         });
     } else {
@@ -279,6 +292,11 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
             Verify your microphone and webcam settings before entering the virtualization grid.
           </span>
+          {cameraError && (
+            <div style={{ fontSize: '0.8rem', color: '#FCA5A5', backgroundColor: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '8px', padding: '0.75rem 1rem', lineHeight: 1.45, textAlign: 'left' }}>
+              {cameraError}
+            </div>
+          )}
         </div>
 
         {/* Right Column: Branded Meeting Info & Joins */}
