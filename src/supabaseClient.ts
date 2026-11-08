@@ -1,23 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
-const getEnv = (key: string): string | undefined => {
-  if (typeof process !== 'undefined' && process.env && process.env[key]) {
-    return process.env[key];
-  }
-  try {
-    const metaEnv = (import.meta as any).env;
-    if (metaEnv && metaEnv[key]) {
-      return metaEnv[key];
-    }
-  } catch (e) {}
-  return undefined;
-};
-
 // Supabase configuration. No credentials are hardcoded here: the app fails
 // loudly at startup when NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are
 // missing, instead of silently pointing at a stale or deleted project.
-export const supabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL') ?? getEnv('VITE_SUPABASE_URL');
-export const supabaseAnonKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') ?? getEnv('VITE_SUPABASE_ANON_KEY');
+// NOTE: Next.js only inlines env vars into the browser bundle when they are
+// read with STATIC process.env.NEXT_PUBLIC_* access. A dynamic lookup such as
+// process.env[key] is NOT inlined, so the browser would see undefined and the
+// app would fail to start. VITE_* is kept as a fallback for local tooling.
+export const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+export const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(
@@ -28,8 +19,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-export const isSupabaseConfigured = 
-  supabaseUrl !== undefined && 
+export const isSupabaseConfigured =
+  supabaseUrl !== undefined &&
   supabaseAnonKey !== undefined;
 
 export interface GiinUser {
@@ -752,6 +743,7 @@ export const getTransparentLogo = (src: string): Promise<string> => {
     img.src = src;
   });
 };
+
 
 
 
