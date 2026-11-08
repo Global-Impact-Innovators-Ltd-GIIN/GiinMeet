@@ -145,8 +145,8 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       const p = navigator.mediaDevices.getUserMedia({
         video: savedCam ? { deviceId: { exact: savedCam }, width: 640, height: 480 } : { width: 640, height: 480 },
         audio: savedMic
-          ? { deviceId: { exact: savedMic }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-          : { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          ? { deviceId: { exact: savedMic }, echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: { ideal: 1 } }
+          : { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: { ideal: 1 } },
       });
       let settled = false;
       p.then((s) => { if (settled) s.getTracks().forEach((t) => t.stop()); }).catch(() => {});

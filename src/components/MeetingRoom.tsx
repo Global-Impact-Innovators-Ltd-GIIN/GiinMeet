@@ -92,6 +92,23 @@ export const handRaiseSoundKey = (reason?: string | null): string => {
   return 'hand-raise';
 };
 
+// Fix Round 6 (audio): ONE microphone capture recipe for the whole
+// room. Every mic acquisition (first join, device switch, test) must
+// request the same processing — echo cancellation, noise suppression,
+// automatic gain control, mono voice capture — or a device switch
+// silently changes what the other side hears. `ideal` (never `exact`)
+// for channelCount, so a mono-only request can never fail a device.
+export const micAudioConstraints = (deviceId?: string): MediaTrackConstraints => {
+  const c: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    channelCount: { ideal: 1 },
+  };
+  if (deviceId) c.deviceId = { exact: deviceId };
+  return c;
+};
+
 export interface ChatMessage {
   id?: string;
   sender: string;
@@ -184,6 +201,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const sigChannelRef = useRef<any>(null);
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
+  // Fix Round 6: the raw mic capture vs the track actually published.
+  // When Studio Voice is on, the published track is the WebAudio
+  // destination track and the raw capture feeds it — the two are
+  // different objects and must never be confused (stopping the raw
+  // track silences the enhancement; stopping the destination track
+  // leaves the raw capture running with the mic light on).
+  const localMicRawTrackRef = useRef<MediaStreamTrack | null>(null);
+  const enhancerChainRef = useRef<{
+    rawTrack: MediaStreamTrack;
+    destTrack: MediaStreamTrack;
+    nodes: { source: MediaStreamAudioSourceNode; highpass: BiquadFilterNode; bandpass: BiquadFilterNode; compressor: DynamicsCompressorNode; dest: MediaStreamAudioDestinationNode };
+  } | null>(null);
+  const isAudioEnhancedRef = useRef(false);
+  // Speaking-indicator analysers, one per peer (plus the local mic).
+  // A new analyser per ontrack / re-subscribe used to pile up rAF loops
+  // that never stopped; the registry dedupes by stream and can stop them.
+  const speakingAnalysersRef = useRef<{ [key: string]: { streamId: string; stopped: boolean; raf: number; source: MediaStreamAudioSourceNode; analyser: AnalyserNode; extraNodes: AudioNode[] } }>({});
+  // What media engine each peer is on, from their presence broadcasts.
+  // Decides whether a P2P link to them is needed at all (see below).
+  const peerEnginesRef = useRef<{ [peerKey: string]: string }>({});
+  // Warn once per session if the browser reports mic processing off.
+  const micProcessingWarnedRef = useRef(false);
   const reconnectTimersRef = useRef<{[key: string]: any}>({});
 
   // Minimized floating window dragging state
@@ -332,6 +371,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const [engineType, setEngineType] = useState<'LIVEKIT' | 'P2P'>('LIVEKIT');
+  // Ref mirror: the signalling closures were created before the last
+  // engine change, so they must read the live value from here.
+  const engineTypeRef = useRef<'LIVEKIT' | 'P2P'>('LIVEKIT');
+  useEffect(() => { engineTypeRef.current = engineType; }, [engineType]);
   const [livekitToken, setLivekitToken] = useState<string>('');
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   // Bumped to force the LiveKit connect effect to re-run (disconnect +
@@ -445,7 +488,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // An ended track is not "already published": unpublish it so the
         // fresh track below actually replaces it instead of early-returning.
         if (existing.track === track && existing.track.readyState === 'live') return; // already published
-        await room.localParticipant.unpublishTrack(existing.track);
+        const oldTrack = existing.track;
+        await room.localParticipant.unpublishTrack(oldTrack);
+        // The room runs with stopLocalTrackOnUnpublish:false (the Studio
+        // Voice enhancer feeds off the raw mic track, so unpublishing it
+        // must not stop it — the SDK default would kill the chain).
+        // Stop a replaced track explicitly here instead — unless it is
+        // the enhancer's live source, which the chain still needs.
+        if (oldTrack !== enhancerChainRef.current?.rawTrack) {
+          try { oldTrack.stop(); } catch (e) {}
+        }
       }
       await room.localParticipant.publishTrack(track, { source });
     } catch (e) {
@@ -465,6 +517,57 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (e) {
       console.warn('[LiveKit] Could not unpublish track:', e);
     }
+  };
+
+  // Fix Round 6: requesting echo cancellation / noise suppression /
+  // gain control is not the same as getting it — a browser may silently
+  // ignore the request (notably on phones). Read the CAPTURE track's
+  // real settings after every acquisition and say so, once per session,
+  // when processing is actually off: the honest fix then is headphones,
+  // not another toggle. Only an explicit `false` warns — `undefined`
+  // means the browser does not report it, not that it is off.
+  const verifyMicProcessing = (track: MediaStreamTrack) => {
+    try {
+      const s = track.getSettings() as any;
+      const missing: string[] = [];
+      if (s.echoCancellation === false) missing.push('echo cancellation');
+      if (s.noiseSuppression === false) missing.push('noise suppression');
+      if (s.autoGainControl === false) missing.push('automatic gain control');
+      if (missing.length === 0) return;
+      console.warn('[Audio] Browser did not apply mic processing:', missing, s);
+      if (!micProcessingWarnedRef.current) {
+        micProcessingWarnedRef.current = true;
+        triggerToast(`Your browser could not enable ${missing.join(' and ')} on this microphone — use headphones to keep your speakers out of the mic.`);
+      }
+    } catch (e) { /* settings unreadable — capture itself still works */ }
+  };
+
+  // Fix Round 6: publish ONE mic track everywhere it must go (LiveKit
+  // + every P2P sender + local stream + speaking detector). The single
+  // funnel for mic-track swaps, so a device switch, a Studio Voice
+  // toggle and the first acquisition cannot diverge into a different
+  // track per engine — which is how the old toggle changed nothing on
+  // LiveKit while swapping the P2P senders.
+  const publishMicTrack = async (track: MediaStreamTrack) => {
+    localAudioTrackRef.current = track;
+    track.enabled = !isMutedRef.current;
+    setStream(prev => {
+      const newStream = prev || new MediaStream();
+      newStream.getAudioTracks().forEach(t => newStream.removeTrack(t));
+      newStream.addTrack(track);
+      return newStream;
+    });
+    Object.values(pcsRef.current).forEach(pc => {
+      const senders = pc.getSenders();
+      const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+      if (audioSender) {
+        audioSender.replaceTrack(track);
+      } else {
+        try { pc.addTrack(track, stream || new MediaStream([track])); } catch (e) {}
+      }
+    });
+    setupSpeakingDetection(new MediaStream([track]), myKey, true);
+    await publishLiveKitTrack(track, Track.Source.Microphone);
   };
 
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -500,6 +603,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [videoFilter, setVideoFilter] = useState('none');
 
   const [isAudioEnhanced, setIsAudioEnhanced] = useState(false);
+  // Ref mirror of the Studio Voice flag: mic swaps close over the flag
+  // and must re-apply the chain, not silently drop it.
+  useEffect(() => { isAudioEnhancedRef.current = isAudioEnhanced; }, [isAudioEnhanced]);
   const [isStudioLightEnabled, setIsStudioLightEnabled] = useState(false);
   
   const [isMeetingLocked, setIsMeetingLocked] = useState(false);
@@ -883,9 +989,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           setLivekitRole(serverRole);
         }
 
+        // Fix Round 6: stopLocalTrackOnUnpublish:false. The SDK default
+        // (true) stops a track the moment it is unpublished — which
+        // would stop the raw mic track when Studio Voice publishes its
+        // filtered track in its place, silencing the enhancer's own
+        // input. Track lifecycle is explicit in this file instead
+        // (publishLiveKitTrack stops a replaced track; stopScreenShare
+        // and the unmount cleanup stop theirs), so nothing leaks.
         const room = new LiveKitRoom({
           adaptiveStream: true,
-          dynacast: true
+          dynacast: true,
+          stopLocalTrackOnUnpublish: false
         });
 
         livekitRoomRef.current = room;
@@ -1102,6 +1216,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // `livekitReconnectNonce` IS a dependency: bumping it is how the token
     // refresh forces a clean disconnect + reconnect with a fresh token.
   }, [isMediaInitialized, engineType, meetingId, myKey, currentUser, isAdmin, livekitReconnectNonce]);
+
+  // Fix Round 6: when the engine becomes LiveKit, the P2P mesh is
+  // redundant — tear it down (see teardownP2PMesh). The mesh rebuilds
+  // itself from presence broadcasts if the engine ever falls back to
+  // P2P (breakouts / LiveKit failure), so this cannot strand a call.
+  useEffect(() => {
+    if (engineType !== 'LIVEKIT') return;
+    teardownP2PMesh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engineType]);
 
   // Token expiry: refresh EARLY and WITHOUT dropping media. The token now
   // lasts 6 hours, but the refresh still fires at 15 minutes remaining —
@@ -1355,10 +1479,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         localVideoTrackRef.current = null;
         dyingTrack.stop();
       }
+      // Fix Round 6: when Studio Voice is on, localAudioTrackRef is the
+      // filtered destination track — stopping it alone leaves the raw
+      // capture feeding the chain with the mic light on. Tear the
+      // chain down (stops the destination track) and stop the raw
+      // capture too. Also end every speaking-indicator loop.
+      teardownEnhancer();
+      if (localMicRawTrackRef.current) {
+        localMicRawTrackRef.current.stop();
+        localMicRawTrackRef.current = null;
+      }
       if (localAudioTrackRef.current) {
         localAudioTrackRef.current.stop();
         localAudioTrackRef.current = null;
       }
+      Object.keys(speakingAnalysersRef.current).forEach(stopSpeakingDetection);
     };
   }, []);
 
@@ -1471,7 +1606,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       });
     }
-  }, [selectedSpeaker, remoteStreams, activePeerKeys]);
+    // Fix Round 6: livekitRemoteStreams was missing here, so an audio
+    // element mounted for a LiveKit peer never got the chosen speaker
+    // (it played on the default device instead).
+  }, [selectedSpeaker, remoteStreams, livekitRemoteStreams, activePeerKeys]);
 
   const changeCamera = async (deviceId: string) => {
     setSelectedCamera(deviceId);
@@ -1527,39 +1665,29 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       // Acquire the new microphone FIRST (see changeCamera).
       const audioStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: { exact: deviceId },
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
+        audio: micAudioConstraints(deviceId)
       });
       const audioTrack = audioStream.getAudioTracks()[0];
-      const oldTrack = localAudioTrackRef.current;
-      localAudioTrackRef.current = audioTrack;
-      audioTrack.enabled = !isMuted;
-      if (oldTrack && oldTrack !== audioTrack) {
-        oldTrack.stop();
+      const oldRaw = localMicRawTrackRef.current;
+      const oldPublished = localAudioTrackRef.current;
+      // Tear the enhancer down FIRST: its destination track is the
+      // published one and its source is the raw capture. Stopping the
+      // raw track while the chain is live would silence the new chain,
+      // and leaving the old chain up leaks a second live mic.
+      teardownEnhancer();
+      if (oldPublished && oldPublished !== audioTrack) {
+        try { oldPublished.stop(); } catch (e) {}
       }
-
-      setStream(prev => {
-        const newStream = prev || new MediaStream();
-        newStream.getAudioTracks().forEach(t => newStream.removeTrack(t));
-        newStream.addTrack(audioTrack);
-        return newStream;
-      });
-
-      Object.values(pcsRef.current).forEach(pc => {
-        const audioSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
-        if (audioSender) {
-          audioSender.replaceTrack(audioTrack);
-        }
-      });
-
-      // Publish the new microphone to LiveKit as well.
-      await publishLiveKitTrack(audioTrack, Track.Source.Microphone);
-
-      setupSpeakingDetection(new MediaStream([audioTrack]), myKey, true);
+      if (oldRaw && oldRaw !== audioTrack && oldRaw !== oldPublished) {
+        try { oldRaw.stop(); } catch (e) {}
+      }
+      localMicRawTrackRef.current = audioTrack;
+      verifyMicProcessing(audioTrack);
+      // Studio Voice stays as the user set it: a mic switch must not
+      // silently drop the enhancement (the old code published the raw
+      // track while the toggle still showed ON).
+      const trackToUse = isAudioEnhancedRef.current ? buildEnhancedTrack(audioTrack) : audioTrack;
+      await publishMicTrack(trackToUse);
     } catch (err) {
       console.error('Failed to change microphone:', err);
       triggerToast('Could not switch microphone — keeping the current one.');
@@ -1613,7 +1741,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         sigChannelRef.current.send({
           type: 'broadcast',
           event: 'signal',
-          payload: { type: 'offer', targetKey: peerKey, senderKey: myKey, sdp: pc.localDescription }
+          payload: { type: 'offer', targetKey: peerKey, senderKey: myKey, sdp: pc.localDescription, engine: engineTypeRef.current }
         });
       }
     } catch (err) {
@@ -1737,6 +1865,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       pcsRef.current[peerKey].close();
       delete pcsRef.current[peerKey];
     }
+    stopSpeakingDetection(peerKey);
     if (screenSendersRef.current[peerKey]) {
       delete screenSendersRef.current[peerKey];
     }
@@ -1766,6 +1895,71 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       return copy;
     });
     setParticipants(prev => prev.filter(p => p.id !== peerKey && p.userId !== peerKey));
+  };
+
+  // Fix Round 6: close ONE P2P link without touching the tile. Unlike
+  // cleanupPeer (the peer left), the participant is still in the room —
+  // only the redundant transport goes away (their voice stays on
+  // LiveKit). A P2P screen track is dropped too, unless it is also a
+  // LiveKit screen track: the two must never share one MediaStream, or
+  // the tile shows one at random. LiveKit re-delivers its screens on
+  // subscribe, so dropping the P2P copy cannot strand a share.
+  const closeP2PLink = (peerKey: string) => {
+    if (pcsRef.current[peerKey]) {
+      try { pcsRef.current[peerKey].close(); } catch (e) {}
+      delete pcsRef.current[peerKey];
+    }
+    if (screenSendersRef.current[peerKey]) delete screenSendersRef.current[peerKey];
+    if (remoteCameraTrackIdsRef.current[peerKey]) delete remoteCameraTrackIdsRef.current[peerKey];
+    if (remoteVideoMetaRef.current[peerKey]) delete remoteVideoMetaRef.current[peerKey];
+    if (pcCandidatesRef.current[peerKey]) delete pcCandidatesRef.current[peerKey];
+    stopSpeakingDetection(peerKey);
+    setActivePeerKeys(prev => prev.filter(k => k !== peerKey));
+    const nextRemoteRef = { ...remoteStreamsRef.current };
+    delete nextRemoteRef[peerKey];
+    remoteStreamsRef.current = nextRemoteRef;
+    setRemoteStreams(prev => {
+      if (!prev[peerKey]) return prev;
+      const copy = { ...prev };
+      delete copy[peerKey];
+      return copy;
+    });
+    setRemoteScreenStreams(prev => {
+      const entry = prev[peerKey];
+      if (!entry) return prev;
+      const livekitScreenTrackIds = new Set<string>();
+      Object.entries(livekitPublicationsRef.current).forEach(([k, pub]: [string, any]) => {
+        if (!k.startsWith(`${peerKey}:`)) return;
+        if (pub?.source !== Track.Source.ScreenShare) return;
+        const id = pub?.track?.mediaStreamTrack?.id;
+        if (id) livekitScreenTrackIds.add(id);
+      });
+      const kept = entry.getTracks().filter(t => livekitScreenTrackIds.has(t.id));
+      if (kept.length === entry.getTracks().length) return prev;
+      if (kept.length === 0) {
+        const copy = { ...prev };
+        delete copy[peerKey];
+        return copy;
+      }
+      const next = new MediaStream(kept);
+      return { ...prev, [peerKey]: next };
+    });
+  };
+
+  // Fix Round 6: one engine carries each voice. While LiveKit is the
+  // engine, a P2P link to the same peer sends that peer's microphone
+  // (and camera) a second time — doubling uplink load and jitter on
+  // constrained connections, for a stream nobody plays (tiles prefer
+  // LiveKit). Close the redundant links. Links to peers whose own
+  // engine is P2P are KEPT: they cannot reach the SFU, so the mesh is
+  // their only path to us. Peers whose engine is not known yet are
+  // treated as LiveKit — their presence broadcast (every 6 s) corrects
+  // the record if they are really P2P, and the mesh rebuilds.
+  const teardownP2PMesh = () => {
+    Object.keys(pcsRef.current).forEach(peerKey => {
+      if (peerEnginesRef.current[peerKey] === 'P2P') return;
+      closeP2PLink(peerKey);
+    });
   };
 
   // Collaborative Whiteboard Drawing Functions
@@ -2165,38 +2359,55 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   }, [isWhiteboardActive]);
 
-  // Web Audio speaking volume analyzer
+  // Web Audio speaking volume analyzer (registry version — Fix Round 6).
+  // One analyser per peer, deduped by stream: a re-subscribe or a
+  // re-negotiation used to pile up a new analyser + rAF loop each time,
+  // none of them ever stopped. stopSpeakingDetection ends the loop and
+  // disconnects the nodes (peer leave / engine teardown / mic swap).
+  // Remote analysers route through a zero-gain node to the destination:
+  // that keeps iOS Safari / Chrome from silencing the stream, at gain 0,
+  // so it can never double-play the voice.
+  const stopSpeakingDetection = (targetKey: string) => {
+    const entry = speakingAnalysersRef.current[targetKey];
+    if (!entry) return;
+    delete speakingAnalysersRef.current[targetKey];
+    entry.stopped = true;
+    if (entry.raf) cancelAnimationFrame(entry.raf);
+    try { entry.source.disconnect(); } catch (e) {}
+    try { entry.analyser.disconnect(); } catch (e) {}
+    entry.extraNodes.forEach(n => { try { n.disconnect(); } catch (e) {} });
+  };
+
   const setupSpeakingDetection = (mediaStream: MediaStream, targetKey: string, isLocal: boolean) => {
     try {
+      if (!mediaStream.getAudioTracks().some(t => t.readyState === 'live')) return;
+      const existing = speakingAnalysersRef.current[targetKey];
+      if (existing && existing.streamId === mediaStream.id && !existing.stopped) return; // already analysing this stream
+      if (existing) stopSpeakingDetection(targetKey);
       const ctx = getAudioCtx();
       const source = ctx.createMediaStreamSource(mediaStream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 128;
       source.connect(analyser);
-      
-      // Fix WebRTC silent remote stream issue on iOS Safari / Chrome:
-      // Connecting a remote WebRTC MediaStream to a Web Audio source without connecting it
-      // to the destination speakers can silence the stream entirely. We route it through a
-      // zero-gain node to the destination to satisfy the browser's audio graph requirement
-      // without creating duplicate double-audio / echo.
+
+      const extraNodes: AudioNode[] = [];
       if (!isLocal) {
         const silentGain = ctx.createGain();
         silentGain.gain.value = 0;
         analyser.connect(silentGain);
         silentGain.connect(ctx.destination);
+        extraNodes.push(silentGain);
       }
-      
+
+      const entry = { streamId: mediaStream.id, stopped: false, raf: 0, source, analyser, extraNodes };
+      speakingAnalysersRef.current[targetKey] = entry;
+
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
-      
+
       let wasSpeaking = false;
       const checkVolume = () => {
-        if (isLocal) {
-          if (!stream) return;
-        } else {
-          if (!pcsRef.current[targetKey]) return;
-        }
-
+        if (entry.stopped) return;
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
         for (let i = 0; i < bufferLength; i++) {
@@ -2219,7 +2430,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             });
           }
         }
-        requestAnimationFrame(checkVolume);
+        entry.raf = requestAnimationFrame(checkVolume);
       };
       checkVolume();
     } catch (e) {
@@ -2643,6 +2854,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const handleSignal = async (data: any) => {
       const { type, senderKey, sdp, candidate } = data;
 
+      // Fix Round 6: the mesh is dormant while the SFU carries media —
+      // except for a peer whose own engine is P2P (their LiveKit
+      // failed), who can only reach us peer-to-peer. The offer carries
+      // the sender's engine so the answerer can tell. Answers and
+      // candidates need no gate: they only arrive for a PC this side
+      // already created.
+      if (data.engine) peerEnginesRef.current[senderKey] = data.engine;
+      if (type === 'offer' && engineTypeRef.current === 'LIVEKIT' && data.engine !== 'P2P') return;
+
       if (type === 'offer') {
         let pc = pcsRef.current[senderKey];
         if (!pc || pc.signalingState === 'closed') {
@@ -2733,7 +2953,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         
         if (senderKey !== myKey) {
           playUserJoinSound();
-          
+          // Fix Round 6: remember the peer's engine. A peer on the SFU
+          // needs no P2P link — and if we built one while their engine
+          // was unknown, close it now that we know.
+          if (data.engine) peerEnginesRef.current[senderKey] = data.engine;
+          if (data.engine === 'LIVEKIT' && engineTypeRef.current === 'LIVEKIT') closeP2PLink(senderKey);
           // A guest's signalling key is a random per-visit UUID, but
           // tiles are keyed by the meeting_participants row id (which
           // is also the guest's LiveKit identity). The guest sends its
@@ -2794,7 +3018,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             existingPc.connectionState === 'failed' || 
             existingPc.connectionState === 'closed';
 
-          if (isInitiator && needsConnection) {
+          // Fix Round 6: build the mesh only when it is actually the
+          // transport — our engine is P2P (fallback / breakout), or the
+          // peer's is (their LiveKit failed, so the SFU cannot carry
+          // them). Two LiveKit peers never mesh: their voices already
+          // meet on the server, and a parallel mesh only doubles the
+          // uplink and the jitter.
+          if (isInitiator && needsConnection && (engineTypeRef.current === 'P2P' || data.engine === 'P2P')) {
             initPeerConnection(senderKey);
           }
         }
@@ -3112,6 +3342,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               senderKey: myKey,
               participantRowId: myParticipantRowId || undefined,
               name: currentUser?.name || 'Guest',
+              // Fix Round 6: peers need to know our engine — a P2P-only
+              // peer can only reach us over the mesh, a LiveKit peer
+              // must not build one to us.
+              engine: engineTypeRef.current,
               // Read live values from refs: this closure is frozen at the
               // signalling effect's last run and would otherwise re-broadcast
               // a stale isScreenSharing=false every 6s.
@@ -3145,6 +3379,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           senderKey: myKey,
           participantRowId: myParticipantRowId || undefined,
           name: currentUser?.name || 'Guest',
+          engine: engineTypeRef.current,
           // Live values from refs -- see the SUBSCRIBED announce above.
           isVideoOn: isVideoOnRef.current,
           isMuted: isMutedRef.current,
@@ -3575,52 +3810,46 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     });
   }, [remoteStreams, livekitRemoteStreams, isSpatialAudioEnabled]);
 
+  // Fix Round 6: speaking detection for LiveKit peers. It used to come
+  // only from the P2P mesh's ontrack — so with the mesh gated off in
+  // LiveKit mode, remote speaking rings would go dead. Analyse the
+  // LiveKit stream directly (deduped by the registry, so a peer with
+  // both engines never gets two analysers), and stop analysers for
+  // peers with no live audio on either engine.
+  useEffect(() => {
+    if (engineType !== 'LIVEKIT') return;
+    Object.keys(livekitRemoteStreams).forEach(peerKey => {
+      const s = livekitRemoteStreams[peerKey];
+      if (s && s.getAudioTracks().some(t => t.readyState === 'live')) {
+        setupSpeakingDetection(s, peerKey, false);
+      }
+    });
+    Object.keys(speakingAnalysersRef.current).forEach(peerKey => {
+      if (peerKey === myKey) return;
+      const lk = livekitRemoteStreams[peerKey];
+      const p2p = remoteStreams[peerKey];
+      const hasLive =
+        (lk && lk.getAudioTracks().some(t => t.readyState === 'live')) ||
+        (p2p && p2p.getAudioTracks().some(t => t.readyState === 'live'));
+      if (!hasLive) stopSpeakingDetection(peerKey);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [livekitRemoteStreams, remoteStreams, engineType]);
+
   // Initialize audio track (kept alive throughout the meeting)
   useEffect(() => {
     async function initAudio() {
       try {
         const savedMic = localStorage.getItem('giin_selected_mic');
-        const audioStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: savedMic ? {
-            deviceId: { exact: savedMic },
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          } : {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          } 
+        const audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: micAudioConstraints(savedMic || undefined)
         });
         const audioTrack = audioStream.getAudioTracks()[0];
-        localAudioTrackRef.current = audioTrack;
-        audioTrack.enabled = !isMuted;
-        
-        setStream(prev => {
-          const newStream = prev || new MediaStream();
-          newStream.getAudioTracks().forEach(t => newStream.removeTrack(t));
-          newStream.addTrack(audioTrack);
-          return newStream;
-        });
-
-        // Setup local audio analyzer
-        setupSpeakingDetection(new MediaStream([audioTrack]), myKey, true);
-
-        // Add to any existing peer connections
-        Object.values(pcsRef.current).forEach(pc => {
-          const senders = pc.getSenders();
-          const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
-          if (audioSender) {
-            audioSender.replaceTrack(audioTrack);
-          } else {
-            const sender = pc.addTrack(audioTrack, stream || new MediaStream([audioTrack]));
-          }
-        });
-
-        // And publish it to LiveKit (the connect effect runs once, at
-        // connect time — a mic acquired after that is otherwise invisible
-        // to LiveKit viewers).
-        publishLiveKitTrack(audioTrack, Track.Source.Microphone);
+        localMicRawTrackRef.current = audioTrack;
+        verifyMicProcessing(audioTrack);
+        // One funnel (see publishMicTrack): local stream, P2P senders,
+        // LiveKit publication and speaking detector all get this track.
+        await publishMicTrack(audioTrack);
       } catch (err: any) {
         // A dead mic used to fail silently (console.error only) and the
         // user joined the meeting unable to speak, never knowing why.
@@ -3637,6 +3866,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     initAudio();
     return () => {
+      // Fix Round 6: stop the raw capture too, not just the published
+      // track (when Studio Voice is on they are different objects).
+      teardownEnhancer();
+      if (localMicRawTrackRef.current) {
+        localMicRawTrackRef.current.stop();
+      }
       if (localAudioTrackRef.current) {
         localAudioTrackRef.current.stop();
       }
@@ -3986,77 +4221,93 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  const getEnhancedAudioTrack = (rawTrack: MediaStreamTrack): MediaStreamTrack => {
+  // Fix Round 6: Studio Voice, rebuilt. The old toggle re-acquired the
+  // microphone on every flip (without the selected device — so it
+  // silently switched mics), never stopped the previous track, never
+  // published anything to LiveKit (only the P2P senders changed, so on
+  // the LiveKit engine the toggle changed nothing anyone heard), and
+  // never tore the old filter chain down. The chain is now built from
+  // the CURRENT capture and tracked in enhancerChainRef, so it can be
+  // torn down exactly once — and the raw track stays alive as the
+  // chain's input until the chain is gone.
+  const buildEnhancedTrack = (rawTrack: MediaStreamTrack): MediaStreamTrack => {
     try {
       const ctx = getAudioCtx();
       const rawStream = new MediaStream([rawTrack]);
       const source = ctx.createMediaStreamSource(rawStream);
-      
+
       const bandpass = ctx.createBiquadFilter();
       bandpass.type = 'bandpass';
       bandpass.frequency.value = 1650;
       bandpass.Q.value = 0.5;
-      
+
       const highpass = ctx.createBiquadFilter();
       highpass.type = 'highpass';
       highpass.frequency.value = 150;
-      
+
       const compressor = ctx.createDynamicsCompressor();
       compressor.threshold.value = -24;
       compressor.knee.value = 30;
       compressor.ratio.value = 12;
       compressor.attack.value = 0.003;
       compressor.release.value = 0.25;
-      
+
       const dest = ctx.createMediaStreamDestination();
-      
+
       source.connect(highpass);
       highpass.connect(bandpass);
       bandpass.connect(compressor);
       compressor.connect(dest);
-      
-      return dest.stream.getAudioTracks()[0];
+
+      const destTrack = dest.stream.getAudioTracks()[0];
+      enhancerChainRef.current = { rawTrack, destTrack, nodes: { source, highpass, bandpass, compressor, dest } };
+      return destTrack;
     } catch (e) {
       console.warn('Failed to initialize Audio Enhancer:', e);
       return rawTrack;
     }
   };
 
+  const teardownEnhancer = () => {
+    const chain = enhancerChainRef.current;
+    if (!chain) return;
+    enhancerChainRef.current = null;
+    try { chain.nodes.source.disconnect(); } catch (e) {}
+    try { chain.nodes.highpass.disconnect(); } catch (e) {}
+    try { chain.nodes.bandpass.disconnect(); } catch (e) {}
+    try { chain.nodes.compressor.disconnect(); } catch (e) {}
+    try { chain.nodes.dest.disconnect(); } catch (e) {}
+    try { chain.destTrack.stop(); } catch (e) {}
+  };
+
   const toggleAudioEnhancement = async () => {
     const nextVal = !isAudioEnhanced;
     setIsAudioEnhanced(nextVal);
+    isAudioEnhancedRef.current = nextVal;
+    const rawTrack = localMicRawTrackRef.current;
+    if (!rawTrack || rawTrack.readyState !== 'live') {
+      setIsAudioEnhanced(false);
+      isAudioEnhancedRef.current = false;
+      triggerToast('Microphone is not ready yet — try again once your mic is on.');
+      return;
+    }
+    // No re-acquisition: the toggle re-routes the CURRENT capture, so it
+    // can never silently switch microphones. Echo cancellation, noise
+    // suppression and gain control are already on for the capture (see
+    // micAudioConstraints); the toggle only adds or removes the Studio
+    // Voice filter chain — and the result is published to LiveKit AND
+    // the P2P mesh alike through the one funnel (publishMicTrack).
     try {
-      const audioStream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        } 
-      });
-      const rawTrack = audioStream.getAudioTracks()[0];
-      let trackToUse = rawTrack;
       if (nextVal) {
-        trackToUse = getEnhancedAudioTrack(rawTrack);
+        const enhanced = buildEnhancedTrack(rawTrack);
+        await publishMicTrack(enhanced);
+      } else {
+        teardownEnhancer();
+        await publishMicTrack(rawTrack);
       }
-      localAudioTrackRef.current = trackToUse;
-      trackToUse.enabled = !isMuted;
-      
-      setStream(prev => {
-        const newStream = prev || new MediaStream();
-        newStream.getAudioTracks().forEach(t => newStream.removeTrack(t));
-        newStream.addTrack(trackToUse);
-        return newStream;
-      });
-      
-      Object.values(pcsRef.current).forEach(pc => {
-        const senders = pc.getSenders();
-        const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
-        if (audioSender) {
-          audioSender.replaceTrack(trackToUse);
-        }
-      });
     } catch (err) {
       console.error('Failed to toggle audio enhancement:', err);
+      triggerToast('Could not change Studio Voice — keeping the current microphone.');
     }
   };
 
@@ -4434,9 +4685,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   if (isMinimized) {
     // Determine which stream to display in the mini window
     const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing);
-    const activeRemoteKey = Object.keys(peerStates).find(k => peerStates[k].isSpeaking) || Object.keys(remoteStreams)[0];
-    
-    const showStream = screenPeerKey ? remoteStreams[screenPeerKey] : (activeRemoteKey ? remoteStreams[activeRemoteKey] : stream);
+    const activeRemoteKey = Object.keys(peerStates).find(k => peerStates[k].isSpeaking) || Object.keys(remoteStreams)[0] || Object.keys(livekitRemoteStreams)[0];
+
+    // Fix Round 6: the mini window used to read the P2P stream map
+    // only — with the mesh gated off in LiveKit mode that map is
+    // empty, so minimising showed yourself instead of the speaker.
+    // Resolve through the active (LiveKit-first) stream, like the
+    // tiles do.
+    const activeStreamFor = (peerKey: string) => getRemoteTileState(peerKey).activeStreamObj;
+    const showStream = screenPeerKey ? (activeStreamFor(screenPeerKey) || remoteScreenStreams[screenPeerKey]) : (activeRemoteKey ? activeStreamFor(activeRemoteKey) : stream);
     const isLocalStream = !screenPeerKey && !activeRemoteKey;
     
     let label = 'You';
@@ -4486,7 +4743,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               }}
               autoPlay
               playsInline
-              muted={isLocalStream}
+              // Fix Round 6: when minimised this is the only player for
+              // the remote voice — except with Spatial Audio on, when
+              // the WebAudio panner also plays it. Mute the element
+              // then, like the grid tiles do.
+              muted={isLocalStream || isSpatialAudioEnabled}
               style={{
                 width: '100%',
                 height: '100%',
@@ -4992,6 +5253,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                           }
                         }}
                         autoPlay
+                        // Fix Round 6: the grid tile already mutes its
+                        // audio element when Spatial Audio is on (the
+                        // WebAudio panner plays the voice instead). This
+                        // 1:1 view did not — so with Spatial on, a voice
+                        // played twice, centre + panned, slightly out of
+                        // sync: the echo / interference in a two-person
+                        // call.
+                        muted={isSpatialAudioEnabled}
                       />
                     )}
                     {tile.showVideo && peerStreamObj && (
@@ -6923,7 +7192,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
-                  Audio enhancement: echo cancellation, noise suppression and automatic gain control, applied to your microphone.
+                  Studio Voice focuses your voice with a gentle high-pass filter, presence band and soft compression. Echo cancellation, noise suppression and gain control are already on for every microphone.
                 </p>
               </div>
 

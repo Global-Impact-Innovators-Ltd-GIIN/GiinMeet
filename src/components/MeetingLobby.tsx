@@ -26,8 +26,11 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
   onJoin,
   onCancel
 }) => {
-  const [isVideoOn, setIsVideoOn] = useState(true);
-  const [isAudioOn, setIsAudioOn] = useState(true);
+  // Fix Round 6: honour the join presets from Settings (mute on join /
+  // camera off on join). The lobby toggles still win once the user
+  // touches them — these only set the starting position.
+  const [isVideoOn, setIsVideoOn] = useState(() => { try { return localStorage.getItem('giin_video_off_on_join') !== 'true'; } catch (e) { return true; } });
+  const [isAudioOn, setIsAudioOn] = useState(() => { try { return localStorage.getItem('giin_mute_on_join') !== 'true'; } catch (e) { return true; } });
   const [copied, setCopied] = useState(false);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   // A denied / missing camera used to fail silently (console.warn only)

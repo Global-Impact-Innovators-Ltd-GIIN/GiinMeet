@@ -195,6 +195,24 @@ export const Settings: React.FC<SettingsProps> = ({
     triggerToast(`Spatial Audio ${enabled ? 'enabled' : 'disabled'}`);
   };
 
+  // Fix Round 6: these two join presets were dead checkboxes — no
+  // state, no onChange, nothing read them. They now persist to the
+  // same keys the lobby reads when a meeting is joined.
+  const [muteOnJoin, setMuteOnJoin] = useState(() => localStorage.getItem('giin_mute_on_join') === 'true');
+  const [videoOffOnJoin, setVideoOffOnJoin] = useState(() => localStorage.getItem('giin_video_off_on_join') === 'true');
+
+  const handleToggleMuteOnJoin = (enabled: boolean) => {
+    setMuteOnJoin(enabled);
+    try { localStorage.setItem('giin_mute_on_join', enabled ? 'true' : 'false'); } catch (e) {}
+    triggerToast(`Join muted ${enabled ? 'enabled' : 'disabled'}`);
+  };
+
+  const handleToggleVideoOffOnJoin = (enabled: boolean) => {
+    setVideoOffOnJoin(enabled);
+    try { localStorage.setItem('giin_video_off_on_join', enabled ? 'true' : 'false'); } catch (e) {}
+    triggerToast(`Join with camera off ${enabled ? 'enabled' : 'disabled'}`);
+  };
+
   // Interactive keyboard shortcuts customizer states
   const [hotkeyMute, setHotkeyMute] = useState(() => localStorage.getItem('giin_hotkey_mute') || 'm');
   const [hotkeyCam, setHotkeyCam] = useState(() => localStorage.getItem('giin_hotkey_cam') || 'v');
@@ -364,9 +382,15 @@ export const Settings: React.FC<SettingsProps> = ({
         const mics = devices.filter(d => d.kind === 'audioinput');
         const speakers = devices.filter(d => d.kind === 'audiooutput');
         setDevicesList({ cameras, mics, speakers });
-        if (cameras.length > 0) setSelectedCamera(cameras[0].deviceId);
-        if (mics.length > 0) setSelectedMic(mics[0].deviceId);
-        if (speakers.length > 0) setSelectedSpeaker(speakers[0].deviceId);
+        // Fix Round 6: prefer the device the user already chose (the
+        // room reads the same keys) — the old code always reset to the
+        // first device, so a saved choice was silently discarded here.
+        const savedCam = localStorage.getItem('giin_selected_camera') || '';
+        const savedMic = localStorage.getItem('giin_selected_mic') || '';
+        const savedSpk = localStorage.getItem('giin_selected_speaker') || '';
+        if (cameras.length > 0) setSelectedCamera(cameras.some(d => d.deviceId === savedCam) ? savedCam : cameras[0].deviceId);
+        if (mics.length > 0) setSelectedMic(mics.some(d => d.deviceId === savedMic) ? savedMic : mics[0].deviceId);
+        if (speakers.length > 0) setSelectedSpeaker(speakers.some(d => d.deviceId === savedSpk) ? savedSpk : speakers[0].deviceId);
       })
       .catch(err => {
         console.warn('Failed to list media devices:', err);
@@ -591,8 +615,11 @@ export const Settings: React.FC<SettingsProps> = ({
       setMicActive(false);
     } else {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: selectedMic ? { deviceId: { exact: selectedMic } } : true 
+        // Fix Round 6: the test must capture like the real call does —
+        // echo cancellation, noise suppression, gain control, mono —
+        // or a mic that sounds fine here can still feed back in the room.
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: selectedMic ? { deviceId: { exact: selectedMic }, echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: { ideal: 1 } } : { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: { ideal: 1 } }
         });
         setMicStream(stream);
         setMicActive(true);
@@ -1317,7 +1344,7 @@ export const Settings: React.FC<SettingsProps> = ({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Camera Input Source</label>
-                  <select value={selectedCamera} onChange={(e) => setSelectedCamera(e.target.value)} className="premium-input">
+                  <select value={selectedCamera} onChange={(e) => { setSelectedCamera(e.target.value); try { localStorage.setItem('giin_selected_camera', e.target.value); } catch (err) {} }} className="premium-input">
                     {devicesList.cameras.map(d => (
                       <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera (${d.deviceId.substring(0, 5)})`}</option>
                     ))}
@@ -1326,7 +1353,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Microphone Input Source</label>
-                  <select value={selectedMic} onChange={(e) => setSelectedMic(e.target.value)} className="premium-input">
+                  <select value={selectedMic} onChange={(e) => { setSelectedMic(e.target.value); try { localStorage.setItem('giin_selected_mic', e.target.value); } catch (err) {} }} className="premium-input">
                     {devicesList.mics.map(d => (
                       <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic (${d.deviceId.substring(0, 5)})`}</option>
                     ))}
@@ -1337,7 +1364,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Audio Output Source (Speaker)</label>
-                <select value={selectedSpeaker} onChange={(e) => setSelectedSpeaker(e.target.value)} className="premium-input">
+                <select value={selectedSpeaker} onChange={(e) => { setSelectedSpeaker(e.target.value); try { localStorage.setItem('giin_selected_speaker', e.target.value); } catch (err) {} }} className="premium-input">
                   {devicesList.speakers.map(d => (
                     <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker (${d.deviceId.substring(0, 5)})`}</option>
                   ))}
@@ -1638,7 +1665,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>Mute sound on join</h4>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Join the meeting room with microphone muted by default.</p>
                 </div>
-                <input type="checkbox" style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
+                <input type="checkbox" checked={muteOnJoin} onChange={(e) => handleToggleMuteOnJoin(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
               </div>
 
               <div className="flex-between" style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
@@ -1646,7 +1673,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>Disable webcam on join</h4>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Start call with video feed turned off.</p>
                 </div>
-                <input type="checkbox" style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
+                <input type="checkbox" checked={videoOffOnJoin} onChange={(e) => handleToggleVideoOffOnJoin(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
               </div>
             </div>
           </div>
