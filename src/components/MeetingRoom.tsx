@@ -97,7 +97,7 @@ export const getWebRTCScreenshareConstraints = () => {
   };
 };
 
-import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode } from '../supabaseClient';
+import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink } from '../supabaseClient';
 
 // Helper functions defined outside the component to satisfy purity rules
 const generateRandomId = () => {
@@ -209,6 +209,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isAnnotating, setIsAnnotating] = useState(false);
   const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings' | 'polls' | 'filters' | 'soundboard' | 'info' | 'transcript'>('none');
   const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
+  // In-room invite by email: no mail provider is configured, so this
+  // opens the user's own mail app with the invitation pre-filled (a real
+  // mailto:) and copies the link — it never claims an email was sent.
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteNote, setInviteNote] = useState('');
   const [showMeetingInfo, setShowMeetingInfo] = useState(false);
 
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
@@ -270,12 +275,56 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Bumped to force the LiveKit connect effect to re-run (disconnect +
   // reconnect with a fresh token) when the token nears expiry.
   const [livekitReconnectNonce, setLivekitReconnectNonce] = useState(0);
-  const [transitionPending, setTransitionPending] = useState<boolean>(false);
-  const [p2pActive, setP2pActive] = useState<boolean>(false);
   const [livekitRemoteStreams, setLivekitRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
-  const [isHandoffTransitioning, setIsHandoffTransitioning] = useState<{ [peerKey: string]: boolean }>({});
-  const [swappedPeers, setSwappedPeers] = useState<string[]>([]);
   const livekitRoomRef = useRef<any>(null);
+  // The room slug/id of the LiveKit room we minted for, so the token
+  // refresh can re-mint for the same room without re-running the whole
+  // connect effect (and so leaving can free our capacity slot).
+  const livekitRoomSlugRef = useRef<string | null>(null);
+  const livekitRoomIdRef = useRef<string | null>(null);
+  // Our server-derived role for this meeting (HOST / COHOST / GUEST).
+  // Co-hosts get admit + mute powers; the token route is the authority.
+  const [livekitRole, setLivekitRole] = useState<'HOST' | 'COHOST' | 'GUEST'>('GUEST');
+  // Poll the co-host list: the host grants it from the participants panel
+  // and the token route confirms it on the next mint.
+  useEffect(() => {
+    let active = true;
+    const loadCoHosts = async () => {
+      const rows = await giinApi.getCoHosts(meetingId);
+      if (!active) return;
+      const keys = new Set<string>();
+      rows.forEach((r: any) => {
+        if (r.user_id) keys.add(r.user_id);
+        if (r.id) keys.add(r.id);
+      });
+      setCoHostKeys(keys);
+    };
+    loadCoHosts();
+    const interval = setInterval(loadCoHosts, 10000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [meetingId]);
+  // Mint a fresh LiveKit token for a room slug. Shared by the connect
+  // effect and the early token refresh, so both mint identically.
+  const fetchLiveKitToken = async (roomSlug: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch('/api/livekit/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomSlug,
+        userId: myKey,
+        userName: currentUser?.name || 'Guest',
+        role: isAdmin ? 'HOST' : 'GUEST',
+        accessToken: session?.access_token || undefined,
+        participantRowId: myParticipantRowId || undefined,
+        meetingId
+      })
+    });
+    return res.json();
+  };
   // The LiveKit screen-share publication, so it can be unpublished when
   // sharing stops (and re-published after a token-refresh reconnect).
   const livekitScreenTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -377,6 +426,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [myParticipantRowId] = useState<string | null>(() => {
     try { return localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { return null; }
   });
+  // Co-host keys (user ids and participant row ids) granted by the host.
+  // Derived AFTER myKey/myParticipantRowId exist (TDZ: these consts are
+  // read during render, so they must sit below those declarations).
+  const [coHostKeys, setCoHostKeys] = useState<Set<string>>(new Set());
+  const isCoHost =
+    livekitRole === 'COHOST' ||
+    coHostKeys.has(myKey) ||
+    (myParticipantRowId ? coHostKeys.has(myParticipantRowId) : false);
+  // Hosts and co-hosts can admit from the waiting room and mute people.
+  // Ending the meeting for everyone and transferring the host role stay
+  // host-only.
+  const canModerate = !!isAdmin || isCoHost;
   const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
   const initPeerConnectionRef = useRef<((peerKey: string, forceAudioOnly?: boolean) => void) | null>(null);
   const makingOfferRef = useRef<{ [peerKey: string]: boolean }>({});
@@ -440,63 +501,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     participantsRef.current = participants;
   }, [participants]);
 
-  const startBackgroundP2P = () => {
-    setP2pActive(prev => {
-      if (prev) return prev;
-      
-      const activeParticipantsCount = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).length + 1;
-      const forceAudioOnly = activeParticipantsCount > 4;
-
-      triggerToast(forceAudioOnly
-        ? 'Fallback room size exceeds 4. Launching background P2P engine in Audio-Only Mode.'
-        : 'Launching background P2P connections...'
-      );
-
-      participantsRef.current
-        .filter(p => (p.userId || p.id) !== myKey)
-        .forEach(p => {
-          const peerKey = p.userId || p.id;
-          if (initPeerConnectionRef.current) {
-            initPeerConnectionRef.current(peerKey, forceAudioOnly);
-          }
-        });
-      return true;
-    });
-  };
-
-  const handleTriggerPeerSwap = (peerKey: string) => {
-    setIsHandoffTransitioning(prev => {
-      if (prev[peerKey]) return prev;
-      
-      triggerToast(`Background stream initialized for ${peerStates[peerKey]?.name || peerKey}. Swapping views...`);
-      
-      setTimeout(() => {
-        setSwappedPeers(swapped => {
-          if (swapped.includes(peerKey)) return swapped;
-          const next = [...swapped, peerKey];
-          
-          const activeRemotePeers = participantsRef.current.filter(p => (p.userId || p.id) !== myKey).map(p => p.userId || p.id);
-          const allSwapped = activeRemotePeers.every(pk => next.includes(pk));
-          
-          if (allSwapped && engineType === 'LIVEKIT') {
-            setTimeout(() => {
-              if (livekitRoomRef.current) {
-                livekitRoomRef.current.disconnect();
-                livekitRoomRef.current = null;
-              }
-              setEngineType('P2P');
-              setTransitionPending(false);
-              triggerToast('Seamless engine handoff completed. P2P Mesh engine is now active.');
-            }, 1000);
-          }
-          
-          return next;
-        });
-      }, 800); // 800ms fade cross-over
-      
-      return { ...prev, [peerKey]: true };
-    });
-  };
   // --------------------------------------------------------------------
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -580,27 +584,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
         // Server-side authorisation: send the signed-in user's session token
         // (verified server-side) plus the admitted participant row id.
-        const { data: { session } } = await supabase.auth.getSession();
-        const res = await fetch('/api/livekit/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            roomSlug: videoRoom.slug,
-            userId: myKey,
-            userName: currentUser?.name || 'Guest',
-            role: isAdmin ? 'HOST' : 'GUEST',
-            accessToken: session?.access_token || undefined,
-            participantRowId: myParticipantRowId || undefined,
-            meetingId
-          })
-        });
-
+        const data = await fetchLiveKitToken(videoRoom.slug);
         if (!active) return;
-        const data = await res.json();
+        livekitRoomSlugRef.current = videoRoom.slug;
+        livekitRoomIdRef.current = videoRoom.id;
         if (data.error === 'MAX_CAPACITY_REACHED') {
-          setConnectionNotice('This meeting room is full. You are connected peer-to-peer instead — video quality may be lower.');
-          setEngineType('P2P');
-          triggerToast('LiveKit room capacity limit reached. Swapped to P2P Mesh engine.');
+          // Honest stop, NOT a silent P2P downgrade: a full room must not
+          // pretend to work as a 5-way peer-to-peer mesh. The user stays
+          // out of the media path with a clear message and a retry — the
+          // capacity count is live now, so a slot frees as soon as
+          // someone really leaves.
+          setConnectionNotice('This meeting room is full (8 participants). You cannot join the video yet — wait for someone to leave, then press "Retry video server".');
+          triggerToast('This meeting room is full. Please wait for someone to leave, then retry.');
           return;
         }
         if (data.error === 'UNAUTHORIZED' || data.error === 'ADMISSION_REQUIRED') {
@@ -608,13 +603,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           triggerToast('Not admitted to this meeting yet.');
           return;
         }
+        if (data.error === 'MEETING_ENDED') {
+          setConnectionNotice('This meeting has ended. The invite link no longer works.');
+          triggerToast('This meeting has ended.');
+          return;
+        }
         if (data.error || !data.token) {
           throw new Error(data.message || data.error || 'Could not get a video token.');
         }
 
-        const { token, expiresAt: tokenExpiry, livekitUrl: serverLivekitUrl } = data;
+        const { token, expiresAt: tokenExpiry, livekitUrl: serverLivekitUrl, role: serverRole } = data;
         setLivekitToken(token);
         setExpiresAt(tokenExpiry);
+        if (serverRole === 'HOST' || serverRole === 'COHOST' || serverRole === 'GUEST') {
+          setLivekitRole(serverRole);
+        }
 
         const room = new LiveKitRoom({
           adaptiveStream: true,
@@ -622,6 +625,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         });
 
         livekitRoomRef.current = room;
+
+        // A dropped LiveKit connection is no longer silent. The SDK
+        // auto-reconnects transient drops, but a disconnect it cannot heal
+        // (token expiry, server gone) used to leave stale tiles with no
+        // message and no retry. Now we say so, re-mint a fresh token and
+        // reconnect — the user sees exactly what is happening.
+        room.on(RoomEvent.Disconnected, () => {
+          if (!active) return;
+          triggerToast('Video connection dropped — reconnecting to the video server…');
+          setConnectionNotice('Video connection dropped. Reconnecting to the video server — your camera and microphone will rejoin automatically.');
+          setLivekitReconnectNonce(n => n + 1);
+        });
 
         room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
           const peerKey = participant.identity;
@@ -727,31 +742,83 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // refresh forces a clean disconnect + reconnect with a fresh token.
   }, [isMediaInitialized, engineType, meetingId, myKey, currentUser, isAdmin, livekitReconnectNonce]);
 
-  // Token expiry: refresh the LiveKit token instead of permanently
-  // downgrading to P2P. The token lasts 2 hours; when under 60 seconds
-  // remain, bump the reconnect nonce so the connect effect disconnects and
-  // reconnects with a fresh token (and republishes the local tracks). If
-  // that reconnect fails, the connect effect's own fallback downgrades to
-  // P2P — the call never dies silently.
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (expiresAt && engineType === 'LIVEKIT') {
-        const timeDiff = new Date(expiresAt).getTime() - Date.now();
-        if (timeDiff <= 60000 && timeDiff > 0 && !tokenRefreshingRef.current) {
-          tokenRefreshingRef.current = true;
-          triggerToast('Refreshing your video connection…');
-          setLivekitReconnectNonce(n => n + 1);
-        }
-      }
-    }, 5000);
+  // Token expiry: refresh EARLY and WITHOUT dropping media. The token now
+  // lasts 6 hours, but the refresh still fires at 15 minutes remaining —
+  // not in a 60-second window a backgrounded tab can miss. It uses
+  // room.updateToken(), so the call does not disconnect and reconnect (no
+  // video/audio drop for anyone near 1h59m). Only if updateToken fails do
+  // we fall back to the full reconnect. A `visibilitychange` listener
+  // covers the backgrounded-tab case: Chrome throttles timers to ~1/min
+  // in background tabs, so on return to the foreground we check the
+  // remaining time immediately instead of waiting for the next tick.
+  const refreshLiveKitToken = async () => {
+    const room = livekitRoomRef.current;
+    const slug = livekitRoomSlugRef.current;
+    if (!room || !slug || tokenRefreshingRef.current) return;
+    tokenRefreshingRef.current = true;
+    try {
+      const data = await fetchLiveKitToken(slug);
+      if (data.error || !data.token) throw new Error(data.message || data.error || 'Could not refresh the video token.');
+      await room.updateToken(data.token);
+      setExpiresAt(data.expiresAt);
+      setLivekitToken(data.token);
+      triggerToast('Video connection refreshed — no interruption.');
+    } catch (err: any) {
+      console.warn('[LiveKit] Token refresh via updateToken failed, falling back to reconnect:', err);
+      triggerToast('Refreshing your video connection…');
+      setLivekitReconnectNonce(n => n + 1);
+    } finally {
+      tokenRefreshingRef.current = false;
+    }
+  };
 
-    return () => clearInterval(interval);
+  useEffect(() => {
+    const maybeRefresh = () => {
+      if (!expiresAt || engineType !== 'LIVEKIT') return;
+      const timeDiff = new Date(expiresAt).getTime() - Date.now();
+      // 15 minutes remaining: refresh now, while there is still plenty
+      // of time to retry if the first attempt fails.
+      if (timeDiff <= 15 * 60 * 1000 && timeDiff > 0) {
+        void refreshLiveKitToken();
+      }
+    };
+    const interval = setInterval(maybeRefresh, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') maybeRefresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expiresAt, engineType]);
 
-  // A fresh expiry means the refresh landed — allow a future refresh.
+  // Attendance: who joined, when, and how long they stayed. Recorded
+  // locally in this browser (localStorage, per meeting) from the
+  // participant list: a key that appears gets a joinedAt, a key that
+  // disappears gets a leftAt. The host can view it from the dashboard
+  // after the meeting (same browser). It is a record of this browser's
+  // view of the room, not a server log — the labels say so.
   useEffect(() => {
-    tokenRefreshingRef.current = false;
-  }, [expiresAt]);
+    try {
+      const key = `giin_attendance_${meetingId}`;
+      const raw = localStorage.getItem(key);
+      const map: Record<string, { name: string; joinedAt: number; leftAt: number | null }> = raw ? JSON.parse(raw) : {};
+      const now = Date.now();
+      const present = new Set<string>();
+      participants.forEach((p) => {
+        const k = p.userId || p.id;
+        present.add(k);
+        if (!map[k]) map[k] = { name: p.name, joinedAt: now, leftAt: null };
+        else map[k].name = p.name;
+      });
+      Object.keys(map).forEach((k) => {
+        if (!present.has(k) && !map[k].leftAt) map[k].leftAt = now;
+      });
+      localStorage.setItem(key, JSON.stringify(map));
+    } catch (e) { /* attendance is best-effort */ }
+  }, [participants, meetingId]);
 
   // Meeting timer: elapsed time since this client joined the room.
   useEffect(() => {
@@ -775,18 +842,31 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   });
 
   // On unmount (leaving the room for good), remove our participant row so
-  // we do not linger as 'Admitted' forever. Best-effort: the tab may be
+  // we do not linger as 'Admitted' forever, AND mark our LiveKit
+  // allocation row LEFT so the room's capacity slot is freed. Without the
+  // LEFT mark, every drop/rejoin left a JOINED row behind and the room
+  // filled with ghosts (the capacity leak). Best-effort: the tab may be
   // closing, so the request may not complete — the host can still kick a
-  // stale row. This effect has EMPTY deps on purpose: it runs its cleanup
-  // only on unmount. The LiveKit connect effect's cleanup also runs on
-  // engine switches and token refreshes, so the row must NOT be removed
-  // there — a token refresh is not a leave.
+  // stale row, and the token route now counts live LiveKit participants
+  // instead of stale rows. This effect has EMPTY deps on purpose: it runs
+  // its cleanup only on unmount. The LiveKit connect effect's cleanup also
+  // runs on engine switches and token refreshes, so the row must NOT be
+  // removed there — a token refresh is not a leave.
   useEffect(() => {
-    return () => {
+    const markLeft = () => {
       try {
         const rowId = localStorage.getItem(`giin_participant_row_${meetingId}`);
-        giinApi.removeParticipant(meetingId, rowId || myKey);
+        if (rowId) giinApi.removeParticipant(meetingId, rowId);
+        else giinApi.removeParticipant(meetingId, myKey);
+        const roomId = livekitRoomIdRef.current;
+        if (roomId) void giinApi.markParticipantLeft(roomId, myKey);
       } catch (e) { /* best effort */ }
+    };
+    // Tab close / refresh: unmount cleanup may not run, so mark LEFT here too.
+    window.addEventListener('pagehide', markLeft);
+    return () => {
+      window.removeEventListener('pagehide', markLeft);
+      markLeft();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1630,7 +1710,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
 
     setBreakoutTimeRemaining(durationMinutes * 60);
-    alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes.`);
+    alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes. Breakout rooms run peer-to-peer, not on the video server, so video quality may drop — this is a labelled fallback, not the LiveKit engine.`);
   };
 
   const handleEndBreakouts = () => {
@@ -1722,15 +1802,27 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Load meeting details (admin_id, passcode, and notes)
+  // Load meeting details (admin_id and notes). The passcode is NOT read
+  // from the meeting row any more — it is hidden from anon reads — so the
+  // host fetches it through the host-only server route for the invite
+  // panel, and everyone else gets an empty passcode (the panel then shows
+  // '—' and the share link carries no code). The old code started with a
+  // freshly generated random code as the passcode state, so guests could
+  // briefly see a made-up code in the invite panel.
   useEffect(() => {
     const loadDetails = async () => {
       try {
         const { data } = await giinApi.getMeetingDetails(meetingId);
         if (data) {
           setMeetingAdminId(data.admin_id || '');
-          if (data.passcode) setPasscode(data.passcode);
           setInitialNotes(data.notes || '');
+          const amHost = isHost || (currentUser?.id && (data.admin_id === currentUser.id || data.user_id === currentUser.id));
+          if (amHost) {
+            const hostPasscode = await giinApi.getMeetingPasscode(meetingId);
+            if (hostPasscode) setPasscode(hostPasscode);
+          } else {
+            setPasscode('');
+          }
         }
       } catch (err) {
         console.error(err);
@@ -2451,13 +2543,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           handleSignal(data);
         }
       })
-      .on('broadcast', { event: 'transition-pending' }, (payload: any) => {
-        if (!transitionPending) {
-          setTransitionPending(true);
-          triggerToast('Handoff alert received from peer. Launching background P2P mesh...');
-          startBackgroundP2P();
-        }
-      })
       .on('broadcast', { event: 'reaction' }, (payload: any) => {
         const data = payload.payload;
         triggerReaction(data.senderKey, data.emoji);
@@ -2665,9 +2750,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     try {
       const constraints = getWebRTCScreenshareConstraints();
+      // audio: true asks the browser for system audio with the share
+      // (Chrome/Edge: pick a tab or window — "Share audio" — to include
+      // the sound of a video you play). Not every choice provides audio:
+      // sharing a whole screen often has no audio track, and Firefox does
+      // not support it at all — when no audio track arrives we say so
+      // plainly instead of pretending the share has sound.
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: constraints.video,
-        audio: false
+        audio: true
       });
 
       const screenTrack = displayStream.getVideoTracks()[0];
@@ -2676,6 +2767,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         triggerToast('Screen sharing started but no video track was captured -- please try again.');
         return false;
       }
+      const screenAudioTrack = displayStream.getAudioTracks()[0] || null;
 
       setScreenStream(displayStream);
       screenStreamRef.current = displayStream;
@@ -2709,6 +2801,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // Publish the screen to LiveKit too, so participants connected over
       // the LiveKit engine see it -- not just the peer-to-peer ones.
       await publishLiveKitTrack(screenTrack, Track.Source.ScreenShare);
+      // System audio, when the browser provided it: published as the
+      // screen-share audio source on LiveKit and added to every P2P peer
+      // connection, so remotes hear the shared video's sound.
+      if (screenAudioTrack) {
+        await publishLiveKitTrack(screenAudioTrack, Track.Source.ScreenShareAudio);
+        Object.keys(pcsRef.current).forEach(peerKey => {
+          const pc = pcsRef.current[peerKey];
+          try { pc.addTrack(screenAudioTrack, displayStream); } catch (e) {}
+        });
+      }
 
       // Broadcast screenshare media state changes (with the screen track
       // id so receivers can recognise the track even if it arrives first).
@@ -2720,7 +2822,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       };
 
       setIsScreenSharing(true);
-      triggerToast('Screen sharing started -- your screen is now visible in the room.');
+      triggerToast(screenAudioTrack
+        ? 'Screen sharing started with system audio — others can hear the sound of what you share.'
+        : 'Screen sharing started without system audio — this browser or screen choice did not provide audio. To share sound, pick a browser tab and tick "Share audio" in the picker.');
       return true;
     } catch (err: any) {
       console.warn('[Screen Share] Permission denied or failed.', err);
@@ -2784,6 +2888,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // Unpublish from LiveKit so remote tiles stop showing the screen.
     livekitScreenTrackRef.current = null;
     unpublishLiveKitTrack(Track.Source.ScreenShare);
+    unpublishLiveKitTrack(Track.Source.ScreenShareAudio);
 
     // Remove screenshare track senders from all peer connections
     const removedAt = Date.now();
@@ -2807,9 +2912,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     broadcastMediaState({ isScreenSharing: false });
   };
 
-  // Admins check for waiting participants via realtime and fallback polling
+  // Hosts and co-hosts check for waiting participants via realtime and fallback polling
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canModerate) return;
     const checkWaitroom = async () => {
       try {
         const list = await giinApi.getWaitingParticipants(meetingId);
@@ -2840,7 +2945,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
-  }, [meetingId, isAdmin]);
+  }, [meetingId, canModerate]);
 
   // Handle host admission action
   const handleAdmitParticipant = async (participantId: string, status: 'Admitted' | 'Declined') => {
@@ -2949,8 +3054,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (peerKey === myKey) return;
       const livekitStream = livekitRemoteStreams[peerKey];
       const p2pStream = remoteStreams[peerKey];
-      const isPeerSwapped = swappedPeers.includes(peerKey);
-      const activeStream = isPeerSwapped ? p2pStream : (livekitStream || p2pStream);
+      const activeStream = livekitStream || p2pStream;
       if (activeStream) {
         activeStreams[peerKey] = activeStream;
       }
@@ -3009,7 +3113,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       }
     });
-  }, [remoteStreams, livekitRemoteStreams, swappedPeers, isSpatialAudioEnabled]);
+  }, [remoteStreams, livekitRemoteStreams, isSpatialAudioEnabled]);
 
   // Initialize audio track (kept alive throughout the meeting)
   useEffect(() => {
@@ -3057,8 +3161,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // connect time — a mic acquired after that is otherwise invisible
         // to LiveKit viewers).
         publishLiveKitTrack(audioTrack, Track.Source.Microphone);
-      } catch (err) {
+      } catch (err: any) {
+        // A dead mic used to fail silently (console.error only) and the
+        // user joined the meeting unable to speak, never knowing why.
         console.error('Error acquiring audio:', err);
+        const reason = err?.name === 'NotAllowedError'
+          ? 'Microphone blocked — allow the microphone in the browser address bar, then turn your mic on again. Others cannot hear you until then.'
+          : err?.name === 'NotFoundError'
+          ? 'No microphone was found on this device — plug one in, then turn your mic on again.'
+          : err?.name === 'NotReadableError'
+          ? 'Your microphone is in use by another app — close that app, then turn your mic on again.'
+          : `Your microphone could not be started (${err?.message || 'unknown error'}). Others cannot hear you.`;
+        triggerToast(reason);
       }
     }
     initAudio();
@@ -3116,8 +3230,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             // And publish it to LiveKit (the connect effect does not re-run
             // when the camera is switched on mid-call).
             publishLiveKitTrack(videoTrack, Track.Source.Camera);
-          } catch (err) {
+          } catch (err: any) {
             console.warn('Error acquiring video:', err);
+            const reason = err?.name === 'NotAllowedError'
+              ? 'Camera blocked — allow the camera in the browser address bar, then turn your camera on again. Others see your avatar until then.'
+              : err?.name === 'NotFoundError'
+              ? 'No camera was found on this device — you are joining with the camera off.'
+              : err?.name === 'NotReadableError'
+              ? 'Your camera is in use by another app — close that app, then turn your camera on again.'
+              : `Your camera could not be started (${err?.message || 'unknown error'}). You are joining with the camera off.`;
+            triggerToast(reason);
             setIsVideoOn(false);
           }
         } else {
@@ -4085,14 +4207,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <input 
                   type="text" 
-                  value={`${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`}
+                  value={buildJoinLink(meetingId, passcode)}
                   readOnly 
                   className="premium-input"
                   style={{ fontSize: '0.7rem', padding: '0.35rem 0.5rem', backgroundColor: 'rgba(0,0,0,0.15)', flex: 1 }}
                 />
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`);
+                    navigator.clipboard.writeText(buildJoinLink(meetingId, passcode));
                     setCopiedInfo('link');
                     setTimeout(() => setCopiedInfo(null), 2000);
                   }}
@@ -4121,7 +4243,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
             <button
               onClick={() => {
-                const link = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
+                const link = buildJoinLink(meetingId, passcode);
                 const invitation = `Please join my GIIN Meet video conference:
 Topic: ${meetingTitle}
 Join Link: ${link}
@@ -4176,7 +4298,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
         {/* Waiting Room Alert Overlay for Hosts — the full queue, not just
             the first person waiting. */}
-        {isAdmin && waitingList.length > 0 && (
+        {canModerate && waitingList.length > 0 && (
           <div style={{
             position: 'absolute',
             top: '20px',
@@ -4803,10 +4925,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                 const peerKey = p.userId || p.id;
                 const livekitStream = livekitRemoteStreams[peerKey];
                 const p2pStream = remoteStreams[peerKey];
-                const isPeerSwapped = swappedPeers.includes(peerKey);
-                
-                // Select active stream based on engine fallback status and swap completion
-                const activeStreamObj = isPeerSwapped ? p2pStream : (livekitStream || p2pStream);
+
+                // LiveKit is the engine; the P2P stream is only the
+                // fallback when LiveKit could not connect at all.
+                const activeStreamObj = livekitStream || p2pStream;
                 const hasConnection = !!activeStreamObj;
                 
                 const pState = peerStates[peerKey] || {
@@ -4889,47 +5011,11 @@ Media encrypted in transit (DTLS-SRTP).`;
                           width: '100%', 
                           height: '100%', 
                           objectFit: 'cover',
-                          opacity: (transitionPending && p2pStream && !isPeerSwapped) ? 0 : 1,
                           transition: 'opacity 0.8s ease-in-out',
                           filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
                         }}
                       />
 
-                      {/* Hidden / Background P2P Buffer Feed */}
-                      {transitionPending && p2pStream && !isPeerSwapped && (
-                        <video
-                          ref={el => {
-                            if (el) {
-                              if (el.srcObject !== p2pStream) {
-                                el.srcObject = p2pStream;
-                              }
-                              // Monitor onunmute to trigger the swap
-                              const track = p2pStream.getVideoTracks()[0];
-                              if (track) {
-                                track.onunmute = () => handleTriggerPeerSwap(peerKey);
-                              } else {
-                                // Fallback if audio-only or instant swap
-                                setTimeout(() => handleTriggerPeerSwap(peerKey), 1500);
-                              }
-                            }
-                          }}
-                          autoPlay
-                          playsInline
-                          muted
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                            opacity: isHandoffTransitioning[peerKey] ? 1 : 0,
-                            transition: 'opacity 0.8s ease-in-out',
-                            pointerEvents: 'none',
-                            filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
-                          }}
-                        />
-                      )}
                     </div>
                   ) : (
                     <div style={{
@@ -5500,15 +5586,34 @@ Media encrypted in transit (DTLS-SRTP).`;
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
                     {p.isSpeaking && !p.isMuted && <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', animation: 'pulse-ring 2s infinite' }} />}
                     
-                    {isAdmin && p.userId && (
+                    {canModerate && p.userId && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <button 
-                          onClick={() => handleDesignateAdmin(p.userId!)}
-                          style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
-                          title="Designate Admin"
-                        >
-                          Make Admin
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDesignateAdmin(p.userId!)}
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
+                            title="Designate Admin"
+                          >
+                            Make Admin
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            onClick={async () => {
+                              const { error } = await giinApi.setParticipantRole(p.id, 'CoHost');
+                              if (error) {
+                                triggerToast(`Could not make ${p.name} a co-host — please try again.`);
+                              } else {
+                                setCoHostKeys(prev => new Set(prev).add(p.userId!).add(p.id));
+                                triggerToast(`${p.name} is now a co-host and can admit people and mute participants.`);
+                              }
+                            }}
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
+                            title="Make Co-Host (can admit people and mute participants)"
+                          >
+                            Make Co-Host
+                          </button>
+                        )}
                         
                         {!p.isMuted && (
                           <button 
@@ -5537,7 +5642,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                           </button>
                         )}
 
-                        <button 
+                        {isAdmin && (
+                        <button
                           onClick={async () => {
                             if (confirm(`Are you sure you want to remove ${p.name} from the meeting?`)) {
                               if (sigChannelRef.current) {
@@ -5573,6 +5679,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         >
                           Remove
                         </button>
+                        )}
                       </div>
                     )}
                     
@@ -5793,7 +5900,9 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Breakout Rooms Management */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Breakout Rooms</span>
-                
+                <span style={{ fontSize: '0.75rem', color: '#FCA5A5', lineHeight: 1.45 }}>
+                  Breakout rooms run peer-to-peer, not on the video server — video quality may drop with several people. LiveKit-native breakouts need breakout-scoped presence (a bigger redesign) and are not in this release.
+                </span>
                 {breakoutTimeRemaining === null ? (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -6547,9 +6656,9 @@ Media encrypted in transit (DTLS-SRTP).`;
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>INVITATION LINK</span>
-                <button 
+                <button
                   onClick={() => {
-                    const inviteUrl = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
+                    const inviteUrl = buildJoinLink(meetingId, passcode);
                     navigator.clipboard.writeText(inviteUrl);
                     setCopiedInfo('link');
                     setTimeout(() => setCopiedInfo(null), 2000);
@@ -6560,6 +6669,36 @@ Media encrypted in transit (DTLS-SRTP).`;
                   {copiedInfo === 'link' ? <Check size={14} /> : <Copy size={14} />}
                   <span>{copiedInfo === 'link' ? 'Copied Link!' : 'Copy Share Link'}</span>
                 </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>INVITE BY EMAIL</span>
+                <input
+                  type="email"
+                  className="premium-input"
+                  placeholder="person@example.com"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem' }}
+                />
+                <button
+                  onClick={() => {
+                    if (!inviteEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail.trim())) {
+                      setInviteNote('Enter a valid email address first.');
+                      return;
+                    }
+                    const link = buildJoinLink(meetingId, passcode);
+                    const subject = encodeURIComponent(`Invitation: ${meetingTitle} — GIIN Meet`);
+                    const body = encodeURIComponent(`Please join my GIIN Meet video meeting:\nTopic: ${meetingTitle}\nJoin link: ${link}\nMeeting ID: ${meetingId}\nPasscode: ${passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
+                    window.location.href = `mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`;
+                    setInviteNote('Your mail app opened with the invitation ready to send. No email is sent automatically — GIIN Meet has no mail provider configured yet.');
+                  }}
+                  className="premium-btn premium-btn-secondary"
+                  style={{ width: '100%', justifyContent: 'center', gap: '0.5rem', fontSize: '0.8rem' }}
+                >
+                  <span>Email Invite</span>
+                </button>
+                {inviteNote && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>{inviteNote}</span>}
               </div>
             </div>
           </div>
