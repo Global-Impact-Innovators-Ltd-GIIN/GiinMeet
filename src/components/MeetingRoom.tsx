@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Room as LiveKitRoom, RoomEvent, Track } from 'livekit-client';
 import { 
-  Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff, 
+  Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff,
+  Clock, Pin, LayoutGrid, LayoutList,
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
   MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
   LogOut, UserCheck, X, Hand
@@ -250,6 +251,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [breakoutTimeRemaining, setBreakoutTimeRemaining] = useState<number | null>(null);
   const [breakoutRoomsCount, setBreakoutRoomsCount] = useState(2);
   const [breakoutDurationMinutes, setBreakoutDurationMinutes] = useState(5);
+
+  // Meeting timer, layout and pinning, unread chat badge.
+  const [meetingJoinedAt] = useState(() => Date.now());
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [layoutMode, setLayoutMode] = useState<'grid' | 'speaker'>('grid');
+  const [pinnedKey, setPinnedKey] = useState<string | null>(null);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  // A ref mirror of activePanel so realtime handlers (which close over the
+  // first render) can tell whether the chat panel is open right now.
+  const activePanelRef = useRef(activePanel);
   const [admittedKeys, setAdmittedKeys] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem(`admitted_keys_${meetingId}`);
@@ -633,6 +644,55 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => {
     tokenRefreshingRef.current = false;
   }, [expiresAt]);
+
+  // Meeting timer: elapsed time since this client joined the room.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - meetingJoinedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [meetingJoinedAt]);
+
+  const formatElapsedTime = (totalSeconds: number) => {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    return `${h > 0 ? `${h}:` : ''}${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  // Keep the activePanel ref in step (realtime handlers close over the
+  // first render, so they read the panel state through this ref).
+  useEffect(() => {
+    activePanelRef.current = activePanel;
+  });
+
+  // Keyboard shortcuts. Deliberately no dependency array: the listener is
+  // re-registered every render so the handlers always see fresh state
+  // (toggleMute/toggleVideo read state directly). 'L' is NOT bound — a
+  // stray keypress must never end the meeting; leaving is click-only.
+  // Ignored while typing in an input, textarea, select or editable area.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'm') toggleMute();
+      else if (k === 'v') toggleVideo();
+      else if (k === 's') handleToggleScreenShare();
+      else if (k === 'h') toggleHandRaise();
+      else if (k === 'c') {
+        if (activePanelRef.current === 'chat') {
+          setActivePanel('none');
+        } else {
+          setActivePanel('chat');
+          setUnreadChatCount(0);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   useEffect(() => {
     if (meetingAdminId) {
@@ -1440,6 +1500,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               if (mappedMsg.id && prev.some(m => (m as any).id === mappedMsg.id)) return prev;
               return [...prev, mappedMsg];
             });
+            // Unread badge: a message from someone else while the chat
+            // panel is closed counts as unread. (Your own messages can't
+            // reach here with the panel closed — you send from the panel.)
+            if (!isSelf && activePanelRef.current !== 'chat') {
+              setUnreadChatCount(c => c + 1);
+            }
           }
         }
       )
@@ -3566,6 +3632,32 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </h3>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem' }}>
+          {/* Participant count */}
+          <span
+            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'white', fontWeight: 600 }}
+            title={`${participants.length + 1} people in this meeting (including you)`}
+          >
+            <Users size={14} color="var(--color-accent)" />
+            {participants.length + 1}
+          </span>
+          {/* Video engine badge: LiveKit (server) or P2P (direct fallback) */}
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              padding: '0.2rem 0.55rem',
+              borderRadius: '10px',
+              backgroundColor: engineType === 'LIVEKIT' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(250, 189, 2, 0.12)',
+              border: `1px solid ${engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)'}`,
+              color: engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)',
+              fontSize: '0.7rem',
+              fontWeight: 700
+            }}
+            title={engineType === 'LIVEKIT' ? 'Video is running through the LiveKit server' : 'LiveKit is unavailable — video is running direct peer-to-peer'}
+          >
+            {engineType === 'LIVEKIT' ? 'LiveKit' : 'P2P'}
+          </span>
           <button 
             onClick={() => onMinimizeToggle?.(true)}
             className="premium-btn premium-btn-secondary"
@@ -4166,10 +4258,21 @@ Media encrypted in transit (DTLS-SRTP).`;
         ) : (
           (() => {
             const hasScreenShare = isScreenSharing || Object.keys(peerStates).some(k => peerStates[k].isScreenSharing);
-            
+
+            // Speaker-layout spotlight: the pinned person if set (and still
+            // in the room), else whoever is speaking, else the first remote
+            // participant, else yourself. Only used in speaker mode.
+            const remotePeerKeys = participants
+              .filter(p => (p.userId || p.id) !== myKey)
+              .map(p => p.userId || p.id);
+            const speakingPeerKey = remotePeerKeys.find(k => peerStates[k]?.isSpeaking && !peerStates[k]?.isMuted);
+            const spotlightKey = layoutMode === 'speaker'
+              ? (pinnedKey && (pinnedKey === 'local' || remotePeerKeys.includes(pinnedKey)) ? pinnedKey : (speakingPeerKey || remotePeerKeys[0] || 'local'))
+              : null;
+
             // Render local video card
             const localVideoCard = (
-              <div className={`meeting-card ${isSpeaking && !isMuted ? 'speaking' : ''}`} style={{
+              <div className={`meeting-card ${isSpeaking && !isMuted ? 'speaking' : ''}${spotlightKey === 'local' ? ' spotlight' : ''}`} style={{
                 position: 'relative',
                 borderRadius: 'var(--radius-md)',
                 overflow: 'hidden',
@@ -4178,6 +4281,37 @@ Media encrypted in transit (DTLS-SRTP).`;
                 border: isSpeaking && !isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
                 transition: 'all 0.25s ease'
               }}>
+                {/* Pin to spotlight (speaker view) */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (pinnedKey === 'local') {
+                      setPinnedKey(null);
+                    } else {
+                      setPinnedKey('local');
+                      setLayoutMode('speaker');
+                    }
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: '10px',
+                    right: '10px',
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    backgroundColor: pinnedKey === 'local' ? 'var(--color-accent)' : 'rgba(0,0,0,0.55)',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: pinnedKey === 'local' ? 'black' : 'white',
+                    cursor: 'pointer',
+                    zIndex: 10
+                  }}
+                  title={pinnedKey === 'local' ? 'Unpin (stop spotlighting yourself)' : 'Pin yourself as the spotlight (speaker view)'}
+                >
+                  <Pin size={13} />
+                </button>
                 {isVideoOn && stream ? (
                   <>
                     <video 
@@ -4313,7 +4447,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 };
 
                 return (
-                  <div key={p.id} className={`meeting-card ${pState.isSpeaking && !pState.isMuted ? 'speaking' : ''}`} style={{
+                  <div key={p.id} className={`meeting-card ${pState.isSpeaking && !pState.isMuted ? 'speaking' : ''}${spotlightKey === peerKey ? ' spotlight' : ''}`} style={{
                     position: 'relative',
                     borderRadius: 'var(--radius-md)',
                     overflow: 'hidden',
@@ -4322,6 +4456,37 @@ Media encrypted in transit (DTLS-SRTP).`;
                     border: pState.isSpeaking && !pState.isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
                     transition: 'all 0.25s ease'
                   }}>
+                    {/* Pin to spotlight (speaker view) */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (pinnedKey === peerKey) {
+                          setPinnedKey(null);
+                        } else {
+                          setPinnedKey(peerKey);
+                          setLayoutMode('speaker');
+                        }
+                      }}
+                      style={{
+                        position: 'absolute',
+                        top: '10px',
+                        right: '10px',
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '50%',
+                        backgroundColor: pinnedKey === peerKey ? 'var(--color-accent)' : 'rgba(0,0,0,0.55)',
+                        border: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: pinnedKey === peerKey ? 'black' : 'white',
+                        cursor: 'pointer',
+                        zIndex: 10
+                      }}
+                      title={pinnedKey === peerKey ? `Unpin ${p.name}` : `Pin ${p.name} as the spotlight (speaker view)`}
+                    >
+                      <Pin size={13} />
+                    </button>
                     {hasConnection && activeStreamObj && (
                       <audio
                         ref={el => {
@@ -4506,6 +4671,18 @@ Media encrypted in transit (DTLS-SRTP).`;
                   }}>
                     <span style={{ fontWeight: 600 }}>{p.name}</span>
                     {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
+                    {typeof pState.latency === 'number' && (
+                      <span
+                        style={{
+                          color: pState.latency < 150 ? '#10B981' : pState.latency < 400 ? 'var(--color-accent)' : '#EF4444',
+                          fontFamily: 'monospace',
+                          fontSize: '0.7rem'
+                        }}
+                        title="Connection latency to this participant"
+                      >
+                        {pState.latency} ms
+                      </span>
+                    )}
                   </div>
 
                   {activeReactions.filter(r => r.senderKey === peerKey).map(r => (
@@ -4683,7 +4860,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             // No Screen Share: Normal grid tiling
             return (
-              <div className="meeting-grid" style={{
+              <div className={`meeting-grid${layoutMode === 'speaker' ? ' speaker-mode' : ''}`} style={{
                 flex: 1,
                 display: 'flex',
                 flexWrap: 'wrap',
@@ -5651,7 +5828,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                   {[
                     { id: 'none', label: 'Normal' },
-                    { id: 'blur', label: 'Blur' },
+                    { id: 'blur', label: 'Soft Blur' },
                     { id: 'sepia', label: 'Sepia' },
                     { id: 'grayscale', label: 'B&W' },
                     { id: 'warm', label: 'Warm' },
@@ -5674,6 +5851,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </button>
                   ))}
                 </div>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
+                  Soft Blur blurs your whole video — it is not a background blur. A true background blur (you sharp, background blurred) needs a segmentation engine and is planned for Phase 2.
+                </p>
               </div>
 
             </div>
@@ -6247,65 +6427,74 @@ Media encrypted in transit (DTLS-SRTP).`;
           <button 
             onClick={toggleMute}
             style={{
-              width: '52px',
-              height: '52px',
-              borderRadius: '50%',
+              width: '56px',
+              height: '56px',
+              borderRadius: '14px',
               backgroundColor: isMuted ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
               border: 'none',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
+              gap: '2px',
               color: 'white',
               cursor: 'pointer',
               transition: 'all 0.2s ease',
               backdropFilter: 'blur(4px)'
             }}
-            title={isMuted ? "Unmute Mic" : "Mute Mic"}
+            title={isMuted ? "Unmute Mic (M)" : "Mute Mic (M)"}
           >
-            {isMuted ? <MicOff size={22} /> : <Mic size={22} />}
+            {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isMuted ? 'Unmute' : 'Mute'}</span>
           </button>
 
           {/* Toggle Video */}
           <button 
             onClick={toggleVideo}
             style={{
-              width: '52px',
-              height: '52px',
-              borderRadius: '50%',
+              width: '56px',
+              height: '56px',
+              borderRadius: '14px',
               backgroundColor: !isVideoOn ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
               border: 'none',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
+              gap: '2px',
               color: 'white',
               cursor: 'pointer',
               transition: 'all 0.2s ease',
               backdropFilter: 'blur(4px)'
             }}
-            title={isVideoOn ? "Turn Camera Off" : "Turn Camera On"}
+            title={isVideoOn ? "Turn Camera Off (V)" : "Turn Camera On (V)"}
           >
-            {isVideoOn ? <VideoIcon size={22} /> : <VideoOff size={22} />}
+            {isVideoOn ? <VideoIcon size={18} /> : <VideoOff size={18} />}
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isVideoOn ? 'Cam Off' : 'Cam On'}</span>
           </button>
 
           {/* Toggle Screen Share */}
           <button 
             onClick={handleToggleScreenShare}
             style={{
-              width: '52px',
-              height: '52px',
-              borderRadius: '50%',
+              width: '56px',
+              height: '56px',
+              borderRadius: '14px',
               backgroundColor: isScreenSharing ? 'var(--color-accent)' : 'rgba(255, 255, 255, 0.1)',
               border: 'none',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
+              gap: '2px',
               color: isScreenSharing ? 'black' : 'white',
               cursor: 'pointer',
               transition: 'all 0.2s ease'
             }}
-            title="Share Screen"
+            title="Share Screen (S)"
           >
-            <Monitor size={20} />
+            <Monitor size={18} />
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isScreenSharing ? 'Stop Share' : 'Share'}</span>
           </button>
 
           {/* Picture-in-Picture Popout Button */}
@@ -6331,23 +6520,56 @@ Media encrypted in transit (DTLS-SRTP).`;
 
           {/* Toggle Chat Panel */}
           <button 
-            onClick={() => setActivePanel(activePanel === 'chat' ? 'none' : 'chat')}
+            onClick={() => {
+              if (activePanel === 'chat') {
+                setActivePanel('none');
+              } else {
+                setActivePanel('chat');
+                setUnreadChatCount(0);
+              }
+            }}
             style={{
-              width: '52px',
-              height: '52px',
-              borderRadius: '50%',
+              width: '56px',
+              height: '56px',
+              borderRadius: '14px',
               backgroundColor: activePanel === 'chat' ? 'var(--color-primary)' : 'rgba(255, 255, 255, 0.1)',
               border: 'none',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
+              gap: '2px',
               color: 'white',
               cursor: 'pointer',
-              transition: 'all 0.2s ease'
+              transition: 'all 0.2s ease',
+              position: 'relative'
             }}
-            title="Chat"
+            title="Chat (C)"
           >
-            <MessageSquare size={22} />
+            <MessageSquare size={18} />
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>Chat</span>
+            {unreadChatCount > 0 && activePanel !== 'chat' && (
+              <span style={{
+                position: 'absolute',
+                top: '-4px',
+                right: '-4px',
+                minWidth: '20px',
+                height: '20px',
+                padding: '0 5px',
+                borderRadius: '10px',
+                backgroundColor: '#EF4444',
+                color: 'white',
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '2px solid #0B0F19',
+                animation: 'pulse-red 1.5s ease-out infinite'
+              }}>
+                {unreadChatCount > 9 ? '9+' : unreadChatCount}
+              </span>
+            )}
           </button>
 
           {/* Toggle Workspace notes Panel */}
@@ -6369,6 +6591,30 @@ Media encrypted in transit (DTLS-SRTP).`;
             title="Workspace Notes"
           >
             <Edit2 size={20} />
+          </button>
+
+          {/* Layout: Grid / Speaker (spotlight follows the pinned person, else the speaker) */}
+          <button 
+            onClick={() => setLayoutMode(layoutMode === 'grid' ? 'speaker' : 'grid')}
+            style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '14px',
+              backgroundColor: layoutMode === 'speaker' ? 'var(--color-primary)' : 'rgba(255, 255, 255, 0.1)',
+              border: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              color: 'white',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            title={layoutMode === 'grid' ? 'Switch to Speaker view (spotlight on the speaker)' : 'Switch to Grid view'}
+          >
+            {layoutMode === 'grid' ? <LayoutGrid size={18} /> : <LayoutList size={18} />}
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{layoutMode === 'grid' ? 'Speaker' : 'Grid'}</span>
           </button>
 
           {/* End Call / Hang Up */}
@@ -6407,6 +6653,49 @@ Media encrypted in transit (DTLS-SRTP).`;
             >
               Share
             </button>
+            {/* Meeting timer */}
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                marginLeft: '0.5rem',
+                color: 'white',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                fontFamily: 'monospace'
+              }}
+              title="Time in this meeting"
+            >
+              <Clock size={14} color="var(--color-accent)" />
+              {formatElapsedTime(elapsedSeconds)}
+            </span>
+            {/* Connection quality (round-trip latency, measured every 8s) */}
+            {(() => {
+              const latencies = Object.values(peerStates)
+                .map(p => p.latency)
+                .filter((l): l is number => typeof l === 'number');
+              if (latencies.length === 0) return null;
+              const avg = Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length);
+              const color = avg < 150 ? '#10B981' : avg < 400 ? 'var(--color-accent)' : '#EF4444';
+              return (
+                <span
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    marginLeft: '0.5rem',
+                    color,
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    fontFamily: 'monospace'
+                  }}
+                  title="Average connection latency to other participants"
+                >
+                  {avg} ms
+                </span>
+              );
+            })()}
           </div>
 
           {/* Center Controls */}
@@ -6951,6 +7240,24 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <span>Host Controls</span>
                     </button>
                   )}
+
+                  {/* Keyboard Shortcuts */}
+                  <div style={{ borderTop: '1px solid #1E293B', marginTop: '0.25rem', paddingTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', padding: '0 0.85rem' }}>KEYBOARD SHORTCUTS</span>
+                    {[
+                      { key: 'M', action: 'Mute / unmute mic' },
+                      { key: 'V', action: 'Camera on / off' },
+                      { key: 'S', action: 'Share / stop sharing screen' },
+                      { key: 'H', action: 'Raise / lower hand' },
+                      { key: 'C', action: 'Open / close chat' }
+                    ].map(s => (
+                      <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.15rem 0.85rem', fontSize: '0.8rem', color: 'white' }}>
+                        <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid #1E293B', borderRadius: '4px', padding: '1px 6px', fontSize: '0.7rem', fontFamily: 'monospace', minWidth: '22px', textAlign: 'center' }}>{s.key}</kbd>
+                        <span>{s.action}</span>
+                      </div>
+                    ))}
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.15rem 0.85rem' }}>Shortcuts are ignored while typing. Leaving the meeting is click-only, by design.</span>
+                  </div>
 
                 </div>
               </>

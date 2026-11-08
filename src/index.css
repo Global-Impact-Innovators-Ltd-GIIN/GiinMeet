@@ -1133,6 +1133,20 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 0 20px rgba(250, 189, 2, 0.45) !important;
 }
 
+/* Speaker layout: one spotlight tile, the rest as a small filmstrip row.
+   The spotlight is the pinned person, else whoever is speaking. */
+.meeting-grid.speaker-mode {
+  align-content: flex-start;
+}
+.meeting-grid.speaker-mode .meeting-card.spotlight {
+  flex: 1 1 100%;
+  max-width: none;
+}
+.meeting-grid.speaker-mode .meeting-card:not(.spotlight) {
+  flex: 0 0 170px;
+  max-width: 170px;
+}
+
 /* Screen share layout responsive overrides */
 @media (max-width: 768px) {
   .screenshare-layout {
