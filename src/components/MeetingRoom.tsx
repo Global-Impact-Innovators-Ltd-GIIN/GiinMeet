@@ -276,6 +276,29 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // reconnect with a fresh token) when the token nears expiry.
   const [livekitReconnectNonce, setLivekitReconnectNonce] = useState(0);
   const [livekitRemoteStreams, setLivekitRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
+  // --- Fix Round 5: video stability -------------------------------------
+  // LiveKit room membership, tracked SEPARATELY from media tracks. A
+  // participant who publishes no tracks (no camera, no mic) never fires
+  // TrackSubscribed, so the old code — which treated "has a MediaStream"
+  // as "is connected" — left their tile on "Connecting..." forever. These
+  // are keyed by LiveKit identity (for guests: the meeting_participants
+  // row id — see the token route).
+  const [livekitParticipantIds, setLivekitParticipantIds] = useState<Set<string>>(new Set<string>());
+  // Peers with a published LiveKit CAMERA track (even if it is not
+  // subscribed / has no live frames yet). "Connecting..." is only honest
+  // while such a publication exists and no live video has arrived.
+  const [livekitCameraPubs, setLivekitCameraPubs] = useState<{ [peerKey: string]: boolean }>({});
+  // Peers whose LiveKit camera publication is muted at the source.
+  const [livekitVideoMuted, setLivekitVideoMuted] = useState<{ [peerKey: string]: boolean }>({});
+  // Remote publications by "<peerKey>:<trackSid>", for the watchdog's
+  // re-subscribe recovery.
+  const livekitPublicationsRef = useRef<{ [key: string]: any }>({});
+  // Local camera liveness. `localVideoTrackRef` alone cannot drive the
+  // tile: enabling an ENDED track is a no-op, so the tile must know
+  // whether the track is actually live.
+  const [localCameraLive, setLocalCameraLive] = useState(false);
+  const [localCameraRecovering, setLocalCameraRecovering] = useState(false);
+  const localCameraRecoverRef = useRef({ inFlight: false, attempts: 0, lastAt: 0 });
   const livekitRoomRef = useRef<any>(null);
   // The room slug/id of the LiveKit room we minted for, so the token
   // refresh can re-mint for the same room without re-running the whole
@@ -342,10 +365,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const room = livekitRoomRef.current;
     if (!room || !track) return;
     try {
-      if (room.state !== 'connected') return;
+      // A camera re-acquired while the room is reconnecting used to be
+      // silently dropped (early return, never retried) — the remote side
+      // then never saw video again until the next toggle. Retry once
+      // after a short delay instead.
+      if (room.state !== 'connected') {
+        setTimeout(() => {
+          const retryRoom = livekitRoomRef.current;
+          if (retryRoom && retryRoom.state === 'connected' && track.readyState === 'live') {
+            void publishLiveKitTrack(track, source);
+          }
+        }, 2000);
+        return;
+      }
       const existing = room.localParticipant.getTrackPublication(source);
       if (existing && existing.track) {
-        if (existing.track === track) return; // already published
+        // An ended track is not "already published": unpublish it so the
+        // fresh track below actually replaces it instead of early-returning.
+        if (existing.track === track && existing.track.readyState === 'live') return; // already published
         await room.localParticipant.unpublishTrack(existing.track);
       }
       await room.localParticipant.publishTrack(track, { source });
@@ -568,6 +605,171 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setLivekitReconnectNonce(n => n + 1);
   };
 
+  // --- Fix Round 5: video-stability helpers ------------------------------
+  // Keep the LiveKit membership set in sync.
+  const markLivekitParticipant = (peerKey: string, present: boolean) => {
+    setLivekitParticipantIds(prev => {
+      const next = new Set(prev);
+      if (present) next.add(peerKey); else next.delete(peerKey);
+      return next;
+    });
+  };
+
+  // Record / forget one remote LiveKit publication. Camera publications
+  // are what make "Connecting..." honest; anything else is camera-off.
+  const noteLivekitPublication = (publication: any, peerKey: string) => {
+    if (!publication || !peerKey) return;
+    livekitPublicationsRef.current[`${peerKey}:${publication.trackSid}`] = publication;
+    if (publication.kind === 'video' && publication.source === Track.Source.Camera) {
+      setLivekitCameraPubs(prev => (prev[peerKey] ? prev : { ...prev, [peerKey]: true }));
+      if (publication.isMuted) setLivekitVideoMuted(prev => ({ ...prev, [peerKey]: true }));
+    }
+  };
+  const forgetLivekitPublication = (publication: any, peerKey: string) => {
+    if (!publication || !peerKey) return;
+    delete livekitPublicationsRef.current[`${peerKey}:${publication.trackSid}`];
+    if (publication.kind === 'video' && publication.source === Track.Source.Camera) {
+      setLivekitCameraPubs(prev => {
+        if (!prev[peerKey]) return prev;
+        const next = { ...prev };
+        delete next[peerKey];
+        return next;
+      });
+      setLivekitVideoMuted(prev => {
+        if (!prev[peerKey]) return prev;
+        const next = { ...prev };
+        delete next[peerKey];
+        return next;
+      });
+    }
+  };
+
+  // Drop a LiveKit remote peer's streams entirely (leave / disconnect),
+  // so no tile keeps showing a dead or empty stream as video.
+  const clearLivekitPeerStreams = (peerKey: string) => {
+    setLivekitRemoteStreams(prev => {
+      if (!prev[peerKey]) return prev;
+      const next = { ...prev };
+      delete next[peerKey];
+      return next;
+    });
+    setRemoteScreenStreams(prev => {
+      if (!prev[peerKey]) return prev;
+      const next = { ...prev };
+      delete next[peerKey];
+      return next;
+    });
+  };
+
+  // Resume any <video> element in the room that the browser paused
+  // (backgrounded tab, autoplay policy). Harmless on elements already playing.
+  const resumeVideoElements = () => {
+    try {
+      const root = meetingRoomRef.current || document;
+      root.querySelectorAll('video').forEach((el: any) => {
+        if (el.srcObject && el.paused) el.play().catch(() => {});
+      });
+    } catch (e) { /* video resume is best-effort */ }
+  };
+
+  // Attach the liveness handler to a freshly acquired local camera track.
+  // An ended camera used to stay "on" forever (enabling an ended track
+  // does nothing) — now it triggers a reacquisition instead of a black tile.
+  const attachLocalCameraTrack = (track: MediaStreamTrack) => {
+    localVideoTrackRef.current = track;
+    setLocalCameraLive(track.readyState === 'live');
+    track.onended = () => {
+      // Only the CURRENT track may trigger a reacquire: stopping a
+      // superseded track (camera switch, unmount) must not spin up a
+      // new camera.
+      if (localVideoTrackRef.current !== track) return;
+      setLocalCameraLive(false);
+      if (isVideoOnRef.current) void reacquireLocalCamera('track-ended');
+    };
+  };
+
+  // Re-acquire the local camera after it ended / went missing, with
+  // backoff and a hard stop so a dead camera cannot spin getUserMedia
+  // forever. On final failure the camera is honestly OFF (avatar + toast),
+  // never a black tile.
+  const reacquireLocalCamera = async (reason: string) => {
+    const guard = localCameraRecoverRef.current;
+    if (!isVideoOnRef.current || guard.inFlight) return;
+    const now = Date.now();
+    if (now - guard.lastAt < 1000) return; // backoff: at most one attempt/sec
+    if (guard.attempts >= 3) {
+      setIsVideoOn(false);
+      setLocalCameraRecovering(false);
+      triggerToast('Your camera stopped and could not be restarted — you are showing as camera off. Turn your camera on again to retry.');
+      return;
+    }
+    guard.inFlight = true;
+    guard.attempts += 1;
+    guard.lastAt = now;
+    setLocalCameraRecovering(true);
+    try {
+      const savedCam = localStorage.getItem('giin_selected_camera');
+      const videoStream = await navigator.mediaDevices.getUserMedia({
+        video: savedCam ? { deviceId: { exact: savedCam }, width: 640, height: 480 } : { width: 640, height: 480 }
+      });
+      const videoTrack = videoStream.getVideoTracks()[0];
+      if (!videoTrack) throw new Error('No video track acquired');
+      const oldTrack = localVideoTrackRef.current;
+      if (oldTrack && oldTrack !== videoTrack && oldTrack.readyState !== 'live') {
+        try { oldTrack.stop(); } catch (e) {}
+      }
+      videoTrack.enabled = true;
+      attachLocalCameraTrack(videoTrack);
+      setStream(prev => {
+        const newStream = prev || new MediaStream();
+        newStream.getVideoTracks().forEach(t => newStream.removeTrack(t));
+        newStream.addTrack(videoTrack);
+        return newStream;
+      });
+      Object.values(pcsRef.current).forEach(pc => {
+        const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (videoSender) videoSender.replaceTrack(videoTrack).catch(() => {});
+      });
+      await publishLiveKitTrack(videoTrack, Track.Source.Camera);
+      guard.attempts = 0;
+      setLocalCameraRecovering(false);
+      resumeVideoElements();
+    } catch (err) {
+      console.warn('[LiveKit] Camera reacquire failed (' + reason + '):', err);
+      setLocalCameraRecovering(false);
+      // Next watchdog tick / toggle retries (backed off); after 3
+      // attempts the guard above turns the camera honestly off.
+    } finally {
+      guard.inFlight = false;
+    }
+  };
+
+  // One honest tile state for a remote peer, used by the grid and the
+  // direct-call view alike. A tile shows live video ONLY when a live
+  // video track is actually flowing; "Connecting..." ONLY while a camera
+  // publication exists but its frames have not arrived yet (or the P2P
+  // handshake is still in flight). Everyone else is "Camera Off" —
+  // including a participant who never publishes any track at all.
+  const getRemoteTileState = (peerKey: string) => {
+    const livekitStream = livekitRemoteStreams[peerKey];
+    const p2pStream = remoteStreams[peerKey];
+    const activeStreamObj = livekitStream || p2pStream;
+    const liveVideoTracks = activeStreamObj
+      ? activeStreamObj.getVideoTracks().filter((t: MediaStreamTrack) => t.readyState === 'live')
+      : [];
+    const hasLiveVideo = liveVideoTracks.length > 0;
+    const ps = peerStates[peerKey];
+    const peerStateKnown = !!ps;
+    const signalledVideoOff = peerStateKnown && ps.isVideoOn === false;
+    const videoMuted = !!livekitVideoMuted[peerKey];
+    const hasCameraPub = !!livekitCameraPubs[peerKey];
+    const isPresent = livekitParticipantIds.has(peerKey) || activePeerKeys.includes(peerKey) || peerStateKnown;
+    const p2pConnecting = engineType !== 'LIVEKIT' && activePeerKeys.includes(peerKey) && !activeStreamObj;
+    const connecting = (hasCameraPub && !hasLiveVideo) || p2pConnecting;
+    const showVideo = hasLiveVideo && !videoMuted && !signalledVideoOff;
+    return { activeStreamObj, hasLiveVideo, showVideo, connecting, isPresent, hasCameraPub };
+  };
+
   useEffect(() => {
     if (!isMediaInitialized || engineType !== 'LIVEKIT') return;
 
@@ -638,9 +840,81 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           setLivekitReconnectNonce(n => n + 1);
         });
 
+        // Fix Round 5: room membership is NOT the same as media tracks.
+        // ParticipantConnected/Disconnected tell us who is actually in
+        // the room; TrackPublished/Unpublished tell us who HAS a camera
+        // (even before it is subscribed); TrackMuted/Unmuted tell us
+        // whose camera is muted at the source. Without these, a
+        // participant publishing nothing looked identical to one whose
+        // video was still on its way — hence the eternal "Connecting...".
+        room.on(RoomEvent.ParticipantConnected, (participant: any) => {
+          if (!active) return;
+          markLivekitParticipant(participant.identity, true);
+          participant.trackPublications.forEach((pub: any) => noteLivekitPublication(pub, participant.identity));
+        });
+
+        room.on(RoomEvent.ParticipantDisconnected, (participant: any) => {
+          if (!active) return;
+          markLivekitParticipant(participant.identity, false);
+          setLivekitCameraPubs(prev => {
+            if (!prev[participant.identity]) return prev;
+            const next = { ...prev };
+            delete next[participant.identity];
+            return next;
+          });
+          setLivekitVideoMuted(prev => {
+            if (!prev[participant.identity]) return prev;
+            const next = { ...prev };
+            delete next[participant.identity];
+            return next;
+          });
+          Object.keys(livekitPublicationsRef.current).forEach(k => {
+            if (k.startsWith(`${participant.identity}:`)) delete livekitPublicationsRef.current[k];
+          });
+          clearLivekitPeerStreams(participant.identity);
+        });
+
+        room.on(RoomEvent.TrackPublished, (publication: any, participant: any) => {
+          if (!active) return;
+          noteLivekitPublication(publication, participant.identity);
+          // A published camera that never got subscribed (adaptive
+          // streaming / dynacast stall, or a subscribe that raced the
+          // join) leaves the tile waiting forever — ask for it explicitly.
+          if (publication.kind === 'video' && publication.source === Track.Source.Camera && !publication.isSubscribed) {
+            try { publication.setSubscribed(true); } catch (e) { /* auto-subscribe will retry */ }
+          }
+        });
+
+        room.on(RoomEvent.TrackUnpublished, (publication: any, participant: any) => {
+          if (!active) return;
+          forgetLivekitPublication(publication, participant.identity);
+        });
+
+        room.on(RoomEvent.TrackMuted, (publication: any, participant: any) => {
+          if (!active) return;
+          if (publication.source === Track.Source.Camera) {
+            setLivekitVideoMuted(prev => ({ ...prev, [participant.identity]: true }));
+          }
+        });
+
+        room.on(RoomEvent.TrackUnmuted, (publication: any, participant: any) => {
+          if (!active) return;
+          if (publication.source === Track.Source.Camera) {
+            setLivekitVideoMuted(prev => {
+              if (!prev[participant.identity]) return prev;
+              const next = { ...prev };
+              delete next[participant.identity];
+              return next;
+            });
+          }
+        });
+
         room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
           const peerKey = participant.identity;
           if (track.kind !== 'video' && track.kind !== 'audio') return;
+          // Record the publication (camera or not) so the tile knows
+          // whether video is actually on its way — see noteLivekitPublication.
+          noteLivekitPublication(publication, peerKey);
           // A screen-share track is a separate stream from the person's
           // camera. Mixing it into the camera MediaStream would make the
           // video element show one track at random, so screen shares get
@@ -669,8 +943,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (publication.source === Track.Source.ScreenShare) {
             setRemoteScreenStreams(prev => {
               const currentStream = prev[peerKey];
-              if (currentStream) {
-                currentStream.removeTrack(track.mediaStreamTrack);
+              if (!currentStream) return prev;
+              currentStream.removeTrack(track.mediaStreamTrack);
+              // An entry with no tracks left is not a connection: drop
+              // it, or the tile keeps a <video> on an empty stream
+              // (black) instead of falling back to the avatar.
+              if (currentStream.getTracks().length === 0) {
+                const next = { ...prev };
+                delete next[peerKey];
+                return next;
               }
               return { ...prev };
             });
@@ -678,8 +959,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           }
           setLivekitRemoteStreams(prev => {
             const currentStream = prev[peerKey];
-            if (currentStream) {
-              currentStream.removeTrack(track.mediaStreamTrack);
+            if (!currentStream) return prev;
+            currentStream.removeTrack(track.mediaStreamTrack);
+            if (currentStream.getTracks().length === 0) {
+              const next = { ...prev };
+              delete next[peerKey];
+              return next;
             }
             return { ...prev };
           });
@@ -692,6 +977,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         await room.connect(livekitUrl, token);
         setConnectionNotice(null); // A retry that lands clears the degraded banner.
         triggerToast('Connected to LiveKit SFU engine.');
+
+        // Seed membership from participants ALREADY in the room:
+        // ParticipantConnected only fires for joins after ours, so
+        // without this a peer who joined first would never count as
+        // present and their trackless tile would say "Connecting..."
+        // forever. Publications are seeded too, for the same reason.
+        room.remoteParticipants.forEach((p: any) => {
+          markLivekitParticipant(p.identity, true);
+          p.trackPublications.forEach((pub: any) => noteLivekitPublication(pub, p.identity));
+        });
 
         // Publish whatever local tracks we have right now (camera / mic /
         // an in-progress screen share). The helper skips anything already
@@ -733,6 +1028,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // a token-refresh reconnect does not mix ended tracks with fresh ones.
       setLivekitRemoteStreams({});
       setRemoteScreenStreams({});
+      setLivekitParticipantIds(new Set<string>());
+      setLivekitCameraPubs({});
+      setLivekitVideoMuted({});
+      livekitPublicationsRef.current = {};
     };
     // NOTE: `stream` is deliberately NOT a dependency. Every stream change
     // used to tear the LiveKit room down and reconnect it. Track changes
@@ -784,7 +1083,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
     const interval = setInterval(maybeRefresh, 30000);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') maybeRefresh();
+      if (document.visibilityState !== 'visible') return;
+      maybeRefresh();
+      // A backgrounded tab is exactly when the browser stops camera
+      // tracks: re-check liveness on return instead of trusting the
+      // tile, and resume any video element the browser paused.
+      if (isVideoOnRef.current) {
+        const t = localVideoTrackRef.current;
+        if (!t || t.readyState === 'ended') {
+          setLocalCameraLive(false);
+          void reacquireLocalCamera('visibility-return');
+        }
+      }
+      resumeVideoElements();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -793,6 +1104,44 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expiresAt, engineType]);
+
+  // Fix Round 5: media health watchdog. Runs every 5s while in the room:
+  // (1) a local camera that died without firing onended gets reacquired
+  // (backed off inside reacquireLocalCamera); (2) remote LiveKit streams
+  // whose tracks all ended are pruned so their tiles fall back to avatars
+  // instead of holding a dead stream; (3) camera publications that are
+  // published but unsubscribed are re-subscribed; (4) paused <video>
+  // elements are resumed. No secrets are logged.
+  useEffect(() => {
+    if (!isMediaInitialized) return;
+    const id = setInterval(() => {
+      if (isVideoOnRef.current) {
+        const t = localVideoTrackRef.current;
+        if (!t || t.readyState === 'ended') {
+          setLocalCameraLive(false);
+          void reacquireLocalCamera('watchdog');
+        }
+      }
+      setLivekitRemoteStreams(prev => {
+        let changed = false;
+        const next: { [peerKey: string]: MediaStream } = {};
+        Object.entries(prev).forEach(([k, s]) => {
+          if (s.getTracks().some(tr => tr.readyState === 'live')) next[k] = s;
+          else changed = true;
+        });
+        return changed ? next : prev;
+      });
+      Object.values(livekitPublicationsRef.current).forEach((pub: any) => {
+        try {
+          if (pub && pub.kind === 'video' && pub.source === Track.Source.Camera && pub.isSubscribed === false && typeof pub.setSubscribed === 'function') {
+            pub.setSubscribed(true);
+          }
+        } catch (e) { /* re-subscribe is best-effort; next tick retries */ }
+      });
+      resumeVideoElements();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [isMediaInitialized]);
 
   // Attendance: who joined, when, and how long they stayed. Recorded
   // locally in this browser (localStorage, per meeting) from the
@@ -940,8 +1289,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
       // Release camera and microphone hardware
       if (localVideoTrackRef.current) {
-        localVideoTrackRef.current.stop();
+        const dyingTrack = localVideoTrackRef.current;
         localVideoTrackRef.current = null;
+        dyingTrack.stop();
       }
       if (localAudioTrackRef.current) {
         localAudioTrackRef.current.stop();
@@ -1070,8 +1420,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         });
         const videoTrack = videoStream.getVideoTracks()[0];
         const oldTrack = localVideoTrackRef.current;
-        localVideoTrackRef.current = videoTrack;
         videoTrack.enabled = true;
+        // attachLocalCameraTrack sets the ref, the liveness state and
+        // the onended handler (a switched-to camera that later dies
+        // must reacquire, not go black).
+        attachLocalCameraTrack(videoTrack);
+        localCameraRecoverRef.current.attempts = 0;
         if (oldTrack && oldTrack !== videoTrack) {
           oldTrack.stop();
         }
@@ -1232,6 +1586,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       event: 'media-state',
       payload: {
         senderKey: myKey,
+        participantRowId: myParticipantRowId || undefined,
         isVideoOn: overrides?.isVideoOn ?? isVideoOnRef.current,
         isMuted: overrides?.isMuted ?? isMutedRef.current,
         isScreenSharing: sharing,
@@ -1922,7 +2277,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 role: p.role || 'Participant',
                 isMuted: false,
                 isSpeaking: false,
-                isVideoOn: true,
+                // Unknown until the peer announces (presence) or a live
+                // track arrives: assuming video-on made trackless guests
+                // look "Connecting..." forever. The tile trusts a live
+                // track over this flag anyway.
+                isVideoOn: false,
                 avatarBg: avatarBg
               };
             });
@@ -2295,17 +2654,27 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (senderKey !== myKey) {
           playUserJoinSound();
           
-          setPeerStates(prev => ({
-            ...prev,
-            [senderKey]: {
-              name: data.name,
-              isVideoOn: data.isVideoOn,
-              isMuted: data.isMuted,
-              isScreenSharing: data.isScreenSharing,
-              screenTrackId: data.screenTrackId !== undefined ? data.screenTrackId : prev[senderKey]?.screenTrackId ?? null,
-              isSpeaking: false
-            }
-          }));
+          // A guest's signalling key is a random per-visit UUID, but
+          // tiles are keyed by the meeting_participants row id (which
+          // is also the guest's LiveKit identity). The guest sends its
+          // row id with presence, so store the state under BOTH keys:
+          // the sender key for the P2P mesh, the row id for the tiles.
+          // Without this, a guest's "camera off" never reached their
+          // tile and it waited forever for video that was never coming.
+          const canonicalKey = data.participantRowId || senderKey;
+          const peerStateFor = (prev: any) => ({
+            name: data.name,
+            isVideoOn: data.isVideoOn,
+            isMuted: data.isMuted,
+            isScreenSharing: data.isScreenSharing,
+            screenTrackId: data.screenTrackId !== undefined ? data.screenTrackId : prev[senderKey]?.screenTrackId ?? prev[canonicalKey]?.screenTrackId ?? null,
+            isSpeaking: false
+          });
+          setPeerStates(prev => {
+            const next: { [peerKey: string]: any } = { ...prev, [senderKey]: peerStateFor(prev) };
+            if (canonicalKey !== senderKey) next[canonicalKey] = peerStateFor(prev);
+            return next;
+          });
 
           // A peer discovered over the signalling channel: add them to the participant list if not present yet.
           // A late screen-share announcement can arrive after the track:
@@ -2313,7 +2682,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           reclassifyScreenTracks(senderKey, !!data.isScreenSharing, data.screenTrackId ?? null);
 
           setParticipants(prev => {
-            const exists = prev.some(p => p.id === senderKey || p.userId === senderKey);
+            const exists = prev.some(p => p.id === senderKey || p.userId === senderKey || p.id === canonicalKey || p.userId === canonicalKey);
             if (exists) return prev;
             
             const initials = data.name ? data.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() : 'U';
@@ -2325,8 +2694,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             const avatarBg = `hsl(${hue}, 60%, 40%)`;
 
             const newDiscoveredParticipant: Participant = {
-              id: senderKey,
-              userId: senderKey,
+              id: canonicalKey,
+              userId: canonicalKey,
               name: data.name || 'Participant',
               avatar: initials,
               role: 'Participant',
@@ -2595,21 +2964,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       .on('broadcast', { event: 'media-state' }, (payload: any) => {
         const data = payload.payload;
         if (data.senderKey !== myKey) {
+          const mediaCanonicalKey = data.participantRowId || data.senderKey;
           setPeerStates(prev => {
-            const current = prev[data.senderKey] || {
+            const current = prev[data.senderKey] || prev[mediaCanonicalKey] || {
               name: 'Participant',
               isSpeaking: false
             };
-            return {
-              ...prev,
-              [data.senderKey]: {
-                ...current,
-                isVideoOn: data.isVideoOn,
-                isMuted: data.isMuted,
-                isScreenSharing: data.isScreenSharing,
-                screenTrackId: data.screenTrackId !== undefined ? data.screenTrackId : (current as any).screenTrackId ?? null
-              }
+            const updated = {
+              ...current,
+              isVideoOn: data.isVideoOn,
+              isMuted: data.isMuted,
+              isScreenSharing: data.isScreenSharing,
+              screenTrackId: data.screenTrackId !== undefined ? data.screenTrackId : (current as any).screenTrackId ?? null
             };
+            const next: { [peerKey: string]: any } = { ...prev, [data.senderKey]: updated };
+            if (mediaCanonicalKey !== data.senderKey) next[mediaCanonicalKey] = updated;
+            return next;
           });
           // The track may have arrived before this announcement: re-route
           // any video track it misclassified, in either direction.
@@ -2652,6 +3022,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             event: 'presence',
             payload: {
               senderKey: myKey,
+              participantRowId: myParticipantRowId || undefined,
               name: currentUser?.name || 'Guest',
               // Read live values from refs: this closure is frozen at the
               // signalling effect's last run and would otherwise re-broadcast
@@ -2684,6 +3055,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         event: 'presence',
         payload: {
           senderKey: myKey,
+          participantRowId: myParticipantRowId || undefined,
           name: currentUser?.name || 'Guest',
           // Live values from refs -- see the SUBSCRIBED announce above.
           isVideoOn: isVideoOnRef.current,
@@ -3188,7 +3560,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     let active = true;
     async function syncVideo() {
       if (isVideoOn) {
-        if (!localVideoTrackRef.current) {
+        const current = localVideoTrackRef.current;
+        if (!current || current.readyState === 'ended') {
+          // No usable track — acquire a fresh one. (The old code only
+          // re-enabled an existing track, so an ended track stayed
+          // "on" with a black tile; enabling an ended track is a no-op.)
+          if (current && current.readyState === 'ended') localVideoTrackRef.current = null;
           try {
             const savedCam = localStorage.getItem('giin_selected_camera');
             const videoStream = await navigator.mediaDevices.getUserMedia({
@@ -3206,8 +3583,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               return;
             }
             const videoTrack = videoStream.getVideoTracks()[0];
-            localVideoTrackRef.current = videoTrack;
             videoTrack.enabled = true;
+            attachLocalCameraTrack(videoTrack);
+            localCameraRecoverRef.current.attempts = 0;
             
             setStream(prev => {
               const newStream = prev || new MediaStream();
@@ -3240,18 +3618,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               ? 'Your camera is in use by another app — close that app, then turn your camera on again.'
               : `Your camera could not be started (${err?.message || 'unknown error'}). You are joining with the camera off.`;
             triggerToast(reason);
+            setLocalCameraLive(false);
             setIsVideoOn(false);
           }
         } else {
-          localVideoTrackRef.current.enabled = true;
+          // Track is live: re-enable it AND make sure LiveKit is still
+          // serving it — a publication lost during a reconnect is
+          // otherwise never repaired, and remotes keep a black tile.
+          current.enabled = true;
+          setLocalCameraLive(true);
+          publishLiveKitTrack(current, Track.Source.Camera);
         }
       } else {
         // Instead of stopping the track and destroying it (which causes long hardware boot delays),
-        // we keep the track alive but set enabled = false. This sends a black stream instantly and
-        // allows resuming the webcam CMT (camera) instantaneously when toggled back on.
+        // we keep the track alive but set enabled = false, so turning the
+        // camera back on is instant. We ALSO unpublish it from LiveKit:
+        // a live-but-disabled track streams black frames to remotes,
+        // so without this they see a black tile instead of "Camera Off".
         if (localVideoTrackRef.current) {
           localVideoTrackRef.current.enabled = false;
         }
+        setLocalCameraLive(false);
+        unpublishLiveKitTrack(Track.Source.Camera);
       }
       setIsMediaInitialized(true);
     }
@@ -4420,8 +4808,9 @@ Media encrypted in transit (DTLS-SRTP).`;
               (() => {
                 const p = participants[0];
                 const peerKey = p.userId || p.id;
-                const hasConnection = activePeerKeys.includes(peerKey);
-                const peerStreamObj = remoteStreams[peerKey];
+                const tile = getRemoteTileState(peerKey);
+                const hasConnection = tile.isPresent;
+                const peerStreamObj = tile.activeStreamObj;
                 const pState = peerStates[peerKey] || {
                   name: p.name,
                   isVideoOn: p.isVideoOn,
@@ -4442,7 +4831,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         autoPlay
                       />
                     )}
-                    {hasConnection && peerStreamObj && pState.isVideoOn && (
+                    {tile.showVideo && peerStreamObj && (
                       <video
                         className="remote-video-feed"
                         ref={el => {
@@ -4464,7 +4853,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         }}
                       />
                     )}
-                    {(!hasConnection || !peerStreamObj || !pState.isVideoOn) && (
+                    {!tile.showVideo && (
                       <div style={{
                         width: '100%',
                         height: '100%',
@@ -4499,7 +4888,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         </div>
                         <h4 style={{ marginTop: '1.5rem', fontSize: '1.25rem', fontWeight: 600 }}>{p.name}</h4>
                         <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                          {!hasConnection ? 'Connecting secure tunnel...' : 'Camera Off'}
+                          {tile.connecting ? 'Connecting secure tunnel...' : 'Camera Off'}
                         </span>
                       </div>
                     )}
@@ -4599,7 +4988,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               zIndex: 50,
               transition: 'all 0.3s ease'
             }}>
-              {isVideoOn && stream ? (
+              {isVideoOn && stream && localCameraLive ? (
                 <video 
                   ref={el => {
                     if (el && stream && el.srcObject !== stream) {
@@ -4685,7 +5074,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 boxShadow: 'var(--shadow-premium)',
                 transition: 'all 0.25s ease'
               }}>
-                {isVideoOn && stream ? (
+                {isVideoOn && stream && localCameraLive ? (
                   <>
                     <video 
                       ref={el => {
@@ -4844,7 +5233,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 >
                   <Pin size={13} />
                 </button>
-                {isVideoOn && stream ? (
+                {isVideoOn && stream && localCameraLive ? (
                   <>
                     <video 
                       ref={el => {
@@ -4890,7 +5279,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}>
                       {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}
                     </div>
-                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Camera Off</span>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{localCameraRecovering ? 'Camera reconnecting…' : 'Camera Off'}</span>
                   </div>
                 )}
                 
@@ -4982,13 +5371,14 @@ Media encrypted in transit (DTLS-SRTP).`;
               .filter(p => (p.userId || p.id) !== myKey)
               .map(p => {
                 const peerKey = p.userId || p.id;
-                const livekitStream = livekitRemoteStreams[peerKey];
-                const p2pStream = remoteStreams[peerKey];
-
                 // LiveKit is the engine; the P2P stream is only the
                 // fallback when LiveKit could not connect at all.
-                const activeStreamObj = livekitStream || p2pStream;
-                const hasConnection = !!activeStreamObj;
+                // One honest tile state: live video only on a live track,
+                // "Connecting..." only while a camera is actually on its
+                // way — never for a participant with no tracks at all.
+                const tile = getRemoteTileState(peerKey);
+                const activeStreamObj = tile.activeStreamObj;
+                const hasConnection = tile.isPresent;
                 
                 const pState = peerStates[peerKey] || {
                   name: p.name,
@@ -5053,7 +5443,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         muted={isSpatialAudioEnabled}
                       />
                     )}
-                  {hasConnection && activeStreamObj && pState.isVideoOn ? (
+                  {tile.showVideo && activeStreamObj ? (
                     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                       {/* Active Video Feed (LiveKit or Swapped P2P) */}
                       <video
@@ -5103,7 +5493,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         {p.avatar || p.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
                       </div>
                       <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        {!hasConnection ? 'Connecting...' : 'Camera Off'}
+                        {tile.connecting ? 'Connecting...' : 'Camera Off'}
                       </span>
                     </div>
                   )}
@@ -5192,7 +5582,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                     <span
                       style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: pState.isReconnecting ? 'var(--color-accent)' : hasConnection ? (typeof pState.latency === 'number' ? (pState.latency < 150 ? '#10B981' : pState.latency < 400 ? 'var(--color-accent)' : '#EF4444') : '#10B981') : '#64748B' }}
-                      title={pState.isReconnecting ? 'Reconnecting...' : hasConnection ? (typeof pState.latency === 'number' ? `Connection latency ${pState.latency} ms` : 'Connected') : 'Connecting...' }
+                      title={pState.isReconnecting ? 'Reconnecting...' : hasConnection ? (typeof pState.latency === 'number' ? `Connection latency ${pState.latency} ms` : 'Connected') : tile.connecting ? 'Connecting...' : 'In the meeting — camera off' }
                     />
                     {typeof pState.latency === 'number' && (
                       <span
