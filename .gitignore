@@ -31,3 +31,8 @@ dist-ssr
 # Next.js build output
 .next
 next-env.d.ts
+
+.vercel
+.env*
+backups/
+scratch/

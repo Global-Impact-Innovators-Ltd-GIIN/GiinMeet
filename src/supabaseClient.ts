@@ -14,14 +14,14 @@ const getEnv = (key: string): string | undefined => {
 };
 
 // Supabase configuration. No credentials are hardcoded here: the app fails
-// loudly at startup when VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are
+// loudly at startup when NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are
 // missing, instead of silently pointing at a stale or deleted project.
-export const supabaseUrl = getEnv('VITE_SUPABASE_URL');
-export const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
+export const supabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL') ?? getEnv('VITE_SUPABASE_URL');
+export const supabaseAnonKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') ?? getEnv('VITE_SUPABASE_ANON_KEY');
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(
-    '[GiinMeet] Supabase is not configured: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env. ' +
+    '[GiinMeet] Supabase is not configured: set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY (or VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY) in .env. ' +
     'The app will not start with missing credentials.'
   );
 }
@@ -29,8 +29,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export const isSupabaseConfigured = 
-  getEnv('VITE_SUPABASE_URL') !== undefined && 
-  getEnv('VITE_SUPABASE_ANON_KEY') !== undefined;
+  supabaseUrl !== undefined && 
+  supabaseAnonKey !== undefined;
 
 export interface GiinUser {
   id: string;
@@ -752,3 +752,6 @@ export const getTransparentLogo = (src: string): Promise<string> => {
     img.src = src;
   });
 };
+
+
+
