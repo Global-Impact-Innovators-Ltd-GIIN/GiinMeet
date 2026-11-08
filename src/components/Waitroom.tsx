@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, ArrowLeft, Loader2, Sparkles, UserPlus, CheckCircle } from 'lucide-react';
-import { giinApi, supabase } from '../supabaseClient';
+import { giinApi, supabase, isMeetingHost } from '../supabaseClient';
 
 interface WaitroomProps {
   meetingId: string;
@@ -52,9 +52,29 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           setErrorMsg('Meeting does not exist or has been deleted.');
         } else {
           setMeetingDetails(data);
-          // The passcode is never auto-accepted: the user must verify it (the
-          // field is pre-filled when they followed an invite link). A signed-in
-          // user still verifies the passcode before joining.
+          // Host bypass (server truth): the meeting's creator never verifies
+          // a passcode and never waits. Admit them straight into the room.
+          if (user?.id && isMeetingHost(data, user.id)) {
+            try {
+              const hostRow: any = await giinApi.joinMeetingRoom(meetingId, user.name || 'You', user.id, 'Admin', 'Admitted');
+              if (hostRow?.id) {
+                try { localStorage.setItem(`giin_participant_row_${meetingId}`, hostRow.id); } catch (e) {}
+              }
+            } catch (e) { /* host entry does not depend on the row write */ }
+            try {
+              localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
+              localStorage.setItem(`admitted_meeting_title_${meetingId}`, data.title || 'GIIN MEET Call');
+              localStorage.setItem(`admitted_meeting_name_${meetingId}`, user.name || 'You');
+            } catch (e) {}
+            onAdmitted(data.title || 'GIIN MEET Call', user.id, user.name || 'You');
+            return;
+          }
+          // Passcode: skip the form when the meeting has no passcode, and
+          // auto-accept the code when it arrived in the invite link - there
+          // is nothing to retype when you already followed a valid link.
+          if (!data.passcode || (initialPasscode && initialPasscode.toUpperCase() === String(data.passcode).toUpperCase())) {
+            setPasscodeValidated(true);
+          }
         }
       } catch (err) {
         console.error('Failed to load meeting details:', err);
@@ -215,6 +235,16 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     }
   };
 
+  // Signed-in users never type a display name: once the passcode step is
+  // done (or there is none), join straight away with the account name.
+  // Guests still get the name form below.
+  useEffect(() => {
+    if (!passcodeValidated || waitingStatus !== 'None' || !meetingDetails) return;
+    if (user?.name) {
+      joinWaitingRoom(user.name, meetingDetails.passcode);
+    }
+  }, [passcodeValidated, waitingStatus, meetingDetails, user]);
+
   const handleNameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!displayName.trim() || !meetingDetails) return;
@@ -315,8 +345,8 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           </form>
         )}
 
-        {/* Step 2: Name Entry (Guest display name setup) */}
-        {passcodeValidated && waitingStatus === 'None' && (
+        {/* Step 2: Name Entry (Guest display name setup) - signed-in users auto-join with their account name */}
+        {passcodeValidated && waitingStatus === 'None' && !user?.name && (
           <form onSubmit={handleNameSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>

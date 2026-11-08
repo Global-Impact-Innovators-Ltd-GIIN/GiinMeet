@@ -17,7 +17,7 @@ import { PrivateSpace } from './components/PrivateSpace';
 import { Waitroom } from './components/Waitroom';
 import { Superadmin } from './components/Superadmin';
 import { MeetingLobby } from './components/MeetingLobby';
-import { giinApi, supabase, getTransparentLogo } from './supabaseClient';
+import { giinApi, supabase, getTransparentLogo, isMeetingHost } from './supabaseClient';
 import { encryptMessage, decryptMessage } from './services/e2ee';
 
 
@@ -481,6 +481,7 @@ function App() {
   const threadsRef = useRef(threads);
   const activeThreadIdRef = useRef(activeThreadId);
   const currentViewRef = useRef(currentView);
+  const userRef = useRef(user);
 
   useEffect(() => {
     threadsRef.current = threads;
@@ -493,6 +494,10 @@ function App() {
   useEffect(() => {
     currentViewRef.current = currentView;
   }, [currentView]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Real-time messages sync and unread/audio notification handler
   useEffect(() => {
@@ -712,16 +717,50 @@ function App() {
 
   // Hash query router listener
   useEffect(() => {
-    const handleHashChange = () => {
+    const handleHashChange = async () => {
       const hash = window.location.hash;
       if (hash.startsWith('#/join')) {
         const urlParams = new URLSearchParams(hash.split('?')[1]);
         const id = urlParams.get('id') || '';
         const passcode = urlParams.get('passcode') || '';
-        if (id) {
-          setJoinMeetingData({ meetingId: id, passcode });
-          setCurrentView('join');
+        if (!id) return;
+        // Host bypass (server truth): if the signed-in user IS this
+        // meeting's host, they go straight into the room as host - never
+        // the passcode gate, never the waiting room. This also covers the
+        // host opening their own invite link or refreshing mid-meeting.
+        const me = userRef.current;
+        if (me?.id) {
+          try {
+            const { data } = await giinApi.getMeetingDetails(id);
+            if (data && isMeetingHost(data, me.id)) {
+              try {
+                const hostRow: any = await giinApi.joinMeetingRoom(id, me.name || 'You', me.id, 'Admin', 'Admitted');
+                if (hostRow?.id) {
+                  try { localStorage.setItem(`giin_participant_row_${id}`, hostRow.id); } catch (e) {}
+                }
+              } catch (e) { /* host entry does not depend on the row write */ }
+              try {
+                localStorage.setItem(`admitted_meeting_${id}`, 'true');
+                localStorage.setItem(`admitted_meeting_title_${id}`, data.title || 'GIIN MEET Call');
+                localStorage.setItem(`admitted_meeting_name_${id}`, me.name || 'You');
+              } catch (e) {}
+              setActiveCallTitle(data.title || 'GIIN MEET Call');
+              setActiveMeetingId(id);
+              setIsP2PCall(false);
+              if (window.location.hash !== '#/meeting') {
+                window.location.hash = '#/meeting';
+              }
+              setCurrentView('meeting');
+              return;
+            }
+          } catch (e) {
+            // If the host check itself fails, fall through to the normal
+            // join gate rather than stranding the user on the dashboard.
+            console.warn('[GiinMeet] Host check failed, using join gate:', (e as any)?.message);
+          }
         }
+        setJoinMeetingData({ meetingId: id, passcode });
+        setCurrentView('join');
       }
     };
     window.addEventListener('hashchange', handleHashChange);
@@ -1100,9 +1139,14 @@ function App() {
       return;
     }
     if (currentView === 'meeting' && activeMeetingId) {
-      // Keep the join link in hash so they can copy it or rejoin on refresh
-      const passcode = lobbyMeetingData?.passcode || '';
-      window.location.hash = `#/join?id=${activeMeetingId}&passcode=${passcode}`;
+      // The address bar shows the meeting view, never a join link. Writing
+      // #/join?id=... here made the hash listener route the host straight
+      // back into the passcode waitroom for their own meeting. The shareable
+      // invite link is copied from the lobby, the dashboard, or the in-room
+      // Invite panel instead.
+      if (window.location.hash !== '#/meeting') {
+        window.location.hash = '#/meeting';
+      }
       return;
     }
     
@@ -1125,7 +1169,7 @@ function App() {
     setIsDarkMode(!isDarkMode);
   };
 
-  const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true, existingMeetingId?: string, requireWaitingRoom = true) => {
+  const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true, existingMeetingId?: string, requireWaitingRoom = true, passcode?: string | null) => {
     if (existingMeetingId && activeMeetingId === existingMeetingId) {
       setCurrentView('meeting');
       return;
@@ -1199,7 +1243,8 @@ function App() {
             duration: 'Active now',
             status: 'In Progress',
             host: user.name || 'You',
-            require_waiting_room: requireWaitingRoom
+            require_waiting_room: requireWaitingRoom,
+            passcode
           };
           saved = await giinApi.createMeeting(newDbMeet);
         }
@@ -1471,7 +1516,7 @@ function App() {
   }, [user]);
 
 
-  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean }) => {
+  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null }) => {
     if (!user || !user.id) {
       window.alert('Sign in to schedule a meeting.');
       return null;
@@ -1484,7 +1529,8 @@ function App() {
         duration: meet.duration,
         status: 'Scheduled',
         host: user.name || 'You',
-        require_waiting_room: meet.requireWaitingRoom ?? true
+        require_waiting_room: meet.requireWaitingRoom ?? true,
+        passcode: meet.passcode
       };
       const savedMeet = await giinApi.createMeeting(newDbMeet);
 

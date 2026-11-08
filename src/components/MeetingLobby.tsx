@@ -4,6 +4,7 @@ import {
   Sparkles, ArrowRight, ArrowLeft, Sliders
 } from 'lucide-react';
 import { DeviceSettingsModal } from './DeviceSettingsModal';
+import { buildJoinLink } from '../supabaseClient';
 
 interface MeetingLobbyProps {
   meetingId: string;
@@ -35,7 +36,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
 
   // Get shareable join link
-  const shareableLink = `${window.location.origin}/#/join?id=${meetingId}&passcode=${passcode}`;
+  const shareableLink = buildJoinLink(meetingId, passcode);
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(shareableLink);

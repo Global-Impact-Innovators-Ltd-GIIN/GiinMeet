@@ -147,6 +147,61 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // --- CONSOLIDATED HOOK STATES & REFS BLOCK (Prevents TDZ errors) ---
   const [stream, setStream] = useState<MediaStream | null>(null);
+  // Local recording (free tier): records the local camera + mic stream on
+  // this device with MediaRecorder and downloads a .webm file on stop.
+  // It does not record remote participants (that needs cloud recording).
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<any>(null);
+  const startRecording = () => {
+    if (isRecording) return;
+    if (typeof MediaRecorder === 'undefined') {
+      triggerToast('Recording is not supported in this browser.');
+      return;
+    }
+    if (!stream) {
+      triggerToast('Turn your camera or mic on to record.');
+      return;
+    }
+    try {
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+      const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+      recordedChunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        try {
+          const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'giinmeet-recording-' + meetingId + '-' + new Date().toISOString().replace(/[:.]/g, '-') + '.webm';
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          triggerToast('Recording saved to your downloads.');
+        } catch (e) {
+          triggerToast('Could not save the recording.');
+        }
+      };
+      rec.start(1000);
+      mediaRecorderRef.current = rec;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+      triggerToast('Recording started. It saves on this device when you stop.');
+    } catch (e) {
+      triggerToast('Recording could not start in this browser.');
+    }
+  };
+  const stopRecording = () => {
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
+    } catch (e) {}
+    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+  };
   const [isMuted, setIsMuted] = useState(initialMutedState);
   const [isVideoOn, setIsVideoOn] = useState(initialVideoState);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -484,6 +539,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           throw new Error('ROOM_NOT_FOUND');
         }
 
+        // Server-side authorisation: send the signed-in user's session token
+        // (verified server-side) plus the admitted participant row id.
+        const { data: { session } } = await supabase.auth.getSession();
         const res = await fetch('/api/livekit/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -491,7 +549,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             roomSlug: videoRoom.slug,
             userId: myKey,
             userName: currentUser?.name || 'Guest',
-            role: isAdmin ? 'HOST' : 'GUEST'
+            role: isAdmin ? 'HOST' : 'GUEST',
+            accessToken: session?.access_token || undefined,
+            participantRowId: myParticipantRowId || undefined,
+            meetingId
           })
         });
 
@@ -501,6 +562,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           setConnectionNotice('This meeting room is full. You are connected peer-to-peer instead — video quality may be lower.');
           setEngineType('P2P');
           triggerToast('LiveKit room capacity limit reached. Swapped to P2P Mesh engine.');
+          return;
+        }
+        if (data.error === 'UNAUTHORIZED' || data.error === 'ADMISSION_REQUIRED') {
+          setConnectionNotice('You are not admitted to this meeting yet. Please wait for the host to admit you, then try again.');
+          triggerToast('Not admitted to this meeting yet.');
           return;
         }
         if (data.error || !data.token) {
@@ -6531,6 +6597,33 @@ Media encrypted in transit (DTLS-SRTP).`;
             <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isScreenSharing ? 'Stop Share' : 'Share'}</span>
           </button>
 
+          {/* Record (local, on this device) */}
+          <button
+            onClick={() => { if (isRecording) stopRecording(); else startRecording(); }}
+            style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '14px',
+              backgroundColor: isRecording ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
+              border: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              color: 'white',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              backdropFilter: 'blur(4px)'
+            }}
+            title={isRecording ? 'Stop recording (saves to this device)' : 'Record your camera and mic on this device'}
+          >
+            <span style={{ width: '18px', height: '18px', borderRadius: '50%', backgroundColor: isRecording ? 'white' : '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: isRecording ? '2px' : '50%', backgroundColor: isRecording ? '#EF4444' : 'white' }} />
+            </span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isRecording ? formatElapsedTime(recordingSeconds) : 'Record'}</span>
+          </button>
+
           {/* Picture-in-Picture Popout Button */}
           <button 
             onClick={handleTogglePictureInPicture}
@@ -6704,6 +6797,12 @@ Media encrypted in transit (DTLS-SRTP).`;
               <Clock size={14} color="var(--color-accent)" />
               {formatElapsedTime(elapsedSeconds)}
             </span>
+            {isRecording && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '999px', backgroundColor: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.5)', color: '#FCA5A5', fontSize: '0.8rem', fontWeight: 700 }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#EF4444' }} />
+                REC {formatElapsedTime(recordingSeconds)} - on this device
+              </span>
+            )}
             {/* Connection quality (round-trip latency, measured every 8s) */}
             {(() => {
               const latencies = Object.values(peerStates)

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check } from 'lucide-react';
+import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw } from 'lucide-react';
+import { buildJoinLink, generateMeetingPasscode } from '../supabaseClient';
 
 interface Meeting {
   id: string;
@@ -8,15 +9,15 @@ interface Meeting {
   duration: string;
   status: 'Completed' | 'In Progress' | 'Scheduled';
   host: string;
-  passcode?: string;
+  passcode?: string | null;
 }
 
 interface DashboardProps {
   isPremium: boolean;
   onNavigate: (view: string) => void;
-  onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean) => void;
+  onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean, passcode?: string | null) => void;
   meetingHistory: Meeting[];
-  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean }) => Promise<Meeting | null>;
+  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null }) => Promise<Meeting | null>;
   userName: string;
 }
 
@@ -34,7 +35,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [showInstantModal, setShowInstantModal] = useState(false);
   const [instantTitle, setInstantTitle] = useState('Instant Meeting');
   const [instantRequireWaitingRoom, setInstantRequireWaitingRoom] = useState(true);
+  const [instantPasscodeEnabled, setInstantPasscodeEnabled] = useState(true);
+  const [instantPasscode, setInstantPasscode] = useState('');
   const [requireWaitingRoom, setRequireWaitingRoom] = useState(true);
+  const [schedulePasscodeEnabled, setSchedulePasscodeEnabled] = useState(true);
+  const [schedulePasscode, setSchedulePasscode] = useState('');
   const [scheduledMeetingDetails, setScheduledMeetingDetails] = useState<Meeting | null>(null);
   const [copiedSuccessId, setCopiedSuccessId] = useState<'link' | 'details' | null>(null);
   
@@ -54,7 +59,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       title: meetingTitle,
       time: new Date(meetingTime).toISOString(),
       duration: '40m limit',
-      requireWaitingRoom
+      requireWaitingRoom,
+      passcode: schedulePasscodeEnabled ? schedulePasscode : null
     });
 
     if (saved) {
@@ -62,6 +68,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setMeetingTitle('');
       setMeetingTime('');
       setRequireWaitingRoom(true);
+      setSchedulePasscodeEnabled(true);
+      setSchedulePasscode('');
       setShowScheduleModal(false);
       setShowSuccessModal(true);
     }
@@ -107,7 +115,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }}>
         {/* New Meeting */}
         <div 
-          onClick={() => setShowInstantModal(true)}
+          onClick={() => { if (!instantPasscode) setInstantPasscode(generateMeetingPasscode()); setShowInstantModal(true); }}
           className="glass-panel" 
           style={{
             padding: '2rem',
@@ -190,7 +198,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         {/* Schedule Meeting */}
         <div 
-          onClick={() => setShowScheduleModal(true)}
+          onClick={() => { if (!schedulePasscode) setSchedulePasscode(generateMeetingPasscode()); setShowScheduleModal(true); }}
           className="glass-panel" 
           style={{
             padding: '2rem',
@@ -308,7 +316,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <button 
                         onClick={() => {
-                          const shareableLink = `${window.location.origin}/#/join?id=${meeting.id}&passcode=${meeting.passcode || ''}`;
+                          const shareableLink = buildJoinLink(meeting.id, meeting.passcode);
                           navigator.clipboard.writeText(shareableLink);
                           setCopiedHistoryId(meeting.id);
                           setTimeout(() => setCopiedHistoryId(null), 2000);
@@ -526,6 +534,46 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
 
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Meeting Passcode</label>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
+                  <input
+                    type="checkbox"
+                    checked={schedulePasscodeEnabled}
+                    onChange={() => {
+                      if (!schedulePasscodeEnabled && !schedulePasscode) setSchedulePasscode(generateMeetingPasscode());
+                      setSchedulePasscodeEnabled(!schedulePasscodeEnabled);
+                    }}
+                    style={{ marginTop: '3px' }}
+                  />
+                  <div>
+                    <strong style={{ display: 'block' }}>Require a passcode to join</strong>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Guests enter this code before joining. Turn it off for a fully open meeting link.</span>
+                  </div>
+                </label>
+                {schedulePasscodeEnabled && (
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <input
+                      type="text"
+                      className="premium-input"
+                      readOnly
+                      value={schedulePasscode}
+                      style={{ flex: 1, textAlign: 'center', letterSpacing: '0.2em', textTransform: 'uppercase', fontWeight: 700 }}
+                    />
+                    <button
+                      type="button"
+                      className="premium-btn premium-btn-secondary"
+                      onClick={() => setSchedulePasscode(generateMeetingPasscode())}
+                      title="Generate a new passcode"
+                      style={{ padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <RefreshCw size={14} />
+                      <span>New code</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
                 <button 
                   type="button" 
@@ -693,7 +741,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div>
                   <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Passcode</span>
                   <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-accent)' }}>
-                    {scheduledMeetingDetails.passcode || '—'}
+                    {scheduledMeetingDetails.passcode || 'No passcode'}
                   </div>
                 </div>
               </div>
@@ -708,11 +756,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   readOnly 
                   className="premium-input"
                   style={{ fontSize: '0.8rem', backgroundColor: 'rgba(0,0,0,0.1)', flex: 1 }}
-                  value={`${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || '—'}`}
+                  value={buildJoinLink(scheduledMeetingDetails.id, scheduledMeetingDetails.passcode)}
                 />
                 <button
                   onClick={() => {
-                    const link = `${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || '—'}`;
+                    const link = buildJoinLink(scheduledMeetingDetails.id, scheduledMeetingDetails.passcode);
                     navigator.clipboard.writeText(link);
                     setCopiedSuccessId('link');
                     setTimeout(() => setCopiedSuccessId(null), 2000);
@@ -729,7 +777,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {/* Copy Invitation Details Button */}
             <button
               onClick={() => {
-                const link = `${window.location.origin}/#/join?id=${scheduledMeetingDetails.id}&passcode=${scheduledMeetingDetails.passcode || '—'}`;
+                const link = buildJoinLink(scheduledMeetingDetails.id, scheduledMeetingDetails.passcode);
                 const timeStr = (() => {
                   try {
                     return new Date(scheduledMeetingDetails.time).toLocaleString();
@@ -744,7 +792,7 @@ Time: ${timeStr}
 Join Meeting Link: ${link}
 
 Meeting ID: ${scheduledMeetingDetails.id}
-Passcode: ${scheduledMeetingDetails.passcode || '—'}
+Passcode: ${scheduledMeetingDetails.passcode || 'none - open link'}
 
 Media encrypted in transit (DTLS-SRTP).`;
                 navigator.clipboard.writeText(invitation);
@@ -851,9 +899,51 @@ Media encrypted in transit (DTLS-SRTP).`;
                 >
                   Cancel
                 </button>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Meeting Passcode</label>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
+                  <input
+                    type="checkbox"
+                    checked={instantPasscodeEnabled}
+                    onChange={() => {
+                      if (!instantPasscodeEnabled && !instantPasscode) setInstantPasscode(generateMeetingPasscode());
+                      setInstantPasscodeEnabled(!instantPasscodeEnabled);
+                    }}
+                    style={{ marginTop: '3px' }}
+                  />
+                  <div>
+                    <strong style={{ display: 'block' }}>Require a passcode to join</strong>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Guests enter this code before joining. Turn it off for a fully open meeting link.</span>
+                  </div>
+                </label>
+                {instantPasscodeEnabled && (
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <input
+                      type="text"
+                      className="premium-input"
+                      readOnly
+                      value={instantPasscode}
+                      style={{ flex: 1, textAlign: 'center', letterSpacing: '0.2em', textTransform: 'uppercase', fontWeight: 700 }}
+                    />
+                    <button
+                      type="button"
+                      className="premium-btn premium-btn-secondary"
+                      onClick={() => setInstantPasscode(generateMeetingPasscode())}
+                      title="Generate a new passcode"
+                      style={{ padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <RefreshCw size={14} />
+                      <span>New code</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
                 <button 
                   onClick={() => {
-                    onStartMeeting(instantTitle, undefined, true, undefined, instantRequireWaitingRoom);
+                    onStartMeeting(instantTitle, undefined, true, undefined, instantRequireWaitingRoom, instantPasscodeEnabled ? instantPasscode : null);
+                    setInstantPasscode('');
+                    setInstantPasscodeEnabled(true);
                     setShowInstantModal(false);
                   }}
                   className="premium-btn premium-btn-primary"
