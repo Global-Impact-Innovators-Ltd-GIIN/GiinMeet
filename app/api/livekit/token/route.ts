@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../../../src/supabaseClient';
 
@@ -82,12 +82,16 @@ export async function POST(req: NextRequest) {
     // Client-supplied userId / role are NEVER trusted for authorisation.
     let identity = '';
     let displayName = typeof userName === 'string' && userName ? userName : 'Guest';
-    let derivedRole: 'HOST' | 'GUEST' = 'GUEST';
+    // Roles the token route derives (client-supplied roles are never trusted):
+    // HOST = meeting creator/admin, COHOST = granted by the host (a
+    // meeting_participants row with role 'CoHost'), GUEST = everyone else.
+    // SPEAKER is never assigned.
+    let derivedRole: 'HOST' | 'COHOST' | 'GUEST' = 'GUEST';
 
     // Fetch the meeting row (admin truth) once.
     const { data: meeting, error: meetingError } = await admin
       .from('meetings')
-      .select('id, admin_id, user_id, require_waiting_room')
+      .select('id, admin_id, user_id, require_waiting_room, status')
       .eq('id', derivedMeetingId)
       .maybeSingle();
 
@@ -95,6 +99,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         error: 'ADMISSION_REQUIRED',
         message: 'The meeting could not be found.',
+      }, { status: 403 });
+    }
+
+    // An ended meeting stays ended: no new token is ever minted for it,
+    // so an old WhatsApp link cannot re-enter a finished meeting.
+    if (meeting.status === 'Completed') {
+      return NextResponse.json({
+        error: 'MEETING_ENDED',
+        message: 'This meeting has ended.',
       }, { status: 403 });
     }
 
@@ -129,7 +142,7 @@ export async function POST(req: NextRequest) {
         // Non-host: must have an Admitted meeting_participants row.
         const { data: prow, error: prowError } = await admin
           .from('meeting_participants')
-          .select('id, name, status')
+          .select('id, name, status, role')
           .eq('meeting_id', derivedMeetingId)
           .eq('user_id', user.id)
           .maybeSingle();
@@ -140,6 +153,7 @@ export async function POST(req: NextRequest) {
           }, { status: 403 });
         }
         if (prow.name) displayName = prow.name;
+        if (prow.role === 'CoHost') derivedRole = 'COHOST';
       }
     } else {
       // Guest: the admitted participant row id is the credential. It is a
@@ -147,7 +161,7 @@ export async function POST(req: NextRequest) {
       // guest joined an open meeting), so only an admitted guest holds it.
       const { data: grow, error: growError } = await admin
         .from('meeting_participants')
-        .select('id, user_id, name, status')
+        .select('id, user_id, name, status, role')
         .eq('id', participantRowId)
         .eq('meeting_id', derivedMeetingId)
         .maybeSingle();
@@ -166,35 +180,67 @@ export async function POST(req: NextRequest) {
       identity = grow.id;
       if (grow.name) displayName = grow.name;
       if (isHostUser(grow.user_id)) derivedRole = 'HOST';
+      else if (grow.role === 'CoHost') derivedRole = 'COHOST';
     }
 
-    // 4. Capacity check (joined participants count)
-    const { count, error: countError } = await supabase
-      .from('participants')
-      .select('*', { count: 'exact', head: true })
-      .eq('room_id', room.id)
-      .eq('status', 'JOINED');
-
-    if (countError) {
-      console.error('[Token API] Failed to count room participants:', countError);
-      return NextResponse.json({
-        error: 'DB_ERROR',
-        message: 'Unable to check room capacity.',
-      }, { status: 500 });
-    }
-
+    // 4. Capacity check — counted against LIVE LiveKit participants, not
+    // stale database rows. The `participants` table never flipped rows to
+    // LEFT, so a few drop/rejoins could fill all 8 slots with ghosts and
+    // 403 the next real person. LiveKit's room service is the truth about
+    // who is actually connected right now; the database count is only a
+    // fallback when LiveKit cannot be reached.
     const maxCapacity = room.max_capacity || 8;
+    let liveCount: number | null = null;
+    let liveIdentities: string[] | null = null;
+    const lkUrl = process.env.LIVEKIT_URL;
+    const lkKey = process.env.LIVEKIT_API_KEY;
+    const lkSecret = process.env.LIVEKIT_API_SECRET;
+    if (lkUrl && lkKey && lkSecret) {
+      try {
+        const roomService = new RoomServiceClient(lkUrl, lkKey, lkSecret);
+        const liveParticipants = await roomService.listParticipants(room.slug);
+        liveIdentities = liveParticipants.map((p: any) => p.identity);
+        liveCount = liveParticipants.length;
+      } catch (e) {
+        console.warn('[Token API] LiveKit participant list failed, falling back to database count:', (e as any)?.message);
+      }
+    }
 
-    const { data: existingParticipant } = await supabase
-      .from('participants')
-      .select('status')
-      .eq('room_id', room.id)
-      .eq('user_id', identity)
-      .maybeSingle();
+    let joinedCount: number | null = null;
+    if (liveCount !== null) {
+      joinedCount = liveCount;
+    } else {
+      const { count, error: countError } = await supabase
+        .from('participants')
+        .select('*', { count: 'exact', head: true })
+        .eq('room_id', room.id)
+        .eq('status', 'JOINED');
+      if (countError) {
+        console.error('[Token API] Failed to count room participants:', countError);
+        return NextResponse.json({
+          error: 'DB_ERROR',
+          message: 'Unable to check room capacity.',
+        }, { status: 500 });
+      }
+      joinedCount = count;
+    }
 
-    const isAlreadyJoined = existingParticipant?.status === 'JOINED';
+    // A caller already in the room (live, or JOINED in the DB fallback)
+    // never counts against themselves on a token refresh.
+    let isAlreadyJoined: boolean;
+    if (liveIdentities !== null) {
+      isAlreadyJoined = liveIdentities.includes(identity);
+    } else {
+      const { data: existingParticipant } = await supabase
+        .from('participants')
+        .select('status')
+        .eq('room_id', room.id)
+        .eq('user_id', identity)
+        .maybeSingle();
+      isAlreadyJoined = existingParticipant?.status === 'JOINED';
+    }
 
-    if (!isAlreadyJoined && count !== null && count >= maxCapacity) {
+    if (!isAlreadyJoined && joinedCount !== null && joinedCount >= maxCapacity) {
       return NextResponse.json({
         error: 'MAX_CAPACITY_REACHED',
         message: `The meeting room is full. Maximum capacity is ${maxCapacity} participants.`,
@@ -235,7 +281,13 @@ export async function POST(req: NextRequest) {
       }, { status: 500 });
     }
 
-    const expireSeconds = 7200;
+    // 6h token: a 2-hour meeting minted a token that expired exactly as
+    // the meeting ended, and the client refreshed in a 60s window that a
+    // backgrounded tab could miss. 6h covers long meetings with margin;
+    // the client still refreshes early (at 15 min remaining) via
+    // room.updateToken(), so expiry is a backstop, not the plan.
+    // LiveKit AccessToken ttl accepts any number of seconds.
+    const expireSeconds = 21600;
     const expiresAt = new Date(Date.now() + expireSeconds * 1000).toISOString();
 
     const at = new AccessToken(apiKey, apiSecret, {
@@ -264,6 +316,7 @@ export async function POST(req: NextRequest) {
       engine: room.current_engine || 'LIVEKIT',
       roomSlug: room.slug,
       livekitUrl,
+      role: derivedRole,
     });
   } catch (err: any) {
     console.error('[Token API] Internal Exception:', err);

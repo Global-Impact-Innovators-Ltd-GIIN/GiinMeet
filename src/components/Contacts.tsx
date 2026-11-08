@@ -255,7 +255,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       try {
         const { data: meetings, error } = await supabase
           .from('meetings')
-          .select('*')
+          .select('id,title,time,duration,status')
           .eq('user_id', selectedContactId)
           .order('time', { ascending: false });
 

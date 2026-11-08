@@ -67,9 +67,50 @@ export const buildJoinLink = (meetingId: string, passcode?: string | null): stri
   return passcode ? `${base}&passcode=${passcode}` : base;
 };
 
-// Server-truth host check: the meeting row says who the host is. Use this
-// (not a localStorage flag) to decide whether someone bypasses the
-// passcode and the waiting room for a meeting.
+// Columns of `meetings` the browser is allowed to read. The `passcode`
+// column is deliberately NOT in this list: it is hidden from anon reads
+// by giinmeet_passcode_lockdown.sql, so every client-side meetings query
+// must use this list instead of select('*') — a select('*') would fail
+// once the column is revoked. The passcode is only ever read server-side
+// (verify-passcode route, host-only passcode route).
+export const MEETING_PUBLIC_COLUMNS =
+  'id,user_id,title,time,duration,status,host,notes,action_items_count,created_at,admin_id,require_waiting_room';
+
+// Build a calendar (.ics) file for a meeting, for download or import into
+// Google/Outlook/Apple Calendar. Pure client-side generation — no provider.
+export const buildICS = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }): string => {
+  const start = new Date(meeting.time);
+  const mins = parseInt(String(meeting.duration || '60').replace(/\D/g, ''), 10) || 60;
+  const end = new Date(start.getTime() + mins * 60000);
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const link = buildJoinLink(meeting.id, meeting.passcode);
+  const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//GIIN MEET//EN',
+    'BEGIN:VEVENT',
+    `UID:${meeting.id}@giinmeet`,
+    `DTSTAMP:${fmt(new Date())}`,
+    `DTSTART:${fmt(start)}`,
+    `DTEND:${fmt(end)}`,
+    `SUMMARY:${esc(meeting.title)}`,
+    `DESCRIPTION:${esc(`GIIN Meet video meeting. Join: ${link}`)}`,
+    `LOCATION:${esc(link)}`,
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+};
+
+export const downloadICS = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }) => {
+  const blob = new Blob([buildICS(meeting)], { type: 'text/calendar' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `giinmeet-${meeting.id.slice(0, 8)}.ics`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+};
 export const isMeetingHost = (
   meeting: { admin_id?: string | null; user_id?: string | null } | null | undefined,
   userId?: string | null
@@ -298,7 +339,7 @@ export const giinApi = {
   getMeetings: async (userId: string) => {
     const { data, error } = await supabase
       .from('meetings')
-      .select('*')
+      .select(MEETING_PUBLIC_COLUMNS)
       .eq('user_id', userId)
       .order('time', { ascending: false });
     if (error) throw new Error(`Could not load your meetings: ${error.message}`);
@@ -332,18 +373,19 @@ export const giinApi = {
       require_waiting_room: requireWaitingRoom
     };
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('meetings')
-      .insert([payload])
-      .select()
-      .maybeSingle();
+      .insert([payload]);
 
     if (error) {
       throw new Error(`Could not save the meeting: ${error.message}`);
     }
-    if (!data) {
-      throw new Error('Could not save the meeting: the database returned no meeting row.');
-    }
+
+    // The created row is returned from the local payload, not re-read from
+    // the database: the passcode column is hidden from anon reads, so a
+    // re-read would come back without it (and the passcode is already
+    // known here — it was generated just above).
+    const data: any = { ...payload, created_at: new Date().toISOString() };
 
     // Set fields so the frontend code handles permissions and waitroom checks correctly
     if (!data.passcode) data.passcode = passcode;
@@ -355,19 +397,100 @@ export const giinApi = {
     return data;
   },
 
-  // Sync meeting workspace notes
+  // Sync meeting workspace notes. Never overwrites notes with a canned
+  // string: ending a meeting only sets status (see updateMeetingStatus /
+  // endMeeting) and leaves notes alone.
   updateMeetingNotes: async (meetingId: string, notes: string, actionItemsCount: number, status?: string) => {
     const updatePayload: any = { notes, action_items_count: actionItemsCount };
     if (status) {
       updatePayload.status = status;
     }
-    const { data, error } = await supabase
+    // No .select() here: the passcode column is hidden from anon reads,
+    // so re-reading the row would fail. Callers do not need the row back.
+    const { error } = await supabase
       .from('meetings')
       .update(updatePayload)
-      .eq('id', meetingId)
-      .select()
-      .maybeSingle();
-    return { data, error };
+      .eq('id', meetingId);
+    return { data: null, error };
+  },
+
+  // Set only the meeting status (e.g. 'Completed'), preserving notes.
+  updateMeetingStatus: async (meetingId: string, status: string) => {
+    const { error } = await supabase
+      .from('meetings')
+      .update({ status })
+      .eq('id', meetingId);
+    return { error };
+  },
+
+  // End a meeting for everyone, server-side (host only): marks the
+  // meeting Completed WITHOUT touching notes, deactivates the video room
+  // and frees every capacity slot. Falls back to a client-side
+  // status-only update if the server route cannot be reached.
+  endMeeting: async (meetingId: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error('Only the signed-in host can end the meeting for everyone.');
+    }
+    const res = await fetch('/api/meetings/end', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, accessToken: session.access_token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not end the meeting on the server.');
+    }
+    return data;
+  },
+
+  // Verify a meeting passcode server-side. Returns { hasPasscode, valid }.
+  // The passcode itself is never sent to the browser.
+  verifyPasscode: async (meetingId: string, passcode: string) => {
+    const res = await fetch('/api/meetings/verify-passcode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, passcode }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not verify the passcode. Please check your connection and try again.');
+    }
+    return data as { hasPasscode: boolean; valid: boolean };
+  },
+
+  // Fetch a meeting's passcode — host only, server-verified. Used for the
+  // in-room invite panel and the dashboard Copy Link, now that the
+  // passcode column is hidden from anon reads.
+  getMeetingPasscode: async (meetingId: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return null;
+    const res = await fetch('/api/meetings/passcode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, accessToken: session.access_token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) return null;
+    return (data.passcode as string | null) ?? null;
+  },
+
+  // Send a password-reset email (Supabase). The user gets a link; the
+  // reset itself happens on the recovery screen in Auth.tsx. Email
+  // delivery depends on Supabase SMTP being configured in the dashboard.
+  requestPasswordReset: async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/#/reset-password`,
+    });
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  },
+
+  // Set a new password from the recovery flow (user arrives via the email link).
+  updatePassword: async (newPassword: string) => {
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    return { data, error: null };
   },
 
   // Fetch chat messages with local cache fallback
@@ -472,7 +595,7 @@ export const giinApi = {
 
     const { data, error } = await supabase
       .from('meetings')
-      .select('*')
+      .select(MEETING_PUBLIC_COLUMNS)
       .eq('id', meetingId)
       .maybeSingle();
 
@@ -482,6 +605,11 @@ export const giinApi = {
     if (!data) {
       return { data: null, error: { message: 'Meeting does not exist or has been deleted.' } };
     }
+    // The passcode is never read here any more (hidden from anon reads):
+    // callers verify it via giinApi.verifyPasscode (server-side) and the
+    // host fetches it via giinApi.getMeetingPasscode. `data.passcode` is
+    // therefore always undefined for client callers — never rely on it.
+    (data as any).passcode = undefined;
 
     if (!data.admin_id) {
       data.admin_id = data.user_id; // Default host is the creator
@@ -613,6 +741,55 @@ export const giinApi = {
     } catch (err: any) {
       console.warn('[Supabase Client] Failed to delete participant from database:', err.message);
       return { success: false };
+    }
+  },
+
+  // Mark a participant's LiveKit allocation row LEFT. This is what stops
+  // the capacity leak: without it, every drop/rejoin leaves a JOINED row
+  // behind and the room fills with ghosts. Uses fetch with keepalive so
+  // it can still land when the tab is closing (best-effort).
+  markParticipantLeft: async (roomId: string, identity: string) => {
+    try {
+      const url = `${supabaseUrl}/rest/v1/participants?room_id=eq.${encodeURIComponent(roomId)}&user_id=eq.${encodeURIComponent(identity)}`;
+      await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          apikey: supabaseAnonKey || '',
+          Authorization: `Bearer ${supabaseAnonKey || ''}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify({ status: 'LEFT' }),
+        keepalive: true,
+      });
+    } catch (e) {
+      console.warn('[Supabase Client] Could not mark participant LEFT:', (e as any)?.message);
+    }
+  },
+
+  // Grant or revoke the co-host role on a meeting_participants row.
+  // Only 'CoHost' / 'Participant' are settable here; host transfer stays
+  // in changeMeetingAdmin.
+  setParticipantRole: async (participantRowId: string, role: 'CoHost' | 'Participant') => {
+    const { data, error } = await supabase
+      .from('meeting_participants')
+      .update({ role, updated_at: new Date() })
+      .eq('id', participantRowId);
+    return { data, error };
+  },
+
+  // Co-host rows for a meeting (role 'CoHost', any status).
+  getCoHosts: async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meeting_participants')
+        .select('id, user_id, name')
+        .eq('meeting_id', meetingId)
+        .eq('role', 'CoHost');
+      if (error) return [];
+      return data || [];
+    } catch (e) {
+      return [];
     }
   },
 
