@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Room as LiveKitRoom, RoomEvent, Track } from 'livekit-client';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff,
@@ -174,7 +174,7 @@ const generateRandomOffset = () => {
 interface MeetingRoomProps {
   meetingId: string;
   meetingTitle: string;
-  onEndMeeting: () => void;
+  onEndMeeting: (skipServerEnd?: boolean) => void;
   onSaveWorkspaceData?: (notes: string, actionItemsCount: number) => void;
   currentUser: { id: string; name: string; email: string } | null;
   initialVideoState?: boolean;
@@ -328,11 +328,26 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [waitingList, setWaitingList] = useState<any[]>([]);
   const [initialNotes, setInitialNotes] = useState<string>('');
   const [localAdminId, setLocalAdminId] = useState<string>('');
-  const isAdmin = isHost || (currentUser && localAdminId === currentUser.id);
+  // Host truth: the meeting row's admin_id is the current host (it moves
+  // on transfer). The isHost prop is only the fallback until the row
+  // loads; localAdminId is the live override from host-transfer signals.
+  // (Fix Round 6 / Phase 6: the old derivation never consulted the row,
+  // so a transferred host gained no powers and the old host kept them.)
+  const isAdmin = (meetingAdminId ? meetingAdminId === currentUser?.id : isHost) || (currentUser != null && localAdminId === currentUser.id);
 
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [selectedNewAdminId, setSelectedNewAdminId] = useState<string>('');
   const [leaveOption, setLeaveOption] = useState<'transfer' | 'end' | null>(null);
+
+  // Fix Round 6 (Phase 6) — end-for-all state. endedState renders the
+  // "meeting ended" screen; endedRef makes entering it idempotent so
+  // the broadcast, the Realtime watcher and the poll cannot end the
+  // meeting twice or fight the reconnect logic.
+  const [endedState, setEndedState] = useState<{ reason: 'host-ended' | 'you-ended'; detail?: string } | null>(null);
+  const [endError, setEndError] = useState<string>('');
+  const [endingInProgress, setEndingInProgress] = useState(false);
+  const endedRef = useRef(false);
+  const eventsChannelRef = useRef<any>(null);
 
   // Host Meeting Settings States
   const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
@@ -410,6 +425,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // connect effect (and so leaving can free our capacity slot).
   const livekitRoomSlugRef = useRef<string | null>(null);
   const livekitRoomIdRef = useRef<string | null>(null);
+  // Fix Round 6 (Phase 6) — enter the ended state. Disconnects the media
+  // (LiveKit room + P2P links) and shows the "meeting ended" screen.
+  // Idempotent: the broadcast, the Realtime watcher and the poll can all
+  // fire, but the meeting only ends once. Audio capture/publish code is
+  // untouched — this only disconnects the room and closes peer links;
+  // track stopping happens on unmount as before.
+  const enterEndedState = useCallback((reason: 'host-ended' | 'you-ended', detail?: string) => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    try {
+      if (livekitRoomRef.current) livekitRoomRef.current.disconnect();
+    } catch (e) { /* already gone */ }
+    livekitRoomRef.current = null;
+    try {
+      Object.keys(pcsRef.current).forEach(peerKey => {
+        try { pcsRef.current[peerKey]?.close(); } catch (e) { /* already closed */ }
+      });
+    } catch (e) { /* already gone */ }
+    pcsRef.current = {};
+    setEndedState({ reason, detail });
+  }, []);
+
   // Our server-derived role for this meeting (HOST / COHOST / GUEST).
   // Co-hosts get admit + mute powers; the token route is the authority.
   const [livekitRole, setLivekitRole] = useState<'HOST' | 'COHOST' | 'GUEST'>('GUEST');
@@ -1011,9 +1048,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // reconnect — the user sees exactly what is happening.
         room.on(RoomEvent.Disconnected, () => {
           if (!active) return;
-          triggerToast('Video connection dropped — reconnecting to the video server…');
-          setConnectionNotice('Video connection dropped. Reconnecting to the video server — your camera and microphone will rejoin automatically.');
-          setLivekitReconnectNonce(n => n + 1);
+          // A disconnect is NOT always transient: when the host ends the
+          // meeting the server deletes the LiveKit room, which also lands
+          // here. Check the meeting first — reconnecting to an ended
+          // meeting would loop forever. (Fix Round 6 / Phase 6.)
+          void (async () => {
+            try {
+              const { data } = await giinApi.getMeetingDetails(meetingId);
+              if (!active) return;
+              if ((data as any)?.status === 'Completed') { enterEndedState('host-ended'); return; }
+            } catch (e) { /* status check failed: fall through to reconnect */ }
+            if (!active) return;
+            triggerToast('Video connection dropped — reconnecting to the video server…');
+            setConnectionNotice('Video connection dropped. Reconnecting to the video server — your camera and microphone will rejoin automatically.');
+            setLivekitReconnectNonce(n => n + 1);
+          })();
         });
 
         // Fix Round 5: room membership is NOT the same as media tracks.
@@ -1240,6 +1289,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const room = livekitRoomRef.current;
     const slug = livekitRoomSlugRef.current;
     if (!room || !slug || tokenRefreshingRef.current) return;
+    if (endedRef.current) return;
     tokenRefreshingRef.current = true;
     try {
       const data = await fetchLiveKitToken(slug);
@@ -1259,7 +1309,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   useEffect(() => {
     const maybeRefresh = () => {
-      if (!expiresAt || engineType !== 'LIVEKIT') return;
+      if (!expiresAt || engineType !== 'LIVEKIT' || endedRef.current) return;
       const timeDiff = new Date(expiresAt).getTime() - Date.now();
       // 15 minutes remaining: refresh now, while there is still plenty
       // of time to retry if the first attempt fails.
@@ -2467,6 +2517,78 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     loadDetails();
   }, [meetingId]);
 
+  // Fix Round 6 (Phase 6) — the end signal must NOT depend on the P2P
+  // signalling channel. That channel was gated on `passcode`, and
+  // loadDetails sets passcode='' for every non-host, so guests
+  // unsubscribed from it and never heard 'end-meeting'. This dedicated
+  // channel is subscribed by everyone in the room, on any engine.
+  useEffect(() => {
+    const ch = supabase.channel(`meeting-events-${meetingId}`, {
+      config: { broadcast: { self: false } }
+    });
+    eventsChannelRef.current = ch;
+    ch
+      .on('broadcast', { event: 'end-meeting' }, () => { enterEndedState('host-ended'); })
+      .on('broadcast', { event: 'designate-admin' }, (payload: any) => {
+        const newAdminId = payload?.payload?.newAdminId;
+        if (!newAdminId) return;
+        setMeetingAdminId(newAdminId);
+        setLocalAdminId(newAdminId);
+        if (currentUser && newAdminId === currentUser.id) {
+          triggerToast('You are now the host of this meeting.');
+        }
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+      if (eventsChannelRef.current === ch) eventsChannelRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId]);
+
+  // Fix Round 6 (Phase 6) — server-truth meeting watcher. A missed
+  // broadcast must never strand anyone: the meeting row itself says
+  // when the meeting ended (status Completed) or who the host is now
+  // (admin_id). Realtime first, 5s polling as the backstop.
+  useEffect(() => {
+    let active = true;
+    let lastAdminSeen = '';
+    const applyMeetingRow = (row: any) => {
+      if (!active || !row || endedRef.current) return;
+      if (row.status === 'Completed') { enterEndedState('host-ended'); return; }
+      const newAdmin = row.admin_id || '';
+      if (newAdmin) {
+        const wasAdmin = lastAdminSeen;
+        lastAdminSeen = newAdmin;
+        setMeetingAdminId(newAdmin);
+        setLocalAdminId(newAdmin);
+        if (currentUser && newAdmin === currentUser.id && wasAdmin && wasAdmin !== currentUser.id) {
+          triggerToast('You are now the host of this meeting.');
+        }
+      }
+    };
+    const poll = async () => {
+      try {
+        const { data } = await giinApi.getMeetingDetails(meetingId);
+        if (data) applyMeetingRow(data);
+      } catch (e) { /* transient: keep polling */ }
+    };
+    const channel = supabase
+      .channel(`meeting-state-${meetingId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'meetings', filter: `id=eq.${meetingId}` }, (payload: any) => {
+        applyMeetingRow(payload.new);
+      })
+      .subscribe();
+    void poll();
+    const interval = setInterval(poll, 5000);
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId]);
+
   // Poll and subscribe to realtime call chat messages
   useEffect(() => {
     const loadMessages = async () => {
@@ -3072,13 +3194,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       })
       .on('broadcast', { event: 'end-meeting' }, () => {
+        // Legacy path — the dedicated meeting-events channel is the
+        // primary signal now (Phase 6). Kept so a client on the older
+        // build still ends this one.
         if (!isAdmin) {
-          alert('The host has ended this meeting.');
-          onEndMeeting();
+          enterEndedState('host-ended');
         }
       })
       .on('broadcast', { event: 'designate-admin' }, (payload: any) => {
         const data = payload.payload;
+        setMeetingAdminId(data.newAdminId);
         setLocalAdminId(data.newAdminId);
         if (currentUser && data.newAdminId === currentUser.id) {
           alert('You have been designated as the meeting host.');
@@ -3687,15 +3812,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Delegate admin host rights to another user
+  // Delegate admin host rights to another user (server-verified, Phase 6).
   const handleDesignateAdmin = async (targetUserId: string) => {
     if (!confirm('Are you sure you want to designate this user as the meeting admin? You will transfer host settings.')) return;
     try {
-      await giinApi.changeMeetingAdmin(meetingId, targetUserId);
+      await giinApi.transferHost(meetingId, targetUserId);
       setMeetingAdminId(targetUserId);
+      setLocalAdminId(targetUserId);
       alert('Meeting administrator transferred successfully!');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert(err?.message || 'Could not transfer the host role. Please try again.');
     }
   };
 
@@ -4074,56 +4201,100 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleLeaveOrEnd = () => {
+    // Fix Round 6 (Phase 6): the host is ALWAYS asked to choose —
+    // transfer host or end for everyone. The old code skipped the
+    // choice (and the broadcast) whenever the participant list looked
+    // empty, and that list is database-derived and can lag behind the
+    // people actually connected. A minimised room un-minimises first
+    // so the choice is visible.
     if (isAdmin) {
-      if (participants.length > 0) {
-        setShowLeaveModal(true);
-      } else {
-        onEndMeeting();
-      }
+      setEndError('');
+      if (isMinimized) onMinimizeToggle?.(false);
+      setShowLeaveModal(true);
     } else {
       onEndMeeting();
     }
   };
 
-  const handleEndForAll = () => {
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'end-meeting',
-        payload: {}
-      });
-    }
-    setShowLeaveModal(false);
-    setLeaveOption(null);
-    setSelectedNewAdminId('');
-    onEndMeeting();
+  // Fix Round 6 (Phase 6) — end for everyone, for real. Order matters:
+  // (1) the SERVER ends it first (meeting Completed + LiveKit room
+  // deleted) so the link is dead even if every broadcast is missed;
+  // (2) the end is broadcast on both channels, awaited with a timeout,
+  // so the signal is not lost to the unmount that follows; (3) only
+  // then does this client show its own ended screen. The old code did
+  // it backwards — fire-and-forget broadcast, then immediate unmount —
+  // and the LiveKit room was never torn down at all, so everyone else
+  // kept talking. If the server end fails, NOBODY is ended and the
+  // host gets the honest error instead of a silent partial end.
+  const sendEndBroadcast = async (ch: any) => {
+    if (!ch) return;
+    try {
+      await Promise.race([
+        ch.send({ type: 'broadcast', event: 'end-meeting', payload: { meetingId, endedAt: new Date().toISOString() } }),
+        new Promise(resolve => setTimeout(resolve, 2000)),
+      ]);
+    } catch (e) { /* broadcast is best-effort: server state + polling cover it */ }
   };
 
-  const handleTransferAndLeave = async () => {
-    if (!selectedNewAdminId) return;
-
+  const handleEndForAll = async () => {
+    if (endingInProgress || endedRef.current) return;
+    setEndingInProgress(true);
+    setEndError('');
     try {
-      // 1. Broadcast the designation to everyone
-      if (sigChannelRef.current) {
-        sigChannelRef.current.send({
-          type: 'broadcast',
-          event: 'designate-admin',
-          payload: {
-            newAdminId: selectedNewAdminId
-          }
-        });
-      }
+      const result = await giinApi.endMeeting(meetingId);
+      await sendEndBroadcast(eventsChannelRef.current);
+      await sendEndBroadcast(sigChannelRef.current);
+      setShowLeaveModal(false);
+      setLeaveOption(null);
+      setSelectedNewAdminId('');
+      enterEndedState('you-ended', (result as any)?.livekitWarning);
+    } catch (err: any) {
+      console.error('[GiinMeet] End for everyone failed:', err);
+      setEndError(err?.message || 'Could not end the meeting. Nobody was removed — please try again.');
+    } finally {
+      setEndingInProgress(false);
+    }
+  };
 
-      // 2. Update database in background
-      await giinApi.changeMeetingAdmin(meetingId, selectedNewAdminId);
-      
-      // 3. Leave the meeting
+  // Fix Round 6 (Phase 6) — transfer host, for real. The transfer is
+  // a server-verified act now (POST /api/meetings/transfer-host): the
+  // caller must be the current host, and the new host must be a
+  // signed-in participant actually in the meeting — a guest (no auth
+  // account) can never hold the host role, so guests are not offered
+  // in the picker. The old code broadcast the designation BEFORE the
+  // database write and ignored the write's error entirely, so a failed
+  // transfer still left the host gone and everyone confused. Now the
+  // database move happens first; only then is it broadcast, and only
+  // then does the old host leave. A failure leaves the host in the
+  // meeting with an honest error.
+  const handleTransferAndLeave = async () => {
+    if (!selectedNewAdminId || endingInProgress) return;
+    setEndingInProgress(true);
+    setEndError('');
+    try {
+      await giinApi.transferHost(meetingId, selectedNewAdminId);
+      const payload = { newAdminId: selectedNewAdminId };
+      const sendDesignate = async (ch: any) => {
+        if (!ch) return;
+        try {
+          await Promise.race([
+            ch.send({ type: 'broadcast', event: 'designate-admin', payload }),
+            new Promise(resolve => setTimeout(resolve, 2000)),
+          ]);
+        } catch (e) { /* best-effort: the meeting watcher is the truth */ }
+      };
+      await sendDesignate(eventsChannelRef.current);
+      await sendDesignate(sigChannelRef.current);
+      setMeetingAdminId(selectedNewAdminId);
       setShowLeaveModal(false);
       setLeaveOption(null);
       setSelectedNewAdminId('');
       onEndMeeting();
-    } catch (err) {
-      console.error('Failed to transfer host role:', err);
+    } catch (err: any) {
+      console.error('[GiinMeet] Failed to transfer host role:', err);
+      setEndError(err?.message || 'Could not transfer the host role. You are still the host — please try again.');
+    } finally {
+      setEndingInProgress(false);
     }
   };
 
@@ -4682,6 +4853,50 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const isDirectCall = isP2PCall && participants.length <= 1 && !isScreenSharing && !Object.keys(peerStates).some(k => peerStates[k].isScreenSharing);
 
+  // Fix Round 6 (Phase 6) — the ended screen. Rendered BEFORE the
+  // minimised branch so a minimised participant sees it too. The media
+  // is already disconnected by enterEndedState; this screen only
+  // explains what happened and sends the user back to the dashboard.
+  // onEndMeeting(true) skips the server end — it already happened.
+  if (endedState) {
+    return (
+      <div style={{
+        width: '100vw',
+        height: '100dvh',
+        backgroundColor: '#07090E',
+        color: 'white',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '1rem',
+        padding: '2rem',
+        textAlign: 'center'
+      }}>
+        <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <PhoneOff size={28} color="#EF4444" />
+        </div>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>This meeting has ended</h2>
+        <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px', lineHeight: 1.5 }}>
+          {endedState.reason === 'you-ended'
+            ? 'You ended the meeting for everyone. All participants have been disconnected and the invite link no longer works.'
+            : 'The host has ended this meeting. You have been disconnected and the invite link no longer works.'}
+        </p>
+        <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '420px' }}>{meetingTitle}</p>
+        {endedState.detail && (
+          <p style={{ margin: 0, fontSize: '0.85rem', color: '#FCA5A5', maxWidth: '420px', lineHeight: 1.5 }}>{endedState.detail}</p>
+        )}
+        <button
+          onClick={() => onEndMeeting(true)}
+          className="premium-btn premium-btn-primary"
+          style={{ marginTop: '0.5rem', height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
+        >
+          Return to dashboard
+        </button>
+      </div>
+    );
+  }
+
   if (isMinimized) {
     // Determine which stream to display in the mini window
     const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing);
@@ -4898,7 +5113,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <div style={{ width: '1px', height: '12px', backgroundColor: 'rgba(255,255,255,0.2)' }} />
 
             <button 
-              onClick={onEndMeeting}
+              onClick={handleLeaveOrEnd}
               style={{
                 background: 'none',
                 border: 'none',
@@ -8978,12 +9193,22 @@ Media encrypted in transit (DTLS-SRTP).`;
                       }}
                     >
                       <option value="">-- Choose from active participants --</option>
-                      {participants.map(p => (
-                        <option key={p.id} value={p.userId || p.id}>
+                      {participants.filter(p => !!p.userId).map(p => (
+                        <option key={p.id} value={p.userId}>
                           {p.name}
                         </option>
                       ))}
                     </select>
+                    {participants.length > 0 && participants.filter(p => !!p.userId).length === 0 && (
+                      <div style={{ fontSize: '0.8rem', color: '#FCA5A5', lineHeight: 1.4 }}>
+                        Nobody signed in to take over yet — guests who joined without signing in cannot become host.
+                      </div>
+                    )}
+                    {participants.some(p => !p.userId) && participants.filter(p => !!p.userId).length > 0 && (
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                        Guests who joined without signing in cannot become host — only signed-in participants are listed.
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -9045,10 +9270,15 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* Actions Footer */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
+              {endError && (
+                <div style={{ fontSize: '0.85rem', color: '#FCA5A5', backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: '8px', padding: '0.6rem 0.75rem', lineHeight: 1.4 }}>
+                  {endError}
+                </div>
+              )}
               {leaveOption === 'transfer' && (
                 <button
                   onClick={handleTransferAndLeave}
-                  disabled={!selectedNewAdminId}
+                  disabled={!selectedNewAdminId || endingInProgress}
                   className="premium-btn premium-btn-primary"
                   style={{
                     width: '100%',
@@ -9063,13 +9293,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                     transition: 'all 0.2s ease'
                   }}
                 >
-                  Confirm Transfer & Exit
+                  {endingInProgress ? 'Transferring...' : 'Confirm Transfer & Exit'}
                 </button>
               )}
 
               {leaveOption === 'end' && (
                 <button
                   onClick={handleEndForAll}
+                  disabled={endingInProgress}
                   className="premium-btn premium-btn-danger"
                   style={{
                     width: '100%',
@@ -9083,7 +9314,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     transition: 'all 0.2s ease'
                   }}
                 >
-                  End Meeting for All
+                  {endingInProgress ? 'Ending meeting...' : 'End Meeting for All'}
                 </button>
               )}
 

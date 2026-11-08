@@ -111,8 +111,11 @@ export async function POST(req: NextRequest) {
       }, { status: 403 });
     }
 
+    // The CURRENT host is admin_id (it moves on transfer); user_id
+    // (creator) only counts when admin_id was never set. (Phase 6: the
+    // old OR let a transferred-away host keep minting HOST tokens.)
     const isHostUser = (uid: string | null | undefined) =>
-      !!uid && (uid === meeting.admin_id || uid === meeting.user_id);
+      !!uid && (meeting.admin_id ? uid === meeting.admin_id : uid === meeting.user_id);
 
     if (accessToken) {
       // Signed-in user: verify the JWT server-side with the service key.

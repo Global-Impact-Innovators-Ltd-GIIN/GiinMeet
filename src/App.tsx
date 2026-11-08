@@ -1396,7 +1396,7 @@ function App() {
     setCurrentView('meeting');
   };
 
-  const handleEndMeeting = async () => {
+  const handleEndMeeting = async (skipServerEnd = false) => {
     setActiveCallTitle(null);
     const endedId = activeMeetingId;
     if (endedId) {
@@ -1415,16 +1415,18 @@ function App() {
           if (data && isMeetingHost(data, leaver.id)) isLeaverHost = true;
         } catch (e) { /* host check failed: fail closed, do not end */ }
       }
-      if (isLeaverHost) {
+      // skipServerEnd: the room already ended server-side (the host's
+      // own "End for everyone" did it before showing the ended screen),
+      // so do not end it twice. Otherwise the host ends it here.
+      // Fix Round 6 (Phase 6): there is NO client-side fallback that
+      // marks the meeting Completed when the server end fails. That
+      // fallback was a silent partial end — the database said ended
+      // while everyone was still connected.
+      if (isLeaverHost && !skipServerEnd) {
         try {
           await giinApi.endMeeting(endedId);
         } catch (err) {
-          console.error('Server end-meeting failed, falling back to a status-only update:', err);
-          try {
-            await giinApi.updateMeetingStatus(endedId, 'Completed');
-          } catch (e) {
-            console.error('Failed to update end status of meeting in database:', e);
-          }
+          console.error('Server end-meeting failed. The meeting was NOT marked ended:', err);
         }
       }
       // Clear this meeting's admission-bypass flags so a later visit

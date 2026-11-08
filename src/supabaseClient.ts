@@ -111,12 +111,18 @@ export const downloadICS = (meeting: { id: string; title: string; time: string; 
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
+// The CURRENT host is meetings.admin_id (it moves on transfer). The
+// creator (user_id) only counts when admin_id was never set (old rows).
+// (Fix Round 6 / Phase 6: the old OR meant a transferred-away host
+// still counted as host everywhere, so a transfer never really moved
+// the host role.)
 export const isMeetingHost = (
   meeting: { admin_id?: string | null; user_id?: string | null } | null | undefined,
   userId?: string | null
 ): boolean => {
   if (!meeting || !userId) return false;
-  return meeting.admin_id === userId || meeting.user_id === userId;
+  if (meeting.admin_id) return meeting.admin_id === userId;
+  return meeting.user_id === userId;
 };
 
 export const ensureMeetingRoom = async (
@@ -133,6 +139,22 @@ export const ensureMeetingRoom = async (
       .eq('is_active', true)
       .maybeSingle();
     if (existing) return existing as { id: string; slug: string };
+    // Fix Round 6 (Phase 6): never resurrect a room for an ended
+    // meeting. After an end, rooms.is_active is false, so this used to
+    // INSERT a fresh active room on the next reconnect attempt — the
+    // token route still refused (meeting Completed), but the dead
+    // meeting's room row came back to life.
+    try {
+      const { data: mrow } = await supabase
+        .from('meetings')
+        .select('status')
+        .eq('id', meetingId)
+        .maybeSingle();
+      if ((mrow as any)?.status === 'Completed') {
+        console.warn('[GiinMeet] Refusing to create a video room for an ended meeting.');
+        return null;
+      }
+    } catch (e) { /* status check failed: fall through to the insert */ }
     if (!hostId) {
       console.warn('[GiinMeet] Cannot create a video room for a meeting without a signed-in host.');
       return null;
@@ -424,9 +446,12 @@ export const giinApi = {
   },
 
   // End a meeting for everyone, server-side (host only): marks the
-  // meeting Completed WITHOUT touching notes, deactivates the video room
-  // and frees every capacity slot. Falls back to a client-side
-  // status-only update if the server route cannot be reached.
+  // meeting Completed WITHOUT touching notes, deactivates the video room,
+  // deletes the LiveKit room and frees every capacity slot. Returns the
+  // server payload ({ ok, livekitRoomDeleted, livekitWarning? }). Throws
+  // when the server cannot end it — there is NO client-side fallback
+  // that marks the meeting ended, because that was a silent partial end
+  // (Fix Round 6 / Phase 6).
   endMeeting: async (meetingId: string) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
@@ -440,6 +465,28 @@ export const giinApi = {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) {
       throw new Error(data.message || data.error || 'Could not end the meeting on the server.');
+    }
+    return data;
+  },
+
+  // Transfer the host role, server-verified (Fix Round 6 / Phase 6).
+  // POST /api/meetings/transfer-host checks the caller is the current
+  // host and the new host is a signed-in participant in the meeting.
+  // Throws with the server's honest message on any failure — callers
+  // must NOT leave on failure.
+  transferHost: async (meetingId: string, newHostUserId: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error('Only the signed-in host can transfer the host role.');
+    }
+    const res = await fetch('/api/meetings/transfer-host', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, newHostUserId, accessToken: session.access_token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not transfer the host role.');
     }
     return data;
   },

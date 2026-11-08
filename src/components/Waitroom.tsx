@@ -126,6 +126,28 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     fetchDetails();
   }, [meetingId, initialPasscode, user]);
 
+  // Fix Round 6 (Phase 6) — the host may end the meeting while someone
+  // is still here (passcode screen or waiting room, before any
+  // participant row exists). Poll the meeting itself, not just the
+  // participant row: an ended meeting shows the ended message instead
+  // of a wait that never ends.
+  useEffect(() => {
+    if (waitingStatus === 'Admitted') return;
+    let active = true;
+    const checkEnded = async () => {
+      try {
+        const { data } = await giinApi.getMeetingDetails(meetingId);
+        if (active && data && (data as any).status === 'Completed') {
+          setErrorMsg('This meeting has ended. The invite link no longer works.');
+          setWaitingStatus('None');
+          setLoading(false);
+        }
+      } catch (e) { /* transient: keep waiting */ }
+    };
+    const id = setInterval(checkEnded, 5000);
+    return () => { active = false; clearInterval(id); };
+  }, [meetingId, waitingStatus]);
+
   // Real-time waiting room status checking with fallback polling and instant broadcast channel
   useEffect(() => {
     if (waitingStatus !== 'Waiting') return;
