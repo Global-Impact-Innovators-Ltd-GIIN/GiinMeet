@@ -67,6 +67,51 @@ export const playUserJoinSound = () => {
   // Silenced to prevent annoying background chime during reconnects
 };
 
+// Role labels shown on tiles / in the participants list. The database
+// stores raw values ('HOST', 'GUEST', 'CoHost', 'Participant', ...);
+// tiles must show the real role, never a hardcoded one.
+export const displayRoleLabel = (role?: string | null): string => {
+  const r = (role || '').toLowerCase().replace(/[-_\s]/g, '');
+  if (r === 'host' || r === 'admin') return 'Host';
+  if (r === 'cohost') return 'Co-host';
+  if (r === 'guest') return 'Guest';
+  if (r === 'speaker') return 'Speaker';
+  return 'Participant';
+};
+
+// Hand-raise reasons arrive as the menu label ('🙋 Question') or the bare
+// word ('Question'). Map either form to its sound key; anything else
+// (including "Just Raise Hand") gets the neutral default.
+export const handRaiseSoundKey = (reason?: string | null): string => {
+  const r = (reason || '').toLowerCase();
+  if (r.includes('urgent')) return 'hand-urgent';
+  if (r.includes('question')) return 'hand-question';
+  if (r.includes('comment')) return 'hand-comment';
+  if (r.includes('idea')) return 'hand-idea';
+  return 'hand-raise';
+};
+
+export interface ChatMessage {
+  id?: string;
+  sender: string;
+  text: string;
+  time: string;
+  self: boolean;
+  // Set only on a just-sent message rendered optimistically, until the
+  // real database row for it shows up.
+  pending?: boolean;
+}
+
+// Keep a just-sent (optimistic) message visible until the database row
+// for it shows up, then let the real row replace it — so the same
+// message never appears twice. Used by the chat poll, the post-send
+// reload, and the file-share reload alike.
+export const mergeChatWithPending = (dbMessages: ChatMessage[], prev: ChatMessage[]): ChatMessage[] => {
+  const pending = prev.filter(m => m.pending && typeof m.id === 'string' && (m.id as string).startsWith('local-'));
+  const unmatched = pending.filter(t => !dbMessages.some(d => d.sender === t.sender && d.text === t.text));
+  return unmatched.length ? [...dbMessages, ...unmatched] : dbMessages;
+};
+
 interface Participant {
   id: string;
   userId?: string;
@@ -269,6 +314,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [handRaiseReason, setHandRaiseReason] = useState<string | null>(null);
   const [showHandRaiseMenu, setShowHandRaiseMenu] = useState(false);
 
+  // Sound effects (hand-raise chimes + soundboard) on/off for this device.
+  // Persisted locally; this is the "mute" for notification sounds — it
+  // never touches the microphone or anyone else's audio. The long-lived
+  // realtime handlers read it through the ref so they never see a stale
+  // value.
+  const [soundEffectsEnabled, setSoundEffectsEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('giin_sound_effects') !== 'off'; } catch (e) { return true; }
+  });
+  const soundEffectsEnabledRef = useRef(soundEffectsEnabled);
+  const toggleSoundEffects = () => {
+    const next = !soundEffectsEnabledRef.current;
+    soundEffectsEnabledRef.current = next;
+    try { localStorage.setItem('giin_sound_effects', next ? 'on' : 'off'); } catch (e) { /* ignore */ }
+    setSoundEffectsEnabled(next);
+  };
+
   const [engineType, setEngineType] = useState<'LIVEKIT' | 'P2P'>('LIVEKIT');
   const [livekitToken, setLivekitToken] = useState<string>('');
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
@@ -448,7 +509,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [transcripts, setTranscripts] = useState<{ name: string; text: string; time: string }[]>([]);
   const [activeCaption, setActiveCaption] = useState<{ name: string; text: string } | null>(null);
 
-  const [messages, setMessages] = useState<{ sender: string; text: string; time: string; self: boolean }[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [participants, setParticipants] = useState<Participant[]>([]);
 
@@ -1333,6 +1394,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           payload: newRaise
         });
       }
+      // A broadcast is never echoed back to its sender, so the raiser
+      // plays their own reason sound locally; every other participant
+      // plays it when the 'hand-raise' event arrives.
+      playSynthesizedSound(handRaiseSoundKey(reason));
     }
     setShowHandRaiseMenu(false);
   };
@@ -2015,6 +2080,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       });
     }
     triggerReaction(myKey, emoji);
+    // 👏 is the toolbar twin of the soundboard Applause: the 'reaction'
+    // broadcast carries it to everyone, who play it on receipt (above).
+    // Other emoji reactions stay visual-only.
+    if (emoji === '👏') playSynthesizedSound('applause');
     setShowEmojiReactions(false);
   };
 
@@ -2202,7 +2271,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               self: isSelf
             };
           });
-          setMessages(mapped);
+          // Keep any just-sent message that the database list has not
+          // caught up with yet (see mergeChatWithPending).
+          setMessages(prev => mergeChatWithPending(mapped, prev));
         }
       } catch (err) {
         console.error('Failed to load call messages:', err);
@@ -2232,6 +2303,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               // Dedup by database row id. The old text+sender key dropped
               // legitimately repeated messages ("ok" twice is two messages).
               if (mappedMsg.id && prev.some(m => (m as any).id === mappedMsg.id)) return prev;
+              // A realtime echo of our own just-sent message replaces the
+              // optimistic copy instead of duplicating it.
+              const pendingIdx = prev.findIndex(m => (m as any).pending && m.self && m.sender === mappedMsg.sender && m.text === mappedMsg.text);
+              if (pendingIdx >= 0) {
+                const next = [...prev];
+                next[pendingIdx] = mappedMsg;
+                return next;
+              }
               return [...prev, mappedMsg];
             });
             // Unread badge: a message from someone else while the chat
@@ -2892,6 +2971,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       .on('broadcast', { event: 'hand-raise' }, (payload: any) => {
         const data = payload.payload;
         setHandRaises(prev => [...prev.filter(hr => hr.userId !== data.userId), data]);
+        // The raise itself is the sound trigger: one sound per reason,
+        // played for everyone in the room. The raiser is not echoed by
+        // the broadcast, so they play their own sound locally in
+        // toggleHandRaise; everyone else plays it here.
+        if (data.userId !== myKey) playSynthesizedSound(handRaiseSoundKey(data.reason));
       })
       .on('broadcast', { event: 'lower-hand' }, (payload: any) => {
         const data = payload.payload;
@@ -2915,6 +2999,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       .on('broadcast', { event: 'reaction' }, (payload: any) => {
         const data = payload.payload;
         triggerReaction(data.senderKey, data.emoji);
+        // 👏 is the toolbar twin of the soundboard Applause — it plays the
+        // same sound for everyone. Other emoji reactions stay visual-only.
+        if (data.emoji === '👏') playSynthesizedSound('applause');
       })
       .on('broadcast', { event: 'new-question' }, (payload: any) => {
         const data = payload.payload;
@@ -3997,75 +4084,130 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  // ONE shared sound engine for hand-raise chimes AND the soundboard.
+  // Every sound is built from shaped WebAudio tones / filtered noise with
+  // a real attack/decay envelope (never a bare oscillator switched on at
+  // full gain — that clicks). Peaks stay low (<= 0.12) and sawtooth
+  // voices run through a lowpass, so nothing blasts or screeches.
+  // Delivery reuses the single Supabase Realtime signalling channel
+  // (sigChannelRef): hand-raises ride their existing 'hand-raise' event
+  // (the reason is already in the payload) and soundboard sounds ride
+  // 'play-sound'. No second channel. The sender plays locally because a
+  // broadcast is never echoed back to its sender.
   const playSynthesizedSound = (type: string) => {
     try {
+      // The sound-effects mute (soundboard panel toggle). This never
+      // touches the microphone or anyone else's audio.
+      if (!soundEffectsEnabledRef.current) return;
       const ctx = getAudioCtx();
       const now = ctx.currentTime;
-      
-      if (type === 'bell') {
+
+      // Click-free tone: ramp up from silence over `attack`, then decay
+      // exponentially to silence. `freqEnd` slides the pitch (omit it
+      // for a fixed pitch); `lowpass` tames buzzy waves.
+      const tone = (opts: { wave: OscillatorType; freq: number; freqEnd?: number; at: number; dur: number; peak: number; attack?: number; lowpass?: number }) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, now);
-        osc.frequency.exponentialRampToValueAtTime(1760, now + 0.1);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
+        const t0 = now + opts.at;
+        const attack = opts.attack ?? 0.008;
+        osc.type = opts.wave;
+        osc.frequency.setValueAtTime(opts.freq, t0);
+        if (opts.freqEnd) osc.frequency.exponentialRampToValueAtTime(opts.freqEnd, t0 + opts.dur);
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.linearRampToValueAtTime(opts.peak, t0 + attack);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + opts.dur);
         osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now);
-        osc.stop(now + 1.5);
-      } else if (type === 'applause') {
-        const bufferSize = ctx.sampleRate * 1.0;
-        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          data[i] = Math.random() * 2 - 1;
+        if (opts.lowpass) {
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.value = opts.lowpass;
+          gain.connect(lp);
+          lp.connect(ctx.destination);
+        } else {
+          gain.connect(ctx.destination);
         }
-        const noise = ctx.createBufferSource();
-        noise.buffer = buffer;
+        osc.start(t0);
+        osc.stop(t0 + opts.dur + 0.05);
+      };
+
+      // Shaped filtered-noise burst (claps, breath, shimmer).
+      const noiseBurst = (opts: { at: number; dur: number; peak: number; filterType: BiquadFilterType; freq: number; q?: number }) => {
+        const len = Math.max(1, Math.floor(ctx.sampleRate * opts.dur));
+        const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
         const filter = ctx.createBiquadFilter();
-        filter.type = 'bandpass';
-        filter.frequency.value = 1000;
-        filter.Q.value = 1.0;
+        filter.type = opts.filterType;
+        filter.frequency.value = opts.freq;
+        filter.Q.value = opts.q ?? 1;
         const gain = ctx.createGain();
-        gain.gain.setValueAtTime(0.15, now);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.0);
-        noise.connect(filter);
+        const t0 = now + opts.at;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.linearRampToValueAtTime(opts.peak, t0 + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + opts.dur);
+        src.connect(filter);
         filter.connect(gain);
         gain.connect(ctx.destination);
-        noise.start(now);
+        src.start(t0);
+        src.stop(t0 + opts.dur + 0.05);
+      };
+
+      if (type === 'bell') {
+        // Struck bell: inharmonic partials, long natural decay.
+        tone({ wave: 'sine', freq: 1046.5, at: 0, dur: 1.6, peak: 0.12 });
+        tone({ wave: 'sine', freq: 1568, at: 0, dur: 1.1, peak: 0.06 });
+        tone({ wave: 'sine', freq: 2093, at: 0, dur: 0.6, peak: 0.03 });
+        tone({ wave: 'triangle', freq: 523.25, at: 0, dur: 0.9, peak: 0.03 });
+      } else if (type === 'applause') {
+        // A small crowd: a swell of band-passed noise plus a run of
+        // individual claps (short high-passed bursts) over ~1.4 s.
+        noiseBurst({ at: 0, dur: 1.4, peak: 0.10, filterType: 'bandpass', freq: 1200, q: 0.8 });
+        noiseBurst({ at: 0.05, dur: 1.2, peak: 0.05, filterType: 'highpass', freq: 2500 });
+        [0, 0.09, 0.17, 0.28, 0.36, 0.47, 0.55, 0.68, 0.79, 0.9, 1.02, 1.15].forEach((at, i) => {
+          noiseBurst({ at, dur: 0.06, peak: 0.05 + (i % 3) * 0.015, filterType: 'highpass', freq: 1800 });
+        });
       } else if (type === 'horn') {
-        const osc1 = ctx.createOscillator();
-        const osc2 = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc1.type = 'sawtooth';
-        osc2.type = 'triangle';
-        osc1.frequency.setValueAtTime(220, now);
-        osc1.frequency.linearRampToValueAtTime(440, now + 0.4);
-        osc2.frequency.setValueAtTime(225, now);
-        osc2.frequency.linearRampToValueAtTime(445, now + 0.4);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
-        osc1.connect(gain);
-        osc2.connect(gain);
-        gain.connect(ctx.destination);
-        osc1.start(now);
-        osc2.start(now);
-        osc1.stop(now + 0.6);
-        osc2.stop(now + 0.6);
+        // Party horn: a bright two-note "toot" (rising slide) with a
+        // breathy blow underneath — lowpassed, no raw sawtooth blast.
+        tone({ wave: 'sawtooth', freq: 392, freqEnd: 523.25, at: 0, dur: 0.32, peak: 0.05, attack: 0.02, lowpass: 1600 });
+        tone({ wave: 'sawtooth', freq: 392, freqEnd: 659.25, at: 0.32, dur: 0.5, peak: 0.06, attack: 0.02, lowpass: 1600 });
+        tone({ wave: 'triangle', freq: 784, freqEnd: 1046.5, at: 0.32, dur: 0.5, peak: 0.05, attack: 0.02 });
+        noiseBurst({ at: 0, dur: 0.8, peak: 0.02, filterType: 'bandpass', freq: 900, q: 1.5 });
       } else if (type === 'alert') {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(600, now);
-        gain.gain.setValueAtTime(0.08, now);
-        gain.gain.setValueAtTime(0, now + 0.15);
-        gain.gain.setValueAtTime(0.08, now + 0.25);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.5);
+        // Warning: two soft alternating tones (triangle, not square),
+        // smooth steps so it alerts without screeching.
+        tone({ wave: 'triangle', freq: 659.25, at: 0, dur: 0.22, peak: 0.09 });
+        tone({ wave: 'triangle', freq: 523.25, at: 0.24, dur: 0.22, peak: 0.09 });
+        tone({ wave: 'triangle', freq: 659.25, at: 0.48, dur: 0.22, peak: 0.09 });
+        tone({ wave: 'sine', freq: 1318.5, at: 0, dur: 0.15, peak: 0.02 });
+      } else if (type === 'hand-question') {
+        // Question: warm two-note chime, rising (E5 -> A5).
+        tone({ wave: 'sine', freq: 659.25, at: 0, dur: 0.55, peak: 0.11 });
+        tone({ wave: 'sine', freq: 880, at: 0.14, dur: 0.7, peak: 0.11 });
+        tone({ wave: 'triangle', freq: 1760, at: 0.14, dur: 0.4, peak: 0.02 });
+      } else if (type === 'hand-comment') {
+        // Comment: one soft low "plip" — calm, unobtrusive.
+        tone({ wave: 'sine', freq: 523.25, at: 0, dur: 0.45, peak: 0.10 });
+        tone({ wave: 'triangle', freq: 1046.5, at: 0, dur: 0.25, peak: 0.02 });
+      } else if (type === 'hand-idea') {
+        // Idea: bright ascending arpeggio (C5 -> E5 -> G5), a little sparkle.
+        tone({ wave: 'sine', freq: 523.25, at: 0, dur: 0.35, peak: 0.10 });
+        tone({ wave: 'sine', freq: 659.25, at: 0.11, dur: 0.35, peak: 0.10 });
+        tone({ wave: 'sine', freq: 783.99, at: 0.22, dur: 0.55, peak: 0.11 });
+        tone({ wave: 'triangle', freq: 1567.98, at: 0.22, dur: 0.3, peak: 0.02 });
+      } else if (type === 'hand-urgent') {
+        // Urgent: two crisp attention pings over a soft low pulse —
+        // distinct from every other chime, still not a siren.
+        tone({ wave: 'triangle', freq: 1174.66, at: 0, dur: 0.28, peak: 0.12 });
+        tone({ wave: 'triangle', freq: 1174.66, at: 0.3, dur: 0.35, peak: 0.12 });
+        tone({ wave: 'sine', freq: 196, at: 0, dur: 0.65, peak: 0.06 });
+      } else {
+        // Neutral default ("Just Raise Hand" and anything unknown):
+        // a single soft chime.
+        tone({ wave: 'sine', freq: 783.99, at: 0, dur: 0.5, peak: 0.10 });
+        tone({ wave: 'sine', freq: 1046.5, at: 0.08, dur: 0.45, peak: 0.05 });
       }
     } catch (e) {
       console.warn(e);
@@ -4200,13 +4342,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       });
       const list = await giinApi.getMessages(meetingId);
       if (list) {
-        setMessages(list.map((msg: { id?: string; user_id: string; sender_name: string; text: string; created_at: string }) => ({
+        setMessages(prev => mergeChatWithPending(list.map((msg: { id?: string; user_id: string; sender_name: string; text: string; created_at: string }) => ({
           id: msg.id,
           sender: msg.sender_name,
           text: msg.text,
           time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           self: currentUser ? (msg.user_id === currentUser.id) : false
-        })));
+        })), prev));
       }
     } catch (err: any) {
       console.error('Failed to share the file:', err);
@@ -4237,6 +4379,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
     const senderName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Guest';
     const text = chatInput;
+    // Show the message immediately (optimistic render) so the sender sees
+    // it in their own history right away. The temporary copy is swapped
+    // for the real database row when the reload / realtime echo arrives
+    // (mergeChatWithPending + the INSERT handler), so it never doubles.
+    const optimistic: ChatMessage = {
+      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sender: senderName,
+      text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      self: true,
+      pending: true
+    };
+    setMessages(prev => [...prev, optimistic]);
     setChatInput('');
 
     try {
@@ -4246,7 +4401,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         text: text,
         user_id: currentUser?.id
       });
-      
+
       const list = await giinApi.getMessages(meetingId);
       if (list) {
         const mapped = list.map((msg: { id?: string; user_id: string; sender_name: string; text: string; created_at: string }) => {
@@ -4259,10 +4414,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             self: isSelf
           };
         });
-        setMessages(mapped);
+        setMessages(prev => mergeChatWithPending(mapped, prev));
       }
     } catch (err) {
+      // Never silently drop a failed send: take the optimistic message
+      // back, put the text back in the box, and say why. (Guests hit this
+      // by design — sending needs a signed-in session, see giinApi
+      // .sendMessage — so the failure is honest, not a phantom send.)
       console.error('Failed to send chat message:', err);
+      setMessages(prev => prev.filter(m => m.id !== optimistic.id));
+      setChatInput(text);
+      triggerToast(err instanceof Error ? err.message : 'Could not send the message — please try again.');
     }
   };
 
@@ -4909,7 +5071,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       backdropFilter: 'blur(8px)',
                       zIndex: 10
                     }}>
-                      <span style={{ fontWeight: 600 }}>{p.name}</span>
+                      <span style={{ fontWeight: 600 }}>{p.name} ({displayRoleLabel(p.role)})</span>
                       {pState.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />}
                       {/* Latency badge removed to run in the background */}
                     </div>
@@ -5339,7 +5501,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                   backdropFilter: 'blur(4px)',
                   zIndex: 10
                 }}>
-                  <span style={{ fontWeight: 600 }}>You (Host)</span>
+                  {/* The label is the real role, never a hardcoded one:
+                      a guest's own tile says Guest, the host's says Host. */}
+                  <span style={{ fontWeight: 600 }}>You ({isAdmin ? 'Host' : isCoHost ? 'Co-host' : 'Guest'})</span>
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                   <span
                     style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)' }}
@@ -5578,7 +5742,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     backdropFilter: 'blur(4px)',
                     zIndex: 10
                   }}>
-                    <span style={{ fontWeight: 600 }}>{p.name}</span>
+                    <span style={{ fontWeight: 600 }}>{p.name} ({displayRoleLabel(p.role)})</span>
                     {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                     <span
                       style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: pState.isReconnecting ? 'var(--color-accent)' : hasConnection ? (typeof pState.latency === 'number' ? (pState.latency < 150 ? '#10B981' : pState.latency < 400 ? 'var(--color-accent)' : '#EF4444') : '#10B981') : '#64748B' }}
@@ -5845,7 +6009,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   alignItems: m.self ? 'flex-end' : 'flex-start'
                 }}>
                   <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.15rem' }}>
-                    {m.sender} &bull; {m.time}
+                    {m.sender} &bull; {m.time}{m.pending ? ' • Sending…' : ''}
                   </span>
                   <div style={{
                     padding: '0.6rem 0.85rem',
@@ -5853,7 +6017,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                     backgroundColor: m.self ? 'var(--color-primary)' : '#1E293B',
                     color: 'white',
                     fontSize: '0.85rem',
-                    lineHeight: 1.3
+                    lineHeight: 1.3,
+                    opacity: m.pending ? 0.65 : 1
                   }}>
                     {renderChatText(m.text)}
                   </div>
@@ -5884,7 +6049,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </label>
               <input 
                 type="text" 
-                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : "Send message to everyone..."} 
+                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !currentUser ? "Sign in to send messages — guests can read chat" : "Send message to everyone..."} 
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 disabled={isChatLocked && !isAdmin}
@@ -6031,7 +6196,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </div>
                   <div>
                     <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>You</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{isAdmin ? 'Host/Admin' : 'Participant'}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{isAdmin ? 'Host' : isCoHost ? 'Co-host' : 'Guest'}</div>
                   </div>
                 </div>
                 <div>
@@ -6048,7 +6213,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: '0.9rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{p.role}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{displayRoleLabel(p.role)}</div>
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
@@ -7045,7 +7210,25 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRIGGER SOUND EFFECTS</span>
-              
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sounds play for everyone in the room, in real time. Muting only silences them for you.</span>
+              <button
+                onClick={toggleSoundEffects}
+                title={soundEffectsEnabled ? 'Mute hand-raise and soundboard sounds for yourself' : 'Unmute hand-raise and soundboard sounds'}
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: '6px',
+                  border: '1px solid #1E293B',
+                  backgroundColor: soundEffectsEnabled ? 'rgba(255,255,255,0.04)' : 'rgba(239, 68, 68, 0.12)',
+                  color: 'white',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  textAlign: 'left'
+                }}
+              >
+                {soundEffectsEnabled ? '🔔 Sounds on — tap to mute' : '🔕 Sounds muted — tap to unmute'}
+              </button>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 {[
                   { id: 'applause', label: '👏 Applause' },
