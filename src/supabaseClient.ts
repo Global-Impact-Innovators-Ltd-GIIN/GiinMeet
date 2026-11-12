@@ -491,6 +491,92 @@ export const giinApi = {
     return data;
   },
 
+  // Room controls, host-verified server-side (Fix Round 7, #1 + #3).
+  // POST /api/meetings/control verifies the caller is the host (or a
+  // co-host, for mutes) and broadcasts the event with a server marker -
+  // receivers ignore these events without it. A guest co-host proves
+  // themselves with their participant row id, like the token route.
+  // Throws with the server's honest message on any failure.
+  controlMeeting: async (meetingId: string, action: string, opts?: { targetUserId?: string; targetRowId?: string; settings?: Record<string, boolean> }) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    let participantRowId: string | null = null;
+    try { participantRowId = localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { /* storage unavailable */ }
+    if (!session?.access_token && !participantRowId) {
+      throw new Error('Only the host or a co-host can control the room.');
+    }
+    const res = await fetch('/api/meetings/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, action, accessToken: session?.access_token || undefined, participantRowId: participantRowId || undefined, targetUserId: opts?.targetUserId, targetRowId: opts?.targetRowId, settings: opts?.settings }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not control the room.');
+    }
+    return data;
+  },
+
+  // Admit or decline a waiting-room participant, host-verified
+  // server-side (Fix Round 7, #4). The route flips the row and
+  // broadcasts the decision; the old direct client-side row update is
+  // gone. `settings` (the room's current settings) are broadcast with
+  // the decision so the new participant syncs immediately.
+  admitParticipant: async (meetingId: string, participantId: string, status: 'Admitted' | 'Declined', settings?: Record<string, boolean>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    let participantRowId: string | null = null;
+    try { participantRowId = localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { /* storage unavailable */ }
+    if (!session?.access_token && !participantRowId) {
+      throw new Error('Only the host or a co-host can admit people.');
+    }
+    const res = await fetch('/api/meetings/admit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, participantId, status, accessToken: session?.access_token || undefined, participantRowId: participantRowId || undefined, settings }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not admit the participant.');
+    }
+    return data as { ok: boolean; status: string; rowUpdated: boolean };
+  },
+
+  // Persist the meeting lock on the meeting row, host-only (Fix Round
+  // 7, #6). Throws with the server's honest message - including when
+  // the one-time giinmeet_meeting_lock.sql has not been run yet.
+  setMeetingLock: async (meetingId: string, locked: boolean) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error('Only the signed-in host can lock the meeting.');
+    }
+    const res = await fetch('/api/meetings/lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, locked, accessToken: session.access_token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not change the meeting lock.');
+    }
+    return data;
+  },
+
+  // Read the persisted meeting lock (best-effort). Returns false when
+  // the lock column does not exist yet (giinmeet_meeting_lock.sql not
+  // run) or the read fails - callers treat that as unlocked.
+  getMeetingLock: async (meetingId: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('meetings')
+        .select('is_locked')
+        .eq('id', meetingId)
+        .maybeSingle();
+      if (error || !data) return false;
+      return !!(data as any).is_locked;
+    } catch (e) {
+      return false;
+    }
+  },
+
   // Verify a meeting passcode server-side. Returns { hasPasscode, valid }.
   // The passcode itself is never sent to the browser.
   verifyPasscode: async (meetingId: string, passcode: string) => {
@@ -736,7 +822,12 @@ export const giinApi = {
     }
   },
 
-  // Update participant status (Admit/Decline)
+  // DEPRECATED (Fix Round 7, #4): admission goes through
+  // giinApi.admitParticipant (host-verified server route) now. Kept
+  // only so older call sites fail loudly instead of silently - do not
+  // call it for admission: the public UPDATE on
+  // meeting_participants.status is restricted once
+  // giinmeet_admission_lockdown.sql runs.
   updateParticipantStatus: async (participantId: string, status: 'Admitted' | 'Declined') => {
     const { data, error } = await supabase
       .from('meeting_participants')

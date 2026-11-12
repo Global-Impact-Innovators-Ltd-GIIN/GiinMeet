@@ -99,6 +99,9 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   const [videoOn, setVideoOn] = useState(true);
   const [audioOn, setAudioOn] = useState(true);
   const [joinWithoutDevices, setJoinWithoutDevices] = useState(false);
+  // Fix Round 7 (#11): the guest chose to proceed despite a failed
+  // network probe - the probe can fail while the meeting works fine.
+  const [proceedDespiteNetwork, setProceedDespiteNetwork] = useState(false);
   const [runId, setRunId] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -381,7 +384,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
 
   const canProceed =
     displayName.trim().length > 0 &&
-    networkStatus === 'pass' &&
+    (networkStatus === 'pass' || proceedDespiteNetwork) &&
     (joinWithoutDevices ||
       (cameraStatus !== 'fail' && micStatus !== 'fail' && cameraStatus !== 'checking' && micStatus !== 'checking'));
 
@@ -578,6 +581,21 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>You will join with video and audio off. You can turn them on later from inside the meeting if the device starts working.</span>
           </span>
         </label>
+
+        {/* Fix Round 7 (#11): a failed network probe warns instead of
+            blocking - the probe can fail (firewall, IPv6-only path, a
+            hiccup) while the meeting works fine. The guest may continue
+            anyway. */}
+        {networkStatus === 'fail' && !proceedDespiteNetwork && (
+          <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', border: '1px solid #F59E0B', borderRadius: 8, background: '#FFFBEB', color: '#92400E', fontSize: '0.9rem' }}>
+            <strong>Network check failed.</strong> We could not reach the video servers from this device, so the call may have trouble connecting - but the check itself can fail even when the meeting works. You can continue and try joining; if the video does not connect, check your connection and try again.
+            <div style={{ marginTop: '0.5rem' }}>
+              <button type="button" onClick={() => setProceedDespiteNetwork(true)} style={{ padding: '0.5rem 0.9rem', borderRadius: 6, border: 'none', background: '#D97706', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+                Continue anyway
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Sticky action bar: the Continue button stays pinned to the
             bottom of the phone screen while the checks scroll above it,

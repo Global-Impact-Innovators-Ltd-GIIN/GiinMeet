@@ -199,6 +199,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   onMinimizeToggle
 }) => {
   const sigChannelRef = useRef<any>(null);
+  // Fix Round 7 (#1): set once our own participant row has been seen
+  // in a participants poll - the self-row-gone check only fires after
+  // that, so a slow first load never ejects a fresh joiner.
+  const seenOwnRowRef = useRef(false);
+  // Fix Round 7 (#6): true while a lock persist is in flight, so the
+  // meeting-watcher's lock sync cannot undo the host's own toggle.
+  const lockWriteInFlightRef = useRef(false);
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   // Fix Round 6: the raw mic capture vs the track actually published.
@@ -475,6 +482,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // effect and the early token refresh, so both mint identically.
   const fetchLiveKitToken = async (roomSlug: string) => {
     const { data: { session } } = await supabase.auth.getSession();
+    // Fix Round 7 (#14): re-read the participant row id on every mint
+    // - the mount-time value can go stale if the row was deleted and
+    // re-created (kick + re-admit), and a stale id fails the refresh
+    // with ADMISSION_REQUIRED.
+    let freshRowId: string | undefined;
+    try { freshRowId = localStorage.getItem(`giin_participant_row_${meetingId}`) || undefined; } catch (e) { /* storage unavailable */ }
     const res = await fetch('/api/livekit/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -484,7 +497,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         userName: currentUser?.name || 'Guest',
         role: isAdmin ? 'HOST' : 'GUEST',
         accessToken: session?.access_token || undefined,
-        participantRowId: myParticipantRowId || undefined,
+        participantRowId: freshRowId || myParticipantRowId || undefined,
         meetingId
       })
     });
@@ -984,7 +997,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // Find (or create) the LiveKit room for this meeting, then request a
         // token for that room. The token route looks the room up by its slug —
         // a meeting ID on its own is not a room.
-        const videoRoom = await ensureMeetingRoom(meetingId, meetingTitle, currentUser?.id);
+        let videoRoom = await ensureMeetingRoom(meetingId, meetingTitle, currentUser?.id);
+        if (!videoRoom) {
+          // Fix Round 7 (#8): a guest can arrive before the host's room
+          // row exists, or room creation can fail transiently - retry
+          // once before giving up and falling back to peer-to-peer.
+          await new Promise(r => setTimeout(r, 1500));
+          videoRoom = await ensureMeetingRoom(meetingId, meetingTitle, currentUser?.id);
+        }
         if (!videoRoom) {
           throw new Error('ROOM_NOT_FOUND');
         }
@@ -1013,6 +1033,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (data.error === 'MEETING_ENDED') {
           setConnectionNotice('This meeting has ended. The invite link no longer works.');
           triggerToast('This meeting has ended.');
+          return;
+        }
+        if (data.error === 'MEETING_LOCKED') {
+          // Fix Round 7 (#6): a locked meeting is an honest stop, NOT a
+          // silent peer-to-peer downgrade - a locked-out guest must not
+          // end up in a P2P mesh with the room.
+          setConnectionNotice('This meeting is locked by the host - new participants cannot join right now. Wait for the host to unlock it, then press "Retry video server".');
+          triggerToast('This meeting is locked by the host.');
           return;
         }
         if (data.error || !data.token) {
@@ -1444,7 +1472,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (rowId) giinApi.removeParticipant(meetingId, rowId);
         else giinApi.removeParticipant(meetingId, myKey);
         const roomId = livekitRoomIdRef.current;
-        if (roomId) void giinApi.markParticipantLeft(roomId, myKey);
+        // Fix Round 7 (#2): mark LEFT with the token identity - the
+        // participant row id for guests - not the random per-visit key,
+        // which matches no row and left a ghost JOINED row behind.
+        if (roomId) void giinApi.markParticipantLeft(roomId, rowId || myParticipantRowId || myKey);
       } catch (e) { /* best effort */ }
     };
     // Tab close / refresh: unmount cleanup may not run, so mark LEFT here too.
@@ -2502,6 +2533,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (data) {
           setMeetingAdminId(data.admin_id || '');
           setInitialNotes(data.notes || '');
+          // Fix Round 7 (#6): the meeting lock is persisted on the
+          // meeting row now - sync the toggle from the server value on
+          // entry, so a host who re-opens the room sees the real state.
+          void giinApi.getMeetingLock(meetingId).then(locked => setIsMeetingLocked(locked)).catch(() => { /* best-effort: keep the last known value */ });
           const amHost = isHost || (currentUser?.id && (data.admin_id === currentUser.id || data.user_id === currentUser.id));
           if (amHost) {
             const hostPasscode = await giinApi.getMeetingPasscode(meetingId);
@@ -2572,6 +2607,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const { data } = await giinApi.getMeetingDetails(meetingId);
         if (data) applyMeetingRow(data);
       } catch (e) { /* transient: keep polling */ }
+      // Fix Round 7 (#6): the persisted lock is the truth for everyone
+      // in the room, even if a settings broadcast was missed. Skipped
+      // while the host's own lock write is in flight, so the poll
+      // cannot undo the toggle a moment after it was flipped.
+      if (!lockWriteInFlightRef.current) {
+        try {
+          const locked = await giinApi.getMeetingLock(meetingId);
+          setIsMeetingLocked(locked);
+        } catch (e) { /* best-effort: keep the last known value */ }
+      }
     };
     const channel = supabase
       .channel(`meeting-state-${meetingId}`)
@@ -2671,6 +2716,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       try {
         const list = await giinApi.getAdmittedParticipants(meetingId);
         if (list) {
+          // Fix Round 7 (#1): a kicked guest leaves even if the
+          // remove-participant broadcast was missed - their row is
+          // gone from this list. Only trust the check once our own row
+          // has been seen at least once, so a slow first load never
+          // ejects someone who just joined. Hosts never self-eject.
+          const ownRowSeen = list.some((p: any) => (myParticipantRowId && p.id === myParticipantRowId) || p.user_id === myKey || p.id === myKey);
+          if (ownRowSeen) {
+            seenOwnRowRef.current = true;
+          } else if (seenOwnRowRef.current && !isAdmin && !endedRef.current) {
+            alert('You have been removed from the meeting by the host.');
+            onEndMeeting();
+            return;
+          }
           const mapped: Participant[] = list
             .filter((p: any) => p.user_id !== currentUser?.id && p.id !== currentUser?.id)
             .map((p: any) => {
@@ -2770,7 +2828,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // WebRTC mesh signaling engine
   useEffect(() => {
-    if (!passcode || !isMediaInitialized) return; // wait until passcode and media load
+    // Fix Round 7 (#1): the channel is NOT gated on the meeting
+    // passcode any more. loadDetails sets passcode='' for every
+    // non-host, so guests unsubscribed from this channel and never
+    // heard mute/kick/settings/hand-raises - and P2P signalling could
+    // not reach them at all. The channel name is not a secret; control
+    // events are authenticated server-side instead (see
+    // /api/meetings/control and the `server` marker checks below).
+    if (!isMediaInitialized) return; // wait until media loads
 
     const channelSuffix = breakoutRoom ? `-breakout-${breakoutRoom}` : '';
     const sigChannel = supabase.channel(`sig-webrtc-${meetingId}${channelSuffix}`, {
@@ -3211,6 +3276,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'settings-update' }, (payload: any) => {
         const data = payload.payload;
+        // Fix Round 7 (#3): settings only arrive from the server now
+        // (POST /api/meetings/control, host-verified). A broadcast
+        // without the server marker is a forgery attempt - ignore it.
+        if (data.server !== true) return;
         if (data.isWaitingRoomEnabled !== undefined) {
           setIsWaitingRoomEnabled(data.isWaitingRoomEnabled);
         }
@@ -3233,7 +3302,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           }
         }
       })
-      .on('broadcast', { event: 'mute-all' }, () => {
+      .on('broadcast', { event: 'mute-all' }, (payload: any) => {
+        // Fix Round 7 (#3): only the server may mute everyone.
+        if (payload?.payload?.server !== true) return;
         if (!isAdmin) {
           setIsMuted(true);
           if (localAudioTrackRef.current) {
@@ -3244,7 +3315,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'mute-participant' }, (payload: any) => {
         const data = payload.payload;
-        if (data.targetUserId === myKey && !isAdmin) {
+        // Fix Round 7 (#3): only the server may mute a participant.
+        if (data.server !== true) return;
+        // Match by signalling key OR our own participant row id
+        // (guests have user_id NULL, so a row-id target is the only
+        // form that reaches them).
+        if ((data.targetUserId === myKey || (data.targetRowId && myParticipantRowId && data.targetRowId === myParticipantRowId)) && !isAdmin) {
           setIsMuted(true);
           if (localAudioTrackRef.current) {
             localAudioTrackRef.current.enabled = false;
@@ -3254,6 +3330,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'remove-participant' }, async (payload: any) => {
         const data = payload.payload;
+        // Fix Round 7 (#3): only the server may remove a participant.
+        if (data.server !== true) return;
         // Match by signalling key OR by our own meeting_participants row id
         // (guests have user_id NULL, so their myKey never matches a user id).
         if (data.targetUserId === myKey || (data.targetRowId && myParticipantRowId && data.targetRowId === myParticipantRowId)) {
@@ -3267,7 +3345,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           onEndMeeting();
         }
       })
-      .on('broadcast', { event: 'disable-video-all' }, () => {
+      .on('broadcast', { event: 'disable-video-all' }, (payload: any) => {
+        // Fix Round 7 (#3): only the server may disable everyone's video.
+        if (payload?.payload?.server !== true) return;
         if (!isAdmin) {
           setIsVideoOn(false);
           if (localVideoTrackRef.current) {
@@ -3545,7 +3625,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // Close all connections
       Object.keys(pcsRef.current).forEach(cleanupPeer);
     };
-  }, [passcode, stream, isMediaInitialized, breakoutRoom]);
+  }, [stream, isMediaInitialized, breakoutRoom]);
 
   // Breakout Countdown Timer Effect
   useEffect(() => {
@@ -3767,33 +3847,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
   }, [meetingId, canModerate]);
 
-  // Handle host admission action
+  // Handle host admission action - host-verified, server-side.
+  // Fix Round 7 (#4): the route flips the row and broadcasts the
+  // decision with a server marker. The old direct client-side row
+  // update (under a public UPDATE policy) let anyone admit themselves,
+  // and the decision broadcast had no sender check.
   const handleAdmitParticipant = async (participantId: string, status: 'Admitted' | 'Declined') => {
     try {
-      // 1. Broadcast the decision instantly over the channel
-      if (sigChannelRef.current) {
-        sigChannelRef.current.send({
-          type: 'broadcast',
-          event: 'waitroom-response',
-          payload: {
-            targetKey: participantId,
-            status: status
-          }
-        });
-        // Also send current settings so the new participant is in sync!
-        sigChannelRef.current.send({
-          type: 'broadcast',
-          event: 'settings-update',
-          payload: {
-            isWaitingRoomEnabled,
-            isChatLocked
-          }
-        });
+      const result = await giinApi.admitParticipant(meetingId, participantId, status, {
+        isWaitingRoomEnabled,
+        isChatLocked,
+        isMeetingLocked,
+        isScreenShareBlockedForGuests,
+        isMuteOnEntryEnabled
+      });
+      if (!result.rowUpdated) {
+        triggerToast('That guest is no longer in the waiting room - they may have left already.');
       }
-
-      // 2. Update the participant's status in the database (a no-op when the
-      // participant is a signalling-only peer with no database row).
-      await giinApi.updateParticipantStatus(participantId, status);
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not admit the participant - please try again.');
+      return;
+    }
+    try {
       
       if (status === 'Admitted') {
         setAdmittedKeys(prev => {
@@ -4320,8 +4395,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     });
   };
 
-  const handleToggleMeetingLock = (locked: boolean) => {
+  const handleToggleMeetingLock = async (locked: boolean) => {
     setIsMeetingLocked(locked);
+    // Fix Round 7 (#6): the lock is persisted on the meeting row now
+    // (POST /api/meetings/lock, host-verified). If the persist fails -
+    // e.g. the one-time giinmeet_meeting_lock.sql has not been run yet
+    // - the toggle must not pretend the meeting is locked.
+    lockWriteInFlightRef.current = true;
+    try {
+      await giinApi.setMeetingLock(meetingId, locked);
+    } catch (err: any) {
+      setIsMeetingLocked(!locked);
+      triggerToast(err?.message || 'Could not change the meeting lock - please try again.');
+      return;
+    } finally {
+      lockWriteInFlightRef.current = false;
+    }
     broadcastSettingsUpdate({
       isWaitingRoomEnabled,
       isChatLocked,
@@ -4353,42 +4442,45 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     });
   };
 
-  const broadcastSettingsUpdate = (settings: {
+  // Fix Round 7 (#3): settings go through the host-verified server
+  // route, which broadcasts them with a server marker - receivers
+  // ignore settings-update broadcasts that did not come from the
+  // server, so a participant can no longer push fake settings to the
+  // room. Never throws: a failed sync is toasted honestly instead.
+  const broadcastSettingsUpdate = async (settings: {
     isWaitingRoomEnabled: boolean;
     isChatLocked: boolean;
     isMeetingLocked: boolean;
     isScreenShareBlockedForGuests: boolean;
     isMuteOnEntryEnabled: boolean;
   }) => {
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'settings-update',
-        payload: settings
-      });
+    try {
+      await giinApi.controlMeeting(meetingId, 'settings-update', { settings });
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not sync the new settings to the room - guests may not see this change. Please try again.');
     }
   };
 
-  const handleMuteAll = () => {
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'mute-all',
-        payload: {}
-      });
+  const handleMuteAll = async () => {
+    // Fix Round 7 (#3): mute-all goes through the host-verified server
+    // route - the server broadcasts it with a server marker.
+    try {
+      await giinApi.controlMeeting(meetingId, 'mute-all');
       alert('Mute all request sent.');
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not mute everyone - please try again.');
     }
   };
 
 
-  const handleDisableVideoAll = () => {
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'disable-video-all',
-        payload: {}
-      });
+  const handleDisableVideoAll = async () => {
+    // Fix Round 7 (#3): disable-video-all goes through the host-verified
+    // server route - the server broadcasts it with a server marker.
+    try {
+      await giinApi.controlMeeting(meetingId, 'disable-video-all');
       alert('Disable video request sent.');
+    } catch (err: any) {
+      triggerToast(err?.message || "Could not disable everyone's video - please try again.");
     }
   };
 
@@ -6537,23 +6629,23 @@ Media encrypted in transit (DTLS-SRTP).`;
                 placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !currentUser ? "Sign in to send messages — guests can read chat" : "Send message to everyone..."} 
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                disabled={isChatLocked && !isAdmin}
+                disabled={(!currentUser || (isChatLocked && !isAdmin))}
                 style={{
                   flex: 1,
                   padding: '0.5rem 0.75rem',
                   borderRadius: '4px',
-                  backgroundColor: isChatLocked && !isAdmin ? '#1E293B' : '#090D16',
+                  backgroundColor: (!currentUser || (isChatLocked && !isAdmin)) ? '#1E293B' : '#090D16',
                   border: '1px solid #1E293B',
                   color: 'white',
                   fontSize: '0.85rem',
-                  cursor: isChatLocked && !isAdmin ? 'not-allowed' : 'text'
+                  cursor: (!currentUser || (isChatLocked && !isAdmin)) ? 'not-allowed' : 'text'
                 }}
               />
               <button 
                 type="submit" 
-                disabled={isChatLocked && !isAdmin}
+                disabled={(!currentUser || (isChatLocked && !isAdmin))}
                 style={{
-                  background: isChatLocked && !isAdmin ? '#475569' : 'var(--color-primary)',
+                  background: (!currentUser || (isChatLocked && !isAdmin)) ? '#475569' : 'var(--color-primary)',
                   border: 'none',
                   borderRadius: '4px',
                   width: '34px',
@@ -6562,8 +6654,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: 'white',
-                  cursor: isChatLocked && !isAdmin ? 'not-allowed' : 'pointer',
-                  opacity: isChatLocked && !isAdmin ? 0.6 : 1
+                  cursor: (!currentUser || (isChatLocked && !isAdmin)) ? 'not-allowed' : 'pointer',
+                  opacity: (!currentUser || (isChatLocked && !isAdmin)) ? 0.6 : 1
                 }}
               >
                 <SendHorizontal size={16} />
@@ -6704,9 +6796,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
                     {p.isSpeaking && !p.isMuted && <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', animation: 'pulse-ring 2s infinite' }} />}
                     
-                    {canModerate && p.userId && (
+                    {/* Fix Round 7 (#5): moderation is offered for guest
+                        rows too - guests have user_id NULL, so gating on
+                        p.userId hid every control from them. Actions that
+                        need a signed-in user (Make Admin) still check
+                        p.userId individually below. */}
+                    {canModerate && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        {isAdmin && (
+                        {isAdmin && p.userId && (
                           <button
                             onClick={() => handleDesignateAdmin(p.userId!)}
                             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
@@ -6722,7 +6819,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                               if (error) {
                                 triggerToast(`Could not make ${p.name} a co-host — please try again.`);
                               } else {
-                                setCoHostKeys(prev => new Set(prev).add(p.userId!).add(p.id));
+                                setCoHostKeys(prev => {
+                                  const next = new Set(prev);
+                                  next.add(p.id);
+                                  if (p.userId) next.add(p.userId);
+                                  return next;
+                                });
                                 triggerToast(`${p.name} is now a co-host and can admit people and mute participants.`);
                               }
                             }}
@@ -6735,13 +6837,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                         
                         {!p.isMuted && (
                           <button 
-                            onClick={() => {
-                              if (sigChannelRef.current) {
-                                sigChannelRef.current.send({
-                                  type: 'broadcast',
-                                  event: 'mute-participant',
-                                  payload: { targetUserId: p.userId }
-                                });
+                            onClick={async () => {
+                              // Fix Round 7 (#3): mute goes through the
+                              // host-verified server route. Guests are
+                              // targeted by row id - their user_id is NULL.
+                              try {
+                                await giinApi.controlMeeting(meetingId, 'mute-participant', { targetUserId: p.userId || undefined, targetRowId: p.id });
+                              } catch (err: any) {
+                                triggerToast(err?.message || `Could not mute ${p.name} - please try again.`);
                               }
                             }}
                             style={{
@@ -6764,22 +6867,19 @@ Media encrypted in transit (DTLS-SRTP).`;
                         <button
                           onClick={async () => {
                             if (confirm(`Are you sure you want to remove ${p.name} from the meeting?`)) {
-                              if (sigChannelRef.current) {
-                                sigChannelRef.current.send({
-                                  type: 'broadcast',
-                                  event: 'remove-participant',
-                                  // Both identifiers: the signalling key (signed-in users)
-                                  // and the database row id (the only one that works for guests,
-                                  // whose user_id is NULL).
-                                  payload: { targetUserId: p.userId, targetRowId: p.id }
-                                });
-                              }
-                              // Immediately clean up locally for instant UI feedback
-                              cleanupPeer(p.userId!);
-                              // Delete the database row by its row id (works for guests too)
-                              const removed = await giinApi.removeParticipant(meetingId, p.id);
-                              if (!removed.success) {
-                                triggerToast(`Could not remove ${p.name} from the meeting list — please try again.`);
+                              // Fix Round 7 (#1 + #3): the kick goes
+                              // through the host-verified server route -
+                              // the server deletes the row AND broadcasts
+                              // the removal with a server marker. The
+                              // guest leaves even if the broadcast is
+                              // missed (participants poll self-row-gone
+                              // check).
+                              try {
+                                await giinApi.controlMeeting(meetingId, 'remove-participant', { targetUserId: p.userId || undefined, targetRowId: p.id });
+                                // Immediately clean up locally for instant UI feedback
+                                cleanupPeer(p.userId || p.id);
+                              } catch (err: any) {
+                                triggerToast(err?.message || `Could not remove ${p.name} from the meeting - please try again.`);
                               }
                             }
                           }}

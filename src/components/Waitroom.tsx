@@ -55,7 +55,13 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           setLoading(false);
           return;
         }
-      } catch (e) { /* status check failed: fall through to normal flow */ }
+      } catch (e) {
+        // Fix Round 7 (#13): a failed status check must NOT admit
+        // anyone - fail CLOSED. The guest falls back to the normal
+        // waiting-room flow (the details effect below shows the form);
+        // if the host admits them there, they join as usual.
+        return;
+      }
       const savedTitle = localStorage.getItem(`admitted_meeting_title_${meetingId}`) || 'GIIN MEET Call';
       const savedName = localStorage.getItem(`admitted_meeting_name_${meetingId}`) || displayName || user?.name || 'Guest';
       onAdmitted(savedTitle, user?.id || guestKey, savedName);
@@ -264,7 +270,9 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     if (!name.trim()) return;
     setLoading(true);
     try {
-      if (meetingDetails?.require_waiting_room === false) {
+      // Fix Round 7 (#6): a locked meeting does NOT auto-admit.
+      const isLockedForJoin = meetingDetails?.require_waiting_room === false ? await giinApi.getMeetingLock(meetingId) : false;
+      if (meetingDetails?.require_waiting_room === false && !isLockedForJoin) {
         // Immediately admit — but still write the participant row, so the
         // host sees this guest in the room and host controls (kick) work.
         // The old code returned without a row, leaving the guest invisible

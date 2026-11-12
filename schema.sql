@@ -49,7 +49,11 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   passcode TEXT,
   admin_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-  require_waiting_room BOOLEAN DEFAULT true
+  require_waiting_room BOOLEAN DEFAULT true,
+  -- Fix Round 7 (#6): the persisted meeting lock. The host sets it via
+  -- POST /api/meetings/lock; the waiting room checks it before
+  -- auto-admitting and the token route refuses new mints while set.
+  is_locked BOOLEAN NOT NULL DEFAULT false
 );
 
 -- Enable RLS on Meetings
@@ -176,6 +180,7 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS passcode TEXT;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS admin_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS require_waiting_room BOOLEAN DEFAULT true;
+ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS is_locked BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'Member';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'UTC';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS location TEXT DEFAULT 'Remote';

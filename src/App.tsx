@@ -1427,6 +1427,12 @@ function App() {
           await giinApi.endMeeting(endedId);
         } catch (err) {
           console.error('Server end-meeting failed. The meeting was NOT marked ended:', err);
+          // Fix Round 7 (#7): an end-meeting failure must NOT silently
+          // send the host to the dashboard while the meeting keeps
+          // running. Stay in the room and say so plainly - the host
+          // retries from the meeting (End for everyone).
+          window.alert('Could not end the meeting - it is still running and you are still the host. Please check your connection and try ending it again from the meeting.');
+          return;
         }
       }
       // Clear this meeting's admission-bypass flags so a later visit

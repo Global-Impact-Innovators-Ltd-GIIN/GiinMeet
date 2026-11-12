@@ -111,6 +111,22 @@ export async function POST(req: NextRequest) {
       }, { status: 403 });
     }
 
+    // Fix Round 7 (#6): the persisted meeting lock. Best-effort
+    // single-column read - the column only exists once
+    // giinmeet_meeting_lock.sql has been run, so a missing column
+    // (or any read error) is treated as unlocked, never as a failure.
+    // Hosts and already-Admitted rows can still mint while locked; the
+    // two ADMISSION_REQUIRED gates below become MEETING_LOCKED instead.
+    let isMeetingLocked = false;
+    try {
+      const { data: lockRow } = await admin
+        .from('meetings')
+        .select('is_locked')
+        .eq('id', derivedMeetingId)
+        .maybeSingle();
+      isMeetingLocked = !!(lockRow as any)?.is_locked;
+    } catch (e) { /* lock column not set up yet: treat as unlocked */ }
+
     // The CURRENT host is admin_id (it moves on transfer); user_id
     // (creator) only counts when admin_id was never set. (Phase 6: the
     // old OR let a transferred-away host keep minting HOST tokens.)
@@ -150,6 +166,16 @@ export async function POST(req: NextRequest) {
           .eq('user_id', user.id)
           .maybeSingle();
         if (prowError || !prow || prow.status !== 'Admitted') {
+          // Fix Round 7 (#6): a locked meeting answers plainly instead
+          // of sending the guest back to a waiting room that can never
+          // admit them. (A row that IS Admitted passes the check above,
+          // so admitted guests are never locked out.)
+          if (isMeetingLocked) {
+            return NextResponse.json({
+              error: 'MEETING_LOCKED',
+              message: 'This meeting is locked by the host - new participants cannot join right now.',
+            }, { status: 403 });
+          }
           return NextResponse.json({
             error: 'ADMISSION_REQUIRED',
             message: 'You have not been admitted to this meeting yet. Please wait for the host.',
@@ -169,6 +195,17 @@ export async function POST(req: NextRequest) {
         .eq('meeting_id', derivedMeetingId)
         .maybeSingle();
       if (growError || !grow || grow.status !== 'Admitted') {
+        // Fix Round 7 (#6): a locked meeting answers plainly instead
+        // of sending the guest back to a waiting room that can never
+        // admit them. (A guest whose row IS Admitted reaches this
+        // point only after the check passes, so they are never locked
+        // out.)
+        if (isMeetingLocked) {
+          return NextResponse.json({
+            error: 'MEETING_LOCKED',
+            message: 'This meeting is locked by the host - new participants cannot join right now.',
+          }, { status: 403 });
+        }
         return NextResponse.json({
           error: 'ADMISSION_REQUIRED',
           message: 'You have not been admitted to this meeting yet. Please wait for the host.',
