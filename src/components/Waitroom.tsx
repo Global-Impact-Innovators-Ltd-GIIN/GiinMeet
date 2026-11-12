@@ -41,6 +41,28 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const [waitingStatus, setWaitingStatus] = useState<'Waiting' | 'Admitted' | 'Declined' | 'None'>('None');
   const [guestKey] = useState(() => user?.id || crypto.randomUUID());
 
+  // Round 9 (9A/9B/9C): a hard stop shown instead of the join form —
+  // removed by the host, link expired, or meeting ended.
+  const [blocked, setBlocked] = useState<null | 'removed' | 'expired' | 'ended'>(null);
+
+  // Round 9 (9B/9C): an ended meeting or an expired link stops here,
+  // with a plain message — before any join is attempted. Both reads
+  // are best-effort; the token route is the final gate either way.
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await giinApi.getMeetingDetails(meetingId);
+        if (data && (data as any).status === 'Completed') { setBlocked('ended'); setLoading(false); return; }
+      } catch (e) { /* fail closed below: the join still goes through the token route */ }
+      try {
+        const exp = await giinApi.getMeetingLinkExpiry(meetingId);
+        if (exp && exp.expiresAt && exp.mode !== 'on-end' && new Date(exp.expiresAt).getTime() < Date.now()) {
+          setBlocked('expired'); setLoading(false); return;
+        }
+      } catch (e) { /* no expiry on file: the link is live */ }
+    })();
+  }, [meetingId]);
+
   // If already admitted once, bypass waitroom completely — unless the
   // meeting has since ENDED, in which case the old link must not
   // re-enter (the flag is per-browser and was never cleared on the
@@ -51,9 +73,30 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       try {
         const { data } = await giinApi.getMeetingDetails(meetingId);
         if (data && (data as any).status === 'Completed') {
-          setErrorMsg('This meeting has ended. The invite link no longer works.');
+          setBlocked('ended');
           setLoading(false);
           return;
+        }
+        // Round 9 (9A): a removed guest must never slip through the
+        // admitted-flag bypass — their row is 'Removed', not 'Admitted'.
+        // A guest who left and came back gets the same row reactivated;
+        // a Waiting/Declined row falls back to the normal form (the
+        // token route refuses anyone who is not Admitted anyway).
+        const rowId = localStorage.getItem(`giin_participant_row_${meetingId}`);
+        if (rowId) {
+          const rowStatus = await giinApi.checkParticipantStatus(rowId);
+          if (rowStatus === 'Removed') { setBlocked('removed'); setLoading(false); return; }
+          if (rowStatus === 'Left') {
+            try {
+              const rejoined: any = await giinApi.joinMeetingRoom(meetingId, user?.name || displayName || 'Guest', user?.id, 'Participant', 'Admitted');
+              if (rejoined?.id) { try { localStorage.setItem(`giin_participant_row_${meetingId}`, rejoined.id); } catch (e) {} }
+            } catch (e: any) {
+              if (String(e?.message || '').startsWith('REMOVED')) { setBlocked('removed'); setLoading(false); return; }
+              // Any other failure: fall through to the normal waitroom.
+            }
+          } else if (rowStatus === 'Waiting' || rowStatus === 'Declined') {
+            return;
+          }
         }
       } catch (e) {
         // Fix Round 7 (#13): a failed status check must NOT admit
@@ -82,7 +125,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           // will never admit them (the token route rejects ended
           // meetings too, as a second line of defence).
           if ((data as any).status === 'Completed') {
-            setErrorMsg('This meeting has ended. The invite link no longer works.');
+            setBlocked('ended');
             setLoading(false);
             return;
           }
@@ -307,6 +350,8 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       }
     } catch (err: any) {
       console.error('Could not join the waiting room:', err);
+      // Round 9 (9A): the rejoin route refused a removed participant.
+      if (String(err?.message || '').startsWith('REMOVED')) { setBlocked('removed'); return; }
       setErrorMsg(`Could not join the waiting room: ${err?.message || 'please check your connection and try again.'}`);
     } finally {
       setLoading(false);
@@ -339,6 +384,31 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       <div className="flex-center" style={{ minHeight: '80vh', flexDirection: 'column', gap: '1rem' }}>
         <Loader2 size={40} className="mic-indicator" color="var(--color-primary)" style={{ animation: 'spin 1.5s linear infinite' }} />
         <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', fontWeight: 500 }}>{loadingMessage}</span>
+      </div>
+    );
+  }
+
+  if (blocked) {
+    const copy = blocked === 'removed'
+      ? { title: 'You were removed from this meeting', text: 'The host removed you. You can\'t rejoin with this link unless the host invites you back.' }
+      : blocked === 'expired'
+      ? { title: 'This meeting link has expired', text: 'This link is no longer valid. Ask the host for a new link.' }
+      : { title: 'This meeting has ended', text: 'The meeting has ended. The invite link no longer works.' };
+    return (
+      <div className="flex-center" style={{ minHeight: '80vh', padding: '2rem' }}>
+        <div className="glass-panel" style={{ maxWidth: '400px', width: '100%', padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div style={{ alignSelf: 'center', width: '56px', height: '56px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.1)', display: 'flex', alignItems: 'center', justifySelf: 'center', justifyContent: 'center', color: '#EF4444' }}>
+            <ShieldAlert size={28} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', marginBottom: '0.5rem' }}>{copy.title}</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{copy.text}</p>
+          </div>
+          <button onClick={onBack} className="premium-btn premium-btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
+            <ArrowLeft size={16} />
+            <span>Go Back</span>
+          </button>
+        </div>
       </div>
     );
   }

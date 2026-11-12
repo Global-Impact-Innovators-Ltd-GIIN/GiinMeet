@@ -1,15 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw } from 'lucide-react';
-import { buildJoinLink, generateMeetingPasscode, downloadICS, giinApi } from '../supabaseClient';
+import { buildJoinLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry } from '../supabaseClient';
 
 interface Meeting {
   id: string;
   title: string;
   time: string;
   duration: string;
-  status: 'Completed' | 'In Progress' | 'Scheduled';
+  // Round 9 (9A/9B/9C): 'Cancelled' is a real status (Round 8 cancel);
+  // link expiry is read lazily (the columns only exist once
+  // giinmeet_link_expiry.sql runs), so both fields are optional.
+  status: 'Completed' | 'In Progress' | 'Scheduled' | 'Cancelled';
   host: string;
   passcode?: string | null;
+  link_expires_at?: string | null;
+  link_expiry_mode?: string | null;
 }
 
 interface DashboardProps {
@@ -17,7 +22,7 @@ interface DashboardProps {
   onNavigate: (view: string) => void;
   onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean, passcode?: string | null) => void;
   meetingHistory: Meeting[];
-  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null }) => Promise<Meeting | null>;
+  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null } }) => Promise<Meeting | null>;
   onCancelMeeting?: (meetingId: string, title: string) => void;
   userName: string;
   userDomain?: string;
@@ -52,6 +57,108 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingTime, setMeetingTime] = useState('');
+
+  // Round 9 (9C/9D): link expiry + meeting templates.
+  const [scheduleLinkExpiry, setScheduleLinkExpiry] = useState('1m');
+  const [templateDuration, setTemplateDuration] = useState('40m limit');
+  const [linkExpiries, setLinkExpiries] = useState<Record<string, { mode: string; expiresAt: string | null }>>({});
+  const linkExpiryFetchedRef = useRef<Record<string, boolean>>({});
+
+  // Lazy expiry read for live/scheduled rows (best-effort — null
+  // until giinmeet_link_expiry.sql runs; the creation intent in
+  // localStorage is the fallback so the row still shows something).
+  useEffect(() => {
+    meetingHistory.filter((m) => m.status !== 'Completed').forEach(async (m) => {
+      if (linkExpiryFetchedRef.current[m.id]) return;
+      linkExpiryFetchedRef.current[m.id] = true;
+      const exp = await giinApi.getMeetingLinkExpiry(m.id);
+      if (exp) setLinkExpiries((prev) => ({ ...prev, [m.id]: exp }));
+    });
+  }, [meetingHistory]);
+
+  const linkExpiryFor = (meeting: Meeting) => {
+    const fromDb = linkExpiries[meeting.id];
+    if (fromDb) return fromDb;
+    try {
+      const raw = localStorage.getItem(`giin_link_expiry_${meeting.id}`);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return { mode: meeting.link_expiry_mode || (meeting.status === 'Scheduled' ? '1m' : 'on-end'), expiresAt: meeting.link_expires_at || null };
+  };
+  const linkExpiryLabel = (meeting: Meeting) => {
+    const e = linkExpiryFor(meeting);
+    return formatLinkExpiry(e.mode, e.expiresAt);
+  };
+  const linkExpiryMode = (meeting: Meeting) => linkExpiryFor(meeting).mode;
+
+  const handleLinkExpiryChange = async (meeting: Meeting, mode: string) => {
+    const expiresAt = computeLinkExpiry(mode, meeting.time);
+    try {
+      await giinApi.updateMeetingExpiry(meeting.id, mode, expiresAt);
+      setLinkExpiries((prev) => ({ ...prev, [meeting.id]: { mode, expiresAt } }));
+    } catch (err: any) {
+      window.alert('Could not save the link expiry — run giinmeet_link_expiry.sql in Supabase first, then try again.');
+    }
+  };
+
+  const applyScheduleTemplate = (kind: 'standup' | 'client' | 'interview') => {
+    if (kind === 'standup') {
+      setMeetingTitle('Team standup');
+      setTemplateDuration('30m');
+      setRequireWaitingRoom(true);
+      setSchedulePasscodeEnabled(false);
+    } else if (kind === 'client') {
+      setMeetingTitle('Client call');
+      setTemplateDuration('60m');
+      setRequireWaitingRoom(true);
+      if (!schedulePasscode) setSchedulePasscode(generateMeetingPasscode());
+      setSchedulePasscodeEnabled(true);
+    } else {
+      setMeetingTitle('Interview');
+      setTemplateDuration('60m');
+      setRequireWaitingRoom(true);
+      if (!schedulePasscode) setSchedulePasscode(generateMeetingPasscode());
+      setSchedulePasscodeEnabled(true);
+    }
+  };
+
+  const applyInstantTemplate = (kind: 'standup' | 'client' | 'interview') => {
+    if (kind === 'standup') {
+      setInstantTitle('Team standup');
+      setInstantRequireWaitingRoom(true);
+      setInstantPasscodeEnabled(false);
+    } else if (kind === 'client') {
+      setInstantTitle('Client call');
+      setInstantRequireWaitingRoom(true);
+      if (!instantPasscode) setInstantPasscode(generateMeetingPasscode());
+      setInstantPasscodeEnabled(true);
+    } else {
+      setInstantTitle('Interview');
+      setInstantRequireWaitingRoom(true);
+      if (!instantPasscode) setInstantPasscode(generateMeetingPasscode());
+      setInstantPasscodeEnabled(true);
+    }
+  };
+
+  const downloadAttendanceCsv = (meeting: Meeting, rows: { name: string; joinedAt: number; leftAt: number | null }[]) => {
+    const esc = (v: string) => '"' + String(v).replace(/"/g, '""') + '"';
+    const fmt = (t: number) => new Date(t).toLocaleString();
+    const dur = (a: number, b: number | null) => {
+      const mins = Math.max(0, Math.round(((b || Date.now()) - a) / 60000));
+      return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+    };
+    const lines = ['Name,Joined,Left,Duration'];
+    rows.forEach((r) => lines.push([esc(r.name), esc(fmt(r.joinedAt)), esc(r.leftAt ? fmt(r.leftAt) : 'Still in room at end'), esc(dur(r.joinedAt, r.leftAt))].join(',')));
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `attendance-${meeting.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${meeting.id.slice(0, 8)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
   const [meetingCode, setMeetingCode] = useState('');
   const [joinError, setJoinError] = useState('');
   // Recurring meetings: a series is real separate meetings (one per
@@ -92,9 +199,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const saved = await onAddMeeting({
         title: meetingTitle,
         time: t.toISOString(),
-        duration: '40m limit',
+        duration: templateDuration,
         requireWaitingRoom,
-        passcode
+        passcode,
+        linkExpiry: { mode: scheduleLinkExpiry, expiresAt: computeLinkExpiry(scheduleLinkExpiry, t.toISOString()) }
       });
       if (saved) {
         created++;
@@ -345,6 +453,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         }
                       })()} &bull; {meeting.duration}
                     </p>
+                    {meeting.status !== 'Completed' && (
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.25rem 0 0', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <span>{linkExpiryLabel(meeting)}</span>
+                        <select
+                          value={linkExpiryMode(meeting)}
+                          onChange={(e) => handleLinkExpiryChange(meeting, e.target.value)}
+                          title="Change when this meeting link expires"
+                          style={{ fontSize: '0.75rem', padding: '0.15rem 0.3rem', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-main)' }}
+                        >
+                          {LINK_EXPIRY_OPTIONS.map((o) => (
+                            <option key={o.mode} value={o.mode}>{o.label}</option>
+                          ))}
+                        </select>
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -358,11 +481,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   
                   {meeting.status === 'In Progress' ? (
                     <button 
-                      onClick={() => onStartMeeting(meeting.title, undefined, true, meeting.id)}
+                      onClick={() => { try { localStorage.removeItem(`giin_left_meeting_${meeting.id}`); } catch (e) {} onStartMeeting(meeting.title, undefined, true, meeting.id); }}
                       className="premium-btn premium-btn-accent" 
                       style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', borderRadius: '4px' }}
                     >
-                      Join Now
+                      {(() => { try { return localStorage.getItem(`giin_left_meeting_${meeting.id}`) ? 'Rejoin' : 'Join Now'; } catch (e) { return 'Join Now'; } })()}
                     </button>
                   ) : meeting.status === 'Scheduled' ? (
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -459,6 +582,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             </div>
                           ))}
                           <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Recorded in this browser during the meeting, not a server log.</span>
+                          <button
+                            type="button"
+                            className="premium-btn premium-btn-secondary"
+                            style={{ alignSelf: 'flex-start', padding: '0.35rem 0.75rem', fontSize: '0.75rem', marginTop: '0.25rem' }}
+                            onClick={() => downloadAttendanceCsv(meeting, rows)}
+                          >
+                            Download CSV
+                          </button>
                         </div>
                       );
                     } catch (e) {
@@ -606,6 +737,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <h3 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>Schedule a Meeting</h3>
             
             <form onSubmit={handleScheduleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Round 9 (9D): one-click templates. */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>Start from a template</span>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('standup')}>Team standup</button>
+                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('client')}>Client call</button>
+                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('interview')}>Interview</button>
+                </div>
+              </div>
+              {/* Round 9 (9C): link expiry — a duration counts from the meeting date. */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Meeting link expires</label>
+                <select value={scheduleLinkExpiry} onChange={(e) => setScheduleLinkExpiry(e.target.value)} className="premium-input" style={{ height: '44px' }}>
+                  {LINK_EXPIRY_OPTIONS.map((o) => (
+                    <option key={o.mode} value={o.mode}>{o.label}</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>A duration counts from the meeting date. "Expires when the meeting ends" is the default for instant meetings.</span>
+              </div>
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Meeting Title</label>
                 <input 
@@ -1229,6 +1379,16 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </div>
                 )}
               </div>
+
+                {/* Round 9 (9D): one-click templates (instant meetings always expire when they end). */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>Start from a template</span>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('standup')}>Team standup</button>
+                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('client')}>Client call</button>
+                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('interview')}>Interview</button>
+                  </div>
+                </div>
 
                 <button 
                   onClick={() => {

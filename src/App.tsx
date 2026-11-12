@@ -27,9 +27,14 @@ interface Meeting {
   title: string;
   time: string;
   duration: string;
-  status: 'Completed' | 'In Progress' | 'Scheduled';
+  // Round 9 (9A/9B/9C): 'Cancelled' is a real status (Round 8 cancel);
+  // link expiry is read lazily (the columns only exist once
+  // giinmeet_link_expiry.sql runs), so both fields are optional.
+  status: 'Completed' | 'In Progress' | 'Scheduled' | 'Cancelled';
   host: string;
   passcode?: string;
+  link_expires_at?: string | null;
+  link_expiry_mode?: string | null;
 }
 
 const applyFont = (fontFamilyHeading: string, fontFamilyBody: string) => {
@@ -1326,7 +1331,10 @@ function App() {
             status: 'In Progress',
             host: user.name || 'You',
             require_waiting_room: requireWaitingRoom,
-            passcode
+            passcode,
+            // Round 9 (9C): instant meetings expire when they end.
+            link_expiry_mode: 'on-end',
+            link_expires_at: null
           };
           saved = await giinApi.createMeeting(newDbMeet);
         }
@@ -1485,6 +1493,14 @@ function App() {
           return;
         }
       }
+      // Round 9 (9A): leaving a LIVE meeting (not ending it) leaves a
+      // marker so the dashboard shows "Rejoin" instead of "Join Now".
+      // Ending it clears the marker — an ended meeting shows no join
+      // action at all.
+      try {
+        if (isLeaverHost && !skipServerEnd) localStorage.removeItem(`giin_left_meeting_${endedId}`);
+        else localStorage.setItem(`giin_left_meeting_${endedId}`, String(Date.now()));
+      } catch (e) {}
       // Clear this meeting's admission-bypass flags so a later visit
       // to the same meeting ID does not skip the passcode and waiting
       // room forever (the flag is per-meeting and was never cleared).
@@ -1512,6 +1528,30 @@ function App() {
       setCurrentView('dashboard');
     }
   };
+
+  // Round 9 (9B): live-sync the dashboard history when any meeting row
+  // changes — another tab ended it, the host admitted someone, the last
+  // person left and the leave route completed it. Realtime only fires
+  // when the table is in the publication; the focus/visibility/60s
+  // refetch from Round 8 is the fallback, so a missing publication
+  // degrades silently. Debounced to one refetch per 5 seconds.
+  const lastHistorySyncRef = useRef(0);
+  useEffect(() => {
+    const channel = supabase
+      .channel('meetings-history-sync')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'meetings' },
+        () => {
+          const now = Date.now();
+          if (now - lastHistorySyncRef.current < 5000) return;
+          lastHistorySyncRef.current = now;
+          void refreshMeetingHistory();
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
 
   const handleAcceptCall = async () => {
     if (incomingCall) {
@@ -1644,13 +1684,13 @@ function App() {
     setMeetingHistory(prev => prev.filter(m => m.id !== meetingId));
   };
 
-  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null }) => {
+  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null } }) => {
     if (!user || !user.id) {
       window.alert('Sign in to schedule a meeting.');
       return null;
     }
     try {
-      const newDbMeet = {
+      const newDbMeet: any = {
         user_id: user.id,
         title: meet.title,
         time: meet.time,
@@ -1660,6 +1700,14 @@ function App() {
         require_waiting_room: meet.requireWaitingRoom ?? true,
         passcode: meet.passcode
       };
+      // Round 9 (9C): the expiry travels with the meeting. createMeeting
+      // probe-gates the columns (they only exist once
+      // giinmeet_link_expiry.sql runs) and keeps the choice in
+      // localStorage until then.
+      if (meet.linkExpiry) {
+        newDbMeet.link_expiry_mode = meet.linkExpiry.mode;
+        newDbMeet.link_expires_at = meet.linkExpiry.expiresAt;
+      }
       const savedMeet = await giinApi.createMeeting(newDbMeet);
 
       const finalMeet: Meeting = {
@@ -1669,7 +1717,9 @@ function App() {
         duration: savedMeet.duration || '40m limit',
         status: 'Scheduled',
         host: savedMeet.host || 'You',
-        passcode: savedMeet.passcode
+        passcode: savedMeet.passcode,
+        link_expires_at: savedMeet.link_expires_at || meet.linkExpiry?.expiresAt || null,
+        link_expiry_mode: savedMeet.link_expiry_mode || meet.linkExpiry?.mode || 'on-end'
       };
 
       setMeetingHistory(prev => [finalMeet, ...prev]);

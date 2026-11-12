@@ -144,17 +144,34 @@ export async function POST(req: NextRequest) {
       if (!key) {
         return NextResponse.json({ error: 'BAD_REQUEST', message: 'Choose a participant to remove.' }, { status: 400 });
       }
-      const { data: deleted, error: deleteError } = await admin
+      // Round 9 (9A): a removed participant keeps their row with status
+      // 'Removed' — it is the marker that blocks rejoin (the token route
+      // refuses non-Admitted rows, and the waitroom shows "You were
+      // removed"). The status value needs giinmeet_round9_statuses.sql;
+      // until it runs, the CHECK constraint rejects the update and the
+      // route falls back to the old delete (the room still works, but a
+      // removed guest could rejoin with the link until the SQL runs).
+      const { data: removed, error: removeError } = await admin
         .from('meeting_participants')
-        .delete()
+        .update({ status: 'Removed', updated_at: new Date().toISOString() })
         .eq('meeting_id', meetingId)
         .or('id.eq.' + key + ',user_id.eq.' + key)
         .select('id');
-      if (deleteError) {
-        console.error('[Control API] Failed to delete participant row:', deleteError);
-        return NextResponse.json({ error: 'DB_ERROR', message: 'Could not remove the participant from the meeting.' }, { status: 500 });
+      if (removeError) {
+        const { data: deleted, error: deleteError } = await admin
+          .from('meeting_participants')
+          .delete()
+          .eq('meeting_id', meetingId)
+          .or('id.eq.' + key + ',user_id.eq.' + key)
+          .select('id');
+        if (deleteError) {
+          console.error('[Control API] Failed to remove participant row:', deleteError);
+          return NextResponse.json({ error: 'DB_ERROR', message: 'Could not remove the participant from the meeting.' }, { status: 500 });
+        }
+        rowDeleted = (deleted || []).length > 0;
+      } else {
+        rowDeleted = (removed || []).length > 0;
       }
-      rowDeleted = (deleted || []).length > 0;
     }
 
     // Broadcast the control event with the server marker. Receivers

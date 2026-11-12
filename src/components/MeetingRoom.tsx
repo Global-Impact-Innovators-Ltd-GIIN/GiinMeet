@@ -350,7 +350,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // "meeting ended" screen; endedRef makes entering it idempotent so
   // the broadcast, the Realtime watcher and the poll cannot end the
   // meeting twice or fight the reconnect logic.
-  const [endedState, setEndedState] = useState<{ reason: 'host-ended' | 'you-ended'; detail?: string } | null>(null);
+  // Round 9 (9A): 'removed' is a kicked participant; durationSeconds /
+  // attendeeCount are captured when the room ends, for the ended screen.
+  const [endedState, setEndedState] = useState<{ reason: 'host-ended' | 'you-ended' | 'removed'; detail?: string; durationSeconds?: number; attendeeCount?: number } | null>(null);
   const [endError, setEndError] = useState<string>('');
   const [endingInProgress, setEndingInProgress] = useState(false);
   const endedRef = useRef(false);
@@ -449,9 +451,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // fire, but the meeting only ends once. Audio capture/publish code is
   // untouched — this only disconnects the room and closes peer links;
   // track stopping happens on unmount as before.
-  const enterEndedState = useCallback((reason: 'host-ended' | 'you-ended', detail?: string) => {
+  const enterEndedState = useCallback((reason: 'host-ended' | 'you-ended' | 'removed', detail?: string) => {
     if (endedRef.current) return;
     endedRef.current = true;
+    // Round 9 (9A): capture the meeting length and headcount now — the
+    // participant list is torn down with the room, so it cannot be read
+    // later when the ended screen renders.
+    const endedDurationSeconds = elapsedSecondsRef.current;
+    const endedAttendeeCount = participantsRef.current.length + 1;
     try {
       if (livekitRoomRef.current) livekitRoomRef.current.disconnect();
     } catch (e) { /* already gone */ }
@@ -462,7 +469,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       });
     } catch (e) { /* already gone */ }
     pcsRef.current = {};
-    setEndedState({ reason, detail });
+    setEndedState({ reason, detail, durationSeconds: endedDurationSeconds, attendeeCount: endedAttendeeCount });
   }, []);
 
   // Our server-derived role for this meeting (HOST / COHOST / GUEST).
@@ -657,12 +664,30 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Meeting timer, layout and pinning, unread chat badge.
   const [meetingJoinedAt] = useState(() => Date.now());
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  // Round 9 (9A): ref mirror of the timer, so enterEndedState (a
+  // useCallback with empty deps) can read the meeting length at end.
+  const elapsedSecondsRef = useRef(0);
   const [layoutMode, setLayoutMode] = useState<'grid' | 'speaker'>('grid');
   const [pinnedKey, setPinnedKey] = useState<string | null>(null);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   // A ref mirror of activePanel so realtime handlers (which close over the
   // first render) can tell whether the chat panel is open right now.
   const activePanelRef = useRef(activePanel);
+  // Round 9 (9A): participants the host removed, kept so the host can
+  // re-invite them. Their meeting_participants row stays with status
+  // 'Removed' (the rejoin block), so it is fetched separately from the
+  // admitted list.
+  const [removedParticipants, setRemovedParticipants] = useState<any[]>([]);
+  const loadRemovedParticipants = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      const list = await giinApi.getRemovedParticipants(meetingId);
+      setRemovedParticipants(list || []);
+    } catch (e) { /* best effort */ }
+  }, [isAdmin, meetingId]);
+  useEffect(() => {
+    if (activePanel === 'participants') loadRemovedParticipants();
+  }, [activePanel, loadRemovedParticipants]);
   const [admittedKeys, setAdmittedKeys] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem(`admitted_keys_${meetingId}`);
@@ -1102,6 +1127,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
           return;
         }
+        if (data.error === 'LINK_EXPIRED') {
+          // Round 9 (9C): the link's time is up. Plain words, no jargon,
+          // no toast — the centred card is the message.
+          setConnectionNotice('This meeting link has expired. Ask the host for a new link.');
+          return;
+        }
         if (data.error || !data.token) {
           throw new Error(data.message || data.error || 'Could not get a video token.');
         }
@@ -1523,6 +1554,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (!map[k]) map[k] = { name: p.name, joinedAt: now, leftAt: null };
         else map[k].name = p.name;
       });
+      // Round 9 (9D): the host's own attendance — the participants list
+      // excludes self, so without this the host never appears in their
+      // own attendance report.
+      present.add(myKey);
+      if (!map[myKey]) map[myKey] = { name: currentUser?.name || 'You', joinedAt: meetingJoinedAt, leftAt: null };
+      else map[myKey].name = currentUser?.name || 'You';
       Object.keys(map).forEach((k) => {
         if (!present.has(k) && !map[k].leftAt) map[k].leftAt = now;
       });
@@ -1533,7 +1570,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Meeting timer: elapsed time since this client joined the room.
   useEffect(() => {
     const timer = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - meetingJoinedAt) / 1000));
+      const secs = Math.floor((Date.now() - meetingJoinedAt) / 1000);
+      elapsedSecondsRef.current = secs;
+      setElapsedSeconds(secs);
     }, 1000);
     return () => clearInterval(timer);
   }, [meetingJoinedAt]);
@@ -1566,8 +1605,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const markLeft = () => {
       try {
         const rowId = localStorage.getItem(`giin_participant_row_${meetingId}`);
-        if (rowId) giinApi.removeParticipant(meetingId, rowId);
-        else giinApi.removeParticipant(meetingId, myKey);
+        // Round 9 (9A/9B): leave server-side — the row becomes 'Left'
+        // (it persists for rejoin) and the meeting completes when the
+        // last person leaves. The old removeParticipant deleted the row.
+        void giinApi.leaveMeeting(meetingId, rowId || undefined);
+        // Round 9 (9D): close our own attendance record in this browser.
+        try {
+          const attKey = `giin_attendance_${meetingId}`;
+          const attRaw = localStorage.getItem(attKey);
+          if (attRaw) {
+            const attMap = JSON.parse(attRaw);
+            if (attMap[myKey] && !attMap[myKey].leftAt) {
+              attMap[myKey].leftAt = Date.now();
+              localStorage.setItem(attKey, JSON.stringify(attMap));
+            }
+          }
+        } catch (e) { /* attendance is best-effort */ }
         const roomId = livekitRoomIdRef.current;
         // Fix Round 7 (#2): mark LEFT with the token identity - the
         // participant row id for guests - not the random per-visit key,
@@ -2843,8 +2896,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (ownRowSeen) {
             seenOwnRowRef.current = true;
           } else if (seenOwnRowRef.current && !isAdmin && !endedRef.current) {
-            alert('You have been removed from the meeting by the host.');
-            onEndMeeting();
+            // Round 9 (9A): our row left the admitted list — the host
+            // removed us (status 'Removed'). No alert: the removed
+            // screen IS the message.
+            enterEndedState('removed');
             return;
           }
           const mapped: Participant[] = list
@@ -3453,14 +3508,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // Match by signalling key OR by our own meeting_participants row id
         // (guests have user_id NULL, so their myKey never matches a user id).
         if (data.targetUserId === myKey || (data.targetRowId && myParticipantRowId && data.targetRowId === myParticipantRowId)) {
-          alert('You have been removed from the meeting by the host.');
-          // Delete our own row from the database (allowed by RLS).
-          try {
-            await giinApi.removeParticipant(meetingId, myParticipantRowId || myKey);
-          } catch (e) {
-            console.warn('Failed to delete own participant row on kick:', e);
-          }
-          onEndMeeting();
+          // Round 9 (9A): the server kept our row as 'Removed' (the
+          // rejoin block) — do NOT delete it, and do not alert: the
+          // removed screen IS the message.
+          enterEndedState('removed');
         }
       })
       .on('broadcast', { event: 'disable-video-all' }, (payload: any) => {
@@ -5103,23 +5154,46 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <PhoneOff size={28} color="#EF4444" />
         </div>
-        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>This meeting has ended</h2>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>{endedState.reason === 'removed' ? 'You were removed from this meeting' : 'This meeting has ended'}</h2>
         <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px', lineHeight: 1.5 }}>
-          {endedState.reason === 'you-ended'
+          {endedState.reason === 'removed'
+            ? 'The host removed you from this meeting. You can\'t rejoin with this link unless the host invites you back.'
+            : endedState.reason === 'you-ended'
             ? 'You ended the meeting for everyone. All participants have been disconnected and the invite link no longer works.'
             : 'The host has ended this meeting. You have been disconnected and the invite link no longer works.'}
         </p>
+        {endedState.reason !== 'removed' && endedState.durationSeconds !== undefined && (
+          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '420px' }}>
+            Meeting lasted {formatElapsedTime(endedState.durationSeconds)}{endedState.attendeeCount !== undefined ? ` · ${endedState.attendeeCount} ${endedState.attendeeCount === 1 ? 'person' : 'people'} attended` : ''}
+          </p>
+        )}
         <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '420px' }}>{meetingTitle}</p>
         {endedState.detail && (
           <p style={{ margin: 0, fontSize: '0.85rem', color: '#FCA5A5', maxWidth: '420px', lineHeight: 1.5 }}>{endedState.detail}</p>
         )}
-        <button
-          onClick={() => onEndMeeting(true)}
-          className="premium-btn premium-btn-primary"
-          style={{ marginTop: '0.5rem', height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
-        >
-          Return to dashboard
-        </button>
+        {currentUser?.email === 'guest@phone.giinmeet.com' ? (
+          <>
+            {endedState.reason !== 'removed' && (
+              <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px' }}>Thanks for joining.</p>
+            )}
+            <button
+              onClick={() => { try { window.close(); } catch (e) { /* tab was not opened by script */ } }}
+              className="premium-btn premium-btn-primary"
+              style={{ marginTop: '0.5rem', height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
+            >
+              Close this tab
+            </button>
+            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '420px' }}>If the tab stays open, you can close it yourself.</p>
+          </>
+        ) : (
+          <button
+            onClick={() => onEndMeeting(true)}
+            className="premium-btn premium-btn-primary"
+            style={{ marginTop: '0.5rem', height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
+          >
+            Back to dashboard
+          </button>
+        )}
       </div>
     );
   }
@@ -7061,6 +7135,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                                 await giinApi.controlMeeting(meetingId, 'remove-participant', { targetUserId: p.userId || undefined, targetRowId: p.id });
                                 // Immediately clean up locally for instant UI feedback
                                 cleanupPeer(p.userId || p.id);
+                                // Round 9 (9A): the person now shows in
+                                // the Removed section below, with Re-invite.
+                                loadRemovedParticipants();
                               } catch (err: any) {
                                 triggerToast(err?.message || `Could not remove ${p.name} from the meeting - please try again.`);
                               } finally {
@@ -7092,6 +7169,34 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </div>
                 </div>
               ))}
+
+              {/* Round 9 (9A): removed participants, with a host re-invite. */}
+              {isAdmin && removedParticipants.length > 0 && (
+                <div style={{ borderTop: '1px solid #1E293B', paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#FCA5A5' }}>Removed ({removedParticipants.length})</span>
+                  {removedParticipants.map((rp: any) => (
+                    <div key={rp.id} className="flex-between" style={{ flexWrap: 'wrap', rowGap: '0.35rem' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'white', fontWeight: 600 }}>{rp.name}</span>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await giinApi.admitParticipant(meetingId, rp.id, 'Admitted');
+                            triggerToast(`${rp.name} was invited back — they can rejoin with the same link.`);
+                            loadRemovedParticipants();
+                          } catch (err: any) {
+                            triggerToast(err?.message || `Could not invite ${rp.name} back — please try again.`);
+                          }
+                        }}
+                        style={{ border: 'none', background: 'rgba(16, 185, 129, 0.12)', cursor: 'pointer', color: '#10B981', fontSize: '0.7rem', fontWeight: 600, padding: '3px 8px', borderRadius: '4px' }}
+                        title="Invite this person back into the meeting"
+                      >
+                        Re-invite
+                      </button>
+                    </div>
+                  ))}
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Removed people cannot rejoin with the link until you invite them back.</span>
+                </div>
+              )}
             </div>
           </div>
         )}

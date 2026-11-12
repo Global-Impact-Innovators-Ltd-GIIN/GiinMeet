@@ -111,6 +111,27 @@ export async function POST(req: NextRequest) {
       }, { status: 403 });
     }
 
+    // Round 9 (9C): link expiry, enforced server-side. Best-effort
+    // read — the columns only exist once giinmeet_link_expiry.sql has
+    // been run, so a missing column means "no expiry set", never a
+    // failure. Mode 'on-end' has no date (the Completed check above
+    // covers it); a duration mode with a past date refuses the token.
+    try {
+      const { data: expRow } = await admin
+        .from('meetings')
+        .select('link_expires_at,link_expiry_mode')
+        .eq('id', derivedMeetingId)
+        .maybeSingle();
+      const expMode = (expRow as any)?.link_expiry_mode as string | undefined;
+      const expAt = (expRow as any)?.link_expires_at as string | undefined;
+      if (expMode && expMode !== 'on-end' && expAt && new Date(expAt).getTime() < Date.now()) {
+        return NextResponse.json({
+          error: 'LINK_EXPIRED',
+          message: 'This meeting link has expired.',
+        }, { status: 403 });
+      }
+    } catch (e) { /* link expiry not set up yet: the link is live */ }
+
     // Fix Round 7 (#6): the persisted meeting lock. Best-effort
     // single-column read - the column only exists once
     // giinmeet_meeting_lock.sql has been run, so a missing column

@@ -73,6 +73,49 @@ export const buildJoinLink = (meetingId: string, passcode?: string | null): stri
 // must use this list instead of select('*') — a select('*') would fail
 // once the column is revoked. The passcode is only ever read server-side
 // (verify-passcode route, host-only passcode route).
+// Round 9 (9C): meeting link expiry. Modes: 'on-end' (the link dies when
+// the meeting ends — the default for instant meetings) or '1m' / '2m' /
+// '3m' / '6m' / '12m' (the link lives that many months from the
+// meeting's scheduled time). The columns only exist once
+// giinmeet_link_expiry.sql has been run — the probe below keeps every
+// read/write working until then.
+export const LINK_EXPIRY_OPTIONS = [
+  { mode: 'on-end', label: 'Expires when the meeting ends' },
+  { mode: '1m', label: '1 month' },
+  { mode: '2m', label: '2 months' },
+  { mode: '3m', label: '3 months' },
+  { mode: '6m', label: '6 months' },
+  { mode: '12m', label: '12 months' },
+];
+
+export const computeLinkExpiry = (mode: string, fromTime: string): string | null => {
+  if (!mode || mode === 'on-end') return null;
+  const months = parseInt(mode, 10) || 1;
+  const d = new Date(fromTime);
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString();
+};
+
+export const formatLinkExpiry = (mode?: string | null, expiresAt?: string | null): string => {
+  if (!mode || mode === 'on-end') return 'Expires when the meeting ends';
+  if (expiresAt) return 'Link expires ' + new Date(expiresAt).toLocaleDateString();
+  return 'Link expires in ' + mode;
+};
+
+// Probe once per session whether the link-expiry columns exist. A missing
+// column errors the select, which is the signal — never a failure.
+let linkExpirySupportedCache: boolean | null = null;
+export async function probeLinkExpirySupport(): Promise<boolean> {
+  if (linkExpirySupportedCache !== null) return linkExpirySupportedCache;
+  try {
+    const { error } = await supabase.from('meetings').select('link_expires_at').limit(1);
+    linkExpirySupportedCache = !error;
+  } catch (e) {
+    linkExpirySupportedCache = false;
+  }
+  return linkExpirySupportedCache;
+}
+
 export const MEETING_PUBLIC_COLUMNS =
   'id,user_id,title,time,duration,status,host,notes,action_items_count,created_at,admin_id,require_waiting_room';
 
@@ -358,6 +401,74 @@ export const giinApi = {
   // Fetch all meetings linked to user_id. Throws when the database cannot be
   // reached — the caller keeps any previously loaded list and shows the error
   // instead of silently inventing meetings.
+  // Round 9 (9B): leave a meeting server-side (marks the row 'Left' and
+  // completes the meeting when the last person leaves). Best-effort and
+  // never throws — the tab may be closing when this runs.
+  leaveMeeting: async (meetingId: string, participantRowId?: string) => {
+    try {
+      let accessToken: string | undefined;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token;
+      } catch (e) { /* guests have no session */ }
+      await fetch('/api/meetings/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, participantRowId, accessToken }),
+        keepalive: true,
+      });
+    } catch (e) { /* leaving must never fail loudly */ }
+  },
+
+  // Round 9 (9A): participants the host removed, so the host can
+  // re-invite them. Empty when the statuses SQL has not run yet (no
+  // row can hold 'Removed' until then).
+  getRemovedParticipants: async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meeting_participants')
+        .select('*')
+        .eq('meeting_id', meetingId)
+        .eq('status', 'Removed')
+        .order('updated_at', { ascending: false });
+      if (error) return [];
+      return data || [];
+    } catch (err: any) {
+      return [];
+    }
+  },
+
+  // Round 9 (9C): a meeting's link expiry, best-effort. Null when the
+  // columns do not exist yet (giinmeet_link_expiry.sql not run) — the
+  // link is then treated as 'on-end' (live until the meeting ends).
+  getMeetingLinkExpiry: async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meetings')
+        .select('link_expires_at,link_expiry_mode')
+        .eq('id', meetingId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return {
+        mode: (data as any).link_expiry_mode || 'on-end',
+        expiresAt: (data as any).link_expires_at || null,
+      };
+    } catch (e) {
+      return null;
+    }
+  },
+
+  // Round 9 (9C): change a meeting's link expiry (host only — RLS
+  // requires the caller to own the meeting). Throws when the columns
+  // do not exist yet, so the caller can say so honestly.
+  updateMeetingExpiry: async (meetingId: string, mode: string, expiresAt: string | null) => {
+    const { error } = await supabase
+      .from('meetings')
+      .update({ link_expiry_mode: mode, link_expires_at: expiresAt })
+      .eq('id', meetingId);
+    if (error) throw new Error(`Could not save the link expiry: ${error.message}`);
+  },
+
   getMeetings: async (userId: string) => {
     const { data, error } = await supabase
       .from('meetings')
@@ -374,7 +485,7 @@ export const giinApi = {
   // best-effort here (it is retried when the meeting is joined); if it
   // fails, a clear warning is logged and the video call will surface the
   // missing room instead of silently dropping to a peer-to-peer call.
-  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null }) => {
+  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null }) => {
     // Generate UUID on the client side to avoid race conditions and mismatches
     const meetingId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -394,6 +505,24 @@ export const giinApi = {
       admin_id: meeting.user_id,
       require_waiting_room: requireWaitingRoom
     };
+
+    // Round 9 (9C): link expiry. The spread above may have carried the
+    // expiry fields in — strip them, then re-add only when the probe
+    // says the columns exist, so the insert never fails on an unknown
+    // column. When the columns do not exist yet, the chosen expiry is
+    // kept in localStorage so the dashboard can still show it.
+    delete payload.link_expiry_mode;
+    delete payload.link_expires_at;
+    const linkMode = (meeting as any).link_expiry_mode as string | undefined;
+    const linkAt = (meeting as any).link_expires_at as string | null | undefined;
+    if (linkMode) {
+      if (await probeLinkExpirySupport()) {
+        payload.link_expiry_mode = linkMode;
+        payload.link_expires_at = linkAt || null;
+      } else {
+        try { localStorage.setItem(`giin_link_expiry_${meetingId}`, JSON.stringify({ mode: linkMode, expiresAt: linkAt || null })); } catch (e) {}
+      }
+    }
 
     const { error } = await supabase
       .from('meetings')
@@ -777,6 +906,38 @@ export const giinApi = {
   // inserts) — and throws when the write fails, so a join is never faked.
   joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant', status?: 'Waiting' | 'Admitted' | 'Declined') => {
     const finalStatus = status || (role === 'Admin' ? 'Admitted' : 'Waiting');
+
+    // Round 9 (9A): rejoin reactivates the existing row instead of
+    // inserting a duplicate. The rejoin route is server-side (the
+    // admission lockdown blocks client status writes); it refuses
+    // removed participants and only re-admits someone who proves they
+    // were in the room before. When the route is unreachable the old
+    // insert runs instead — the token route still refuses anyone who
+    // is not Admitted, so a removed guest can never get media.
+    try {
+      const rowId = (() => { try { return localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { return null; } })();
+      let accessToken: string | undefined;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token;
+      } catch (e) { /* guests have no session */ }
+      const res = await fetch('/api/meetings/rejoin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, participantRowId: rowId, userId, accessToken, name, role, status: finalStatus }),
+      });
+      const rej: any = await res.json().catch(() => ({}));
+      if (res.status === 403 && rej?.error === 'REMOVED') {
+        throw new Error('REMOVED:You were removed from this meeting by the host.');
+      }
+      if (res.ok && rej?.found && rej?.row) {
+        return rej.row;
+      }
+      // found: false (or an unexpected response) -> fall through to insert.
+    } catch (e: any) {
+      if (String(e?.message || '').startsWith('REMOVED')) throw e;
+      console.warn('[Supabase Client] Rejoin check failed, inserting a fresh participant row:', e?.message);
+    }
 
     const { data, error } = await supabase
       .from('meeting_participants')
