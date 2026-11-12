@@ -336,6 +336,17 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 @keyframes pop-in {
   0% {
     transform: scale(0.92);
@@ -640,13 +651,15 @@ h1, h2, h3, h4, h5, h6 {
   .meeting-toolbar-center {
     width: 100% !important;
     justify-content: center !important;
-    gap: 0.6rem !important;
+    flex-wrap: wrap !important;
+    gap: 0.5rem !important;
     order: 1;
   }
 
   .meeting-toolbar-center button {
-    width: 38px !important;
-    height: 38px !important;
+    width: 36px !important;
+    height: 36px !important;
+    flex-shrink: 0 !important;
   }
 
   .meeting-toolbar-right {
@@ -654,6 +667,63 @@ h1, h2, h3, h4, h5, h6 {
     justify-content: center !important;
     gap: 0.4rem !important;
     order: 2;
+  }
+}
+
+/* Fix Round 8: host mute button on a participant's video card. Hidden
+   until the host hovers the tile on desktop (touch devices have no
+   hover, so it is always visible there). Distinct from the toolbar
+   mute: red pill, MicOff icon + "Mute" label. */
+.tile-mute-btn {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.participant-tile:hover .tile-mute-btn {
+  opacity: 1;
+}
+.participant-tile:focus-within .tile-mute-btn {
+  opacity: 1;
+}
+@media (max-width: 768px) {
+  .tile-mute-btn {
+    opacity: 1 !important;
+  }
+}
+
+/* Fix Round 8 (#11): the room toolbar must wrap below 1280px instead
+   of pushing its right end (End for All) off the viewport. */
+@media (max-width: 1280px) {
+  .meeting-toolbar {
+    flex-wrap: wrap !important;
+    row-gap: 0.75rem;
+    padding: 1rem 1.25rem !important;
+  }
+  .meeting-toolbar-center {
+    flex-wrap: wrap !important;
+    order: 1;
+    width: 100%;
+    justify-content: center !important;
+  }
+  .meeting-toolbar-left {
+    order: 2;
+  }
+  .meeting-toolbar-right {
+    order: 3;
+  }
+}
+
+/* Fix Round 8 (#6): side panels become overlays on phones. As flex
+   siblings a 300-350px panel crushed the video grid to a sliver on a
+   390px screen. On mobile they slide over the room instead. */
+@media (max-width: 768px) {
+  .meeting-side-panel {
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: min(92vw, 340px) !important;
+    z-index: 60 !important;
+    box-shadow: -12px 0 30px rgba(0, 0, 0, 0.5) !important;
   }
 }
 

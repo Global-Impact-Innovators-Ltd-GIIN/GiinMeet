@@ -18,6 +18,7 @@ interface DashboardProps {
   onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean, passcode?: string | null) => void;
   meetingHistory: Meeting[];
   onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null }) => Promise<Meeting | null>;
+  onCancelMeeting?: (meetingId: string, title: string) => void;
   userName: string;
   userDomain?: string;
 }
@@ -28,6 +29,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onStartMeeting,
   meetingHistory,
   onAddMeeting,
+  onCancelMeeting,
   userName,
   userDomain,
 }) => {
@@ -407,6 +409,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       >
                         Start Call
                       </button>
+                      <button
+                        onClick={() => onCancelMeeting?.(meeting.id, meeting.title)}
+                        className="premium-btn premium-btn-secondary"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444' }}
+                        title="Cancel this scheduled meeting"
+                      >
+                        Cancel
+                      </button>
                     </div>
                   ) : (
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -589,7 +599,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             width: '450px',
             backgroundColor: 'var(--bg-card)',
             padding: '2rem',
-            animation: 'pop-in var(--transition-normal)'
+            animation: 'pop-in var(--transition-normal)',
+            maxHeight: '90dvh',
+            overflowY: 'auto'
           }}>
             <h3 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>Schedule a Meeting</h3>
             
@@ -764,7 +776,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             animation: 'pop-in var(--transition-normal)',
             display: 'flex',
             flexDirection: 'column',
-            gap: '1rem'
+            gap: '1rem',
+            maxHeight: '90dvh',
+            overflowY: 'auto'
           }}>
             <h3 style={{ fontSize: '1.4rem', fontFamily: 'var(--font-heading)', margin: 0 }}>Invite to “{inviteMeeting.title}”</h3>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -827,6 +841,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <Copy size={14} /> Copy Invite Link
             </button>
             {inviteNote && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>{inviteNote}</span>}
+            {inviteMeeting.status === 'Scheduled' && (
+              <button
+                className="premium-btn premium-btn-secondary"
+                style={{ width: '100%', justifyContent: 'center', color: '#EF4444' }}
+                onClick={() => {
+                  const m = inviteMeeting;
+                  setInviteMeeting(null);
+                  onCancelMeeting?.(m.id, m.title);
+                }}
+              >
+                Cancel this meeting
+              </button>
+            )}
             <button
               className="premium-btn premium-btn-primary"
               style={{ width: '100%', justifyContent: 'center' }}
@@ -857,7 +884,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             width: '400px',
             backgroundColor: 'var(--bg-card)',
             padding: '2rem',
-            animation: 'pop-in var(--transition-normal)'
+            animation: 'pop-in var(--transition-normal)',
+            maxHeight: '90dvh',
+            overflowY: 'auto'
           }}>
             <h3 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>Join a Meeting</h3>
             
@@ -1085,8 +1114,8 @@ Media encrypted in transit (DTLS-SRTP).`;
           position: 'fixed',
           top: 0,
           left: 0,
-          width: '100vw',
-          height: '100vh',
+          width: '100%',
+          height: '100%',
           backgroundColor: 'rgba(0,0,0,0.7)',
           display: 'flex',
           alignItems: 'center',
@@ -1098,6 +1127,8 @@ Media encrypted in transit (DTLS-SRTP).`;
             maxWidth: '450px',
             width: '100%',
             padding: '2.5rem',
+            maxHeight: '90dvh',
+            overflowY: 'auto',
             animation: 'pop-in 0.3s ease',
             display: 'flex',
             flexDirection: 'column',

@@ -504,11 +504,25 @@ export const giinApi = {
     if (!session?.access_token && !participantRowId) {
       throw new Error('Only the host or a co-host can control the room.');
     }
-    const res = await fetch('/api/meetings/control', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ meetingId, action, accessToken: session?.access_token || undefined, participantRowId: participantRowId || undefined, targetUserId: opts?.targetUserId, targetRowId: opts?.targetRowId, settings: opts?.settings }),
-    });
+    // Fix Round 8 (#10): a control call (mute/kick) must never hang
+    // forever on a degraded connection — 15 s, then an honest error
+    // the button can report instead of a frozen tab.
+    const controller = new AbortController();
+    const controlTimer = setTimeout(() => controller.abort(), 15000);
+    let res: Response;
+    try {
+      res = await fetch('/api/meetings/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, action, accessToken: session?.access_token || undefined, participantRowId: participantRowId || undefined, targetUserId: opts?.targetUserId, targetRowId: opts?.targetRowId, settings: opts?.settings }),
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error('The room did not answer in time — check your connection and try again.');
+      throw e;
+    } finally {
+      clearTimeout(controlTimer);
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) {
       throw new Error(data.message || data.error || 'Could not control the room.');

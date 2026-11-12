@@ -4,7 +4,7 @@ import {
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff,
   Clock, Pin, LayoutGrid, LayoutList,
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
-  MoreHorizontal, BarChart3, Volume2, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
+  MoreHorizontal, BarChart3, Volume2, VolumeX, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
   LogOut, UserCheck, X, Hand, Paperclip
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
@@ -402,6 +402,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Bumped to force the LiveKit connect effect to re-run (disconnect +
   // reconnect with a fresh token) when the token nears expiry.
   const [livekitReconnectNonce, setLivekitReconnectNonce] = useState(0);
+  // Fix Round 8 (#7/#8): the room's reconnect state, kept quiet. The
+  // LiveKit SDK heals transient drops itself — the app must not tear
+  // the room down on every wobble (that was the tile flicker AND the
+  // "client initiated disconnect" that stranded rooms on P2P). This
+  // flag only drives the gentle "Reconnecting..." overlay on the tiles
+  // and the toolbar dot; participants never see an error about it.
+  const [isLivekitReconnecting, setIsLivekitReconnecting] = useState(false);
+  const livekitReconnectTimerRef = useRef<any>(null);
+  // Bounded automatic LiveKit recovery while on the P2P fallback:
+  // at most 5 silent retries, one a minute, plus one on 'online'.
+  const p2pLivekitRetriesRef = useRef(0);
   const [livekitRemoteStreams, setLivekitRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
   // --- Fix Round 5: video stability -------------------------------------
   // LiveKit room membership, tracked SEPARATELY from media tracks. A
@@ -549,7 +560,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           try { oldTrack.stop(); } catch (e) {}
         }
       }
-      await room.localParticipant.publishTrack(track, { source });
+      // Fix Round 8 (#4): on a phone, cap the camera uplink — a phone
+      // camera can push 720p+ into a weak mobile connection and
+      // saturate it, which reads as "very bad signal" for everyone.
+      // Fix Round 8 (#9): publish an explicit 720p encoding with
+      // simulcast on every camera uplink. The old code published the
+      // raw 640x480 capture with SDK defaults, so on a weak connection
+      // the room stayed on the lowest layer and the picture looked
+      // dull from both sides. The phone cap stays (a phone camera can
+      // saturate a weak link); LiveKit still adapts down gracefully.
+      const isPhoneUplink = typeof window !== 'undefined' && window.innerWidth < 768;
+      const publishOptions: any = source === Track.Source.Camera
+        ? isPhoneUplink
+          ? { source, videoEncoding: { maxBitrate: 800_000, maxFramerate: 24 }, simulcast: true }
+          : { source, videoEncoding: { maxBitrate: 1_500_000, maxFramerate: 30 }, simulcast: true }
+        : { source };
+      await room.localParticipant.publishTrack(track, publishOptions);
     } catch (e) {
       console.warn('[LiveKit] Could not publish track:', e);
     }
@@ -660,6 +686,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   
   const [isMeetingLocked, setIsMeetingLocked] = useState(false);
   const [isScreenShareBlockedForGuests, setIsScreenShareBlockedForGuests] = useState(false);
+  // Fix Round 8 (#3): screen-share feedback state — a click that opens
+  // nothing must never look dead again.
+  const [screenShareStarting, setScreenShareStarting] = useState(false);
+  const [screenShareError, setScreenShareError] = useState<string | null>(null);
   const [isMuteOnEntryEnabled, setIsMuteOnEntryEnabled] = useState(false);
 
   const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
@@ -739,6 +769,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Fix Round 8 (#10): a control call (kick) in flight. The button is
+  // disabled while its request runs, so a second click cannot stack
+  // another request on a degraded connection.
+  const [busyControlKey, setBusyControlKey] = useState<string | null>(null);
   // Persistent banner shown whenever the call is running peer-to-peer because
   // the LiveKit server could not be reached. A degraded connection is never
   // silent: the user must know video quality may be lower.
@@ -817,11 +851,36 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // connect effect, which fetches a fresh token, so a fixed server is
   // picked up without rejoining the meeting.
   const handleRetryLiveKit = () => {
-    triggerToast('Retrying the video server...');
+    // Fix Round 8 (#8): silent retry — no toast. The toolbar dot
+    // shows whether the room is back on the video server.
     setConnectionNotice(null);
     setEngineType('LIVEKIT');
     setLivekitReconnectNonce(n => n + 1);
   };
+
+  // Fix Round 8 (Evidence 1): the P2P fallback is a bridge, not a
+  // destination. While the room is on P2P, silently retry LiveKit
+  // once a minute (at most 5 times a session) and once when the
+  // browser reports it is back online. A retry that lands returns
+  // the room to LiveKit with no message; a retry that fails stays
+  // on P2P just as quietly.
+  useEffect(() => {
+    if (engineType !== 'P2P' || endedRef.current) return;
+    const tryLiveKitAgain = () => {
+      if (endedRef.current) return;
+      if (p2pLivekitRetriesRef.current >= 5) return;
+      p2pLivekitRetriesRef.current += 1;
+      setEngineType('LIVEKIT');
+      setLivekitReconnectNonce(n => n + 1);
+    };
+    const onOnline = () => { tryLiveKitAgain(); };
+    window.addEventListener('online', onOnline);
+    const timer = setInterval(tryLiveKitAgain, 60000);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      clearInterval(timer);
+    };
+  }, [engineType]);
 
   // --- Fix Round 5: video-stability helpers ------------------------------
   // Keep the LiveKit membership set in sync.
@@ -928,7 +987,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       const savedCam = localStorage.getItem('giin_selected_camera');
       const videoStream = await navigator.mediaDevices.getUserMedia({
-        video: savedCam ? { deviceId: { exact: savedCam }, width: 640, height: 480 } : { width: 640, height: 480 }
+        video: savedCam ? { deviceId: { exact: savedCam }, width: { ideal: 1280 }, height: { ideal: 720 } } : { width: { ideal: 1280 }, height: { ideal: 720 } }
       });
       const videoTrack = videoStream.getVideoTracks()[0];
       if (!videoTrack) throw new Error('No video track acquired');
@@ -1022,17 +1081,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // capacity count is live now, so a slot frees as soon as
           // someone really leaves.
           setConnectionNotice('This meeting room is full (8 participants). You cannot join the video yet — wait for someone to leave, then press "Retry video server".');
-          triggerToast('This meeting room is full. Please wait for someone to leave, then retry.');
+
           return;
         }
         if (data.error === 'UNAUTHORIZED' || data.error === 'ADMISSION_REQUIRED') {
           setConnectionNotice('You are not admitted to this meeting yet. Please wait for the host to admit you, then try again.');
-          triggerToast('Not admitted to this meeting yet.');
+
           return;
         }
         if (data.error === 'MEETING_ENDED') {
           setConnectionNotice('This meeting has ended. The invite link no longer works.');
-          triggerToast('This meeting has ended.');
+
           return;
         }
         if (data.error === 'MEETING_LOCKED') {
@@ -1040,7 +1099,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // silent peer-to-peer downgrade - a locked-out guest must not
           // end up in a P2P mesh with the room.
           setConnectionNotice('This meeting is locked by the host - new participants cannot join right now. Wait for the host to unlock it, then press "Retry video server".');
-          triggerToast('This meeting is locked by the host.');
+
           return;
         }
         if (data.error || !data.token) {
@@ -1076,21 +1135,53 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // reconnect — the user sees exactly what is happening.
         room.on(RoomEvent.Disconnected, () => {
           if (!active) return;
-          // A disconnect is NOT always transient: when the host ends the
-          // meeting the server deletes the LiveKit room, which also lands
-          // here. Check the meeting first — reconnecting to an ended
-          // meeting would loop forever. (Fix Round 6 / Phase 6.)
+          // Fix Round 8 (#7/#8): a disconnect is usually transient and
+          // the SDK heals it itself — the app must NOT tear the room
+          // down here. The old code bumped the reconnect nonce on every
+          // wobble, which disconnected the room itself ("client
+          // initiated disconnect"), cleared every tile, and looped the
+          // room into a permanent P2P fallback. Now: stay quiet, show
+          // only the gentle tile overlay, and let the SDK reconnect.
+          // Only if the room is STILL down after a few seconds do we
+          // force one clean reconnect — and never for an ended meeting.
           void (async () => {
             try {
               const { data } = await giinApi.getMeetingDetails(meetingId);
               if (!active) return;
               if ((data as any)?.status === 'Completed') { enterEndedState('host-ended'); return; }
-            } catch (e) { /* status check failed: fall through to reconnect */ }
+            } catch (e) { /* status check failed: fall through to quiet retry */ }
             if (!active) return;
-            triggerToast('Video connection dropped — reconnecting to the video server…');
-            setConnectionNotice('Video connection dropped. Reconnecting to the video server — your camera and microphone will rejoin automatically.');
-            setLivekitReconnectNonce(n => n + 1);
+            setIsLivekitReconnecting(true);
+            if (livekitReconnectTimerRef.current) clearTimeout(livekitReconnectTimerRef.current);
+            livekitReconnectTimerRef.current = setTimeout(() => {
+              if (!active || endedRef.current) return;
+              const r = livekitRoomRef.current;
+              if (r && r.state === 'connected') { setIsLivekitReconnecting(false); return; }
+              setLivekitReconnectNonce(n => n + 1);
+            }, 6000);
           })();
+        });
+
+        // Fix Round 8 (#4): live connection quality for the local
+        // participant. A weak mobile link used to look like a broken
+        // app — now the toolbar shows the signal (excellent / good /
+        // poor / lost) so a bad connection is visible, not mysterious.
+        room.on(RoomEvent.ConnectionQualityChanged, (quality: any, participant: any) => {
+          if (!active) return;
+          if (participant && participant.isLocal) setConnectionQuality(String(quality));
+        });
+
+        // Fix Round 8 (#7): the SDK tells us when it is healing a drop
+        // and when it has healed it. The tile overlay follows these —
+        // never a banner, never a toast.
+        room.on(RoomEvent.Reconnecting, () => {
+          if (!active) return;
+          setIsLivekitReconnecting(true);
+        });
+        room.on(RoomEvent.Reconnected, () => {
+          if (!active) return;
+          setIsLivekitReconnecting(false);
+          if (livekitReconnectTimerRef.current) { clearTimeout(livekitReconnectTimerRef.current); livekitReconnectTimerRef.current = null; }
         });
 
         // Fix Round 5: room membership is NOT the same as media tracks.
@@ -1228,8 +1319,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           throw new Error('The video server address is missing.');
         }
         await room.connect(livekitUrl, token);
-        setConnectionNotice(null); // A retry that lands clears the degraded banner.
-        triggerToast('Connected to LiveKit SFU engine.');
+        // Fix Round 8 (#8): a connect that lands is silent. The old
+        // toast announced the video engine by name on every reconnect.
+        setConnectionNotice(null); // A retry that lands clears the join-error card.
+        setIsLivekitReconnecting(false);
 
         // Seed membership from participants ALREADY in the room:
         // ParticipantConnected only fires for joins after ours, so
@@ -1255,16 +1348,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
 
       } catch (err: any) {
+        // Fix Round 8 (#7/#8 + Evidence 1): a disconnect caused by our
+        // own teardown ("Client initiated disconnect") or by an
+        // unmounted effect must never flip the room to P2P — that was
+        // the silent permanent downgrade. Only a real server failure
+        // falls back, quietly: the P2P mesh keeps the call alive, the
+        // toolbar dot shows the state, and the room retries LiveKit on
+        // its own (see the P2P recovery effect). Participants see no
+        // error either way.
+        if (!active) return;
         console.warn('[LiveKit Engine] Could not connect to the video server:', err);
-        // The call still works peer-to-peer, but the user must be told it is
-        // degraded — never a silent downgrade.
-        setConnectionNotice(
-          err?.message === 'ROOM_NOT_FOUND'
-            ? 'The video room for this meeting could not be found. The meeting may need to be re-created, or the rooms setup is incomplete — you are connected peer-to-peer instead.'
-            : `Could not connect to the video server (${err?.message || 'unknown error'}). You are connected peer-to-peer instead — video quality may be lower.`
-        );
+        if (String(err?.message || '').includes('Client initiated disconnect')) return;
         setEngineType('P2P');
-        triggerToast('LiveKit connection failed. Swapped to P2P Mesh.');
       }
     };
 
@@ -1292,7 +1387,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // directly via publishLiveKitTrack instead.
     // `livekitReconnectNonce` IS a dependency: bumping it is how the token
     // refresh forces a clean disconnect + reconnect with a fresh token.
-  }, [isMediaInitialized, engineType, meetingId, myKey, currentUser, isAdmin, livekitReconnectNonce]);
+  // Fix Round 8 (#2): depend on the user ID, not the whole user
+  // object — the session restore replaces the object identity after
+  // mount, and the old dependency tore the LiveKit room down and
+  // reconnected it on every reload.
+  }, [isMediaInitialized, engineType, meetingId, myKey, currentUser?.id, isAdmin, livekitReconnectNonce]);
 
   // Fix Round 6: when the engine becomes LiveKit, the P2P mesh is
   // redundant — tear it down (see teardownP2PMesh). The mesh rebuilds
@@ -1325,10 +1424,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await room.updateToken(data.token);
       setExpiresAt(data.expiresAt);
       setLivekitToken(data.token);
-      triggerToast('Video connection refreshed — no interruption.');
     } catch (err: any) {
       console.warn('[LiveKit] Token refresh via updateToken failed, falling back to reconnect:', err);
-      triggerToast('Refreshing your video connection…');
       setLivekitReconnectNonce(n => n + 1);
     } finally {
       tokenRefreshingRef.current = false;
@@ -1701,7 +1798,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // Acquire the new camera FIRST. Stopping the old track before the
         // new one is acquired leaves the camera dead if getUserMedia fails.
         const videoStream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: deviceId }, width: 640, height: 480 }
+          video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
         });
         const videoTrack = videoStream.getVideoTracks()[0];
         const oldTrack = localVideoTrackRef.current;
@@ -1782,6 +1879,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const screenSendersRef = useRef<{ [peerKey: string]: RTCRtpSender }>({});
   const [remoteScreenStreams, setRemoteScreenStreams] = useState<{ [peerKey: string]: MediaStream }>({});
+
+  // Fix Round 8 (#4): speaker mute + live connection quality.
+  // Speakers muted breaks a feedback loop in one tap (laptop and
+  // phone in the same room, both mics live, both speakers on). The
+  // effect re-applies whenever the toggle or the remote streams
+  // change, so a newcomer starts muted too.
+  const [isSpeakersMuted, setIsSpeakersMuted] = useState(false);
+  const [connectionQuality, setConnectionQuality] = useState<string>('unknown');
+  useEffect(() => {
+    const streams: any[] = [...Object.values(livekitRemoteStreams), ...Object.values(remoteStreams), ...Object.values(remoteScreenStreams)];
+    streams.forEach((s) => {
+      try {
+        s?.getAudioTracks?.().forEach((t: MediaStreamTrack) => { t.enabled = !isSpeakersMuted; });
+      } catch (e) { /* a stream without audio tracks is fine */ }
+    });
+  }, [isSpeakersMuted, livekitRemoteStreams, remoteStreams, remoteScreenStreams]);
 
   // Ref mirror of the remote screen-share map (defined above).
   const remoteScreenStreamsRef = useRef(remoteScreenStreams);
@@ -2532,6 +2645,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const { data } = await giinApi.getMeetingDetails(meetingId);
         if (data) {
           setMeetingAdminId(data.admin_id || '');
+          // Fix Round 8 (bypass check): the waiting-room toggle used to
+          // default to ON for every meeting, so a bypass meeting showed
+          // "Waiting Room ON" in Host Controls even though guests
+          // auto-join. Initialise it from the meeting row instead.
+          setIsWaitingRoomEnabled(data.require_waiting_room ?? true);
           setInitialNotes(data.notes || '');
           // Fix Round 7 (#6): the meeting lock is persisted on the
           // meeting row now - sync the toggle from the server value on
@@ -3648,6 +3766,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       triggerToast('Screen sharing is not supported in this browser -- try Chrome or Edge on a laptop.');
       return false;
     }
+    setScreenShareError(null);
+    setScreenShareStarting(true);
     try {
       const constraints = getWebRTCScreenshareConstraints();
       // audio: true asks the browser for system audio with the share
@@ -3656,14 +3776,25 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // sharing a whole screen often has no audio track, and Firefox does
       // not support it at all — when no audio track arrives we say so
       // plainly instead of pretending the share has sound.
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: constraints.video,
-        audio: true
-      });
+      // Fix Round 8 (#3): getDisplayMedia can hang forever without
+      // opening a picker (notably in automated/headless browsers, and
+      // when the browser's picker is blocked) — the old code awaited it
+      // with no timeout, so the click looked dead with no error at all.
+      // Race it against a 25 s timeout and say so honestly.
+      const displayStream = await Promise.race([
+        navigator.mediaDevices.getDisplayMedia({
+          video: constraints.video,
+          audio: true
+        }),
+        new Promise<never>((_, reject) =>
+          window.setTimeout(() => reject(Object.assign(new Error('Screen picker timed out'), { name: 'PickerTimeoutError' })), 25000)),
+      ]);
+      setScreenShareStarting(false);
 
       const screenTrack = displayStream.getVideoTracks()[0];
       if (!screenTrack) {
         displayStream.getTracks().forEach(t => t.stop());
+        setScreenShareStarting(false);
         triggerToast('Screen sharing started but no video track was captured -- please try again.');
         return false;
       }
@@ -3729,6 +3860,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (err: any) {
       console.warn('[Screen Share] Permission denied or failed.', err);
       screenVideoRef.current = null;
+      setScreenShareStarting(false);
       setIsScreenSharing(false);
       // Every failure path tells the user why -- a silent no-op here is
       // what made sharing look broken when the picker was cancelled or
@@ -3743,8 +3875,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         ? 'Screen sharing was cancelled before it started.'
         : err?.name === 'OverconstrainedError'
         ? 'Your browser refused the screen capture settings -- try again.'
+        : err?.name === 'PickerTimeoutError'
+        ? 'The screen picker did not open — check that screen sharing is allowed for this browser, then try again.'
         : `Screen sharing could not start (${err?.message || 'unknown error'}).`;
       triggerToast(reason);
+      setScreenShareError(reason);
       return false;
     }
   };
@@ -4096,11 +4231,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             const videoStream = await navigator.mediaDevices.getUserMedia({
               video: savedCam ? {
                 deviceId: { exact: savedCam },
-                width: 640,
-                height: 480
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
               } : {
-                width: 640,
-                height: 480
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
               }
             });
             if (!active) {
@@ -4953,7 +5088,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   if (endedState) {
     return (
       <div style={{
-        width: '100vw',
+        width: '100%',
         height: '100dvh',
         backgroundColor: '#07090E',
         color: 'white',
@@ -6129,11 +6264,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                   latency: undefined,
                   videoFilter: undefined,
                   isStudioLightEnabled: false,
-                  isReconnecting: false
+                  // Fix Round 8 (#7): was hardcoded false, so the tile
+                  // never showed its own "Reconnecting..." overlay.
+                  isReconnecting: isLivekitReconnecting
                 };
 
                 return (
-                  <div key={p.id} className={`meeting-card ${pState.isSpeaking && !pState.isMuted ? 'speaking' : ''}${spotlightKey === peerKey ? ' spotlight' : ''}`} style={{
+                  <div key={p.id} className={`meeting-card participant-tile ${pState.isSpeaking && !pState.isMuted ? 'speaking' : ''}${spotlightKey === peerKey ? ' spotlight' : ''}`} style={{
                     position: 'relative',
                     borderRadius: 'var(--radius-md)',
                     overflow: 'hidden',
@@ -6173,6 +6310,48 @@ Media encrypted in transit (DTLS-SRTP).`;
                     >
                       <Pin size={13} />
                     </button>
+                    {/* Fix Round 8: host mute on the video card — the same
+                        server-verified mute as the participants list, with
+                        its own unmistakable button (red pill, MicOff icon
+                        + "Mute" label) so it is never confused with the
+                        toolbar mute. Hidden once the participant is
+                        already muted; the name bar already shows that. */}
+                    {canModerate && !pState.isMuted && (
+                      <button
+                        className="tile-mute-btn"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            await giinApi.controlMeeting(meetingId, 'mute-participant', { targetUserId: p.userId || undefined, targetRowId: p.id });
+                          } catch (err: any) {
+                            triggerToast(err?.message || `Could not mute ${p.name} - please try again.`);
+                          }
+                        }}
+                        style={{
+                          position: 'absolute',
+                          top: '48px',
+                          right: '10px',
+                          height: '28px',
+                          minWidth: '28px',
+                          padding: '0 6px',
+                          borderRadius: '14px',
+                          backgroundColor: 'rgba(239, 68, 68, 0.92)',
+                          border: '1px solid rgba(255,255,255,0.35)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '4px',
+                          color: 'white',
+                          cursor: 'pointer',
+                          zIndex: 10,
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.4)'
+                        }}
+                        title={`Mute ${p.name}`}
+                      >
+                        <MicOff size={13} />
+                        <span style={{ fontSize: '0.65rem', fontWeight: 700 }}>Mute</span>
+                      </button>
+                    )}
                     {hasConnection && activeStreamObj && (
                       <audio
                         ref={el => {
@@ -6201,7 +6380,6 @@ Media encrypted in transit (DTLS-SRTP).`;
                           width: '100%', 
                           height: '100%', 
                           objectFit: 'cover',
-                          transition: 'opacity 0.8s ease-in-out',
                           filter: `${pState.videoFilter === 'blur' ? 'blur(6px)' : pState.videoFilter === 'sepia' ? 'sepia(0.8)' : pState.videoFilter === 'grayscale' ? 'grayscale(1)' : pState.videoFilter === 'warm' ? 'sepia(0.3) hue-rotate(-10deg) saturate(1.4)' : pState.videoFilter === 'cyberpunk' ? 'hue-rotate(90deg) saturate(1.5)' : 'none'} ${pState.isStudioLightEnabled ? 'brightness(1.15) contrast(1.05) saturate(1.1)' : ''}`
                         }}
                       />
@@ -6365,6 +6543,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 <div className="screenshare-layout" style={{
                   flex: 1,
                   display: 'flex',
+                  flexDirection: window.innerWidth < 768 ? 'column' : 'row',
                   overflow: 'hidden',
                   background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E'
                 }}>
@@ -6519,12 +6698,13 @@ Media encrypted in transit (DTLS-SRTP).`;
 
                   {/* Participant Sidebar */}
                   <div className="screenshare-sidebar" style={{
-                    width: '260px',
+                    width: window.innerWidth < 768 ? '100%' : '260px',
                     display: 'flex',
-                    flexDirection: 'column',
-                    gap: '1rem',
-                    padding: '1.5rem 1.5rem 1.5rem 0',
-                    overflowY: 'auto'
+                    flexDirection: window.innerWidth < 768 ? 'row' : 'column',
+                    gap: '0.5rem',
+                    padding: window.innerWidth < 768 ? '0.5rem' : '1.5rem 1.5rem 1.5rem 0',
+                    overflowY: window.innerWidth < 768 ? 'hidden' : 'auto',
+                    overflowX: window.innerWidth < 768 ? 'auto' : 'hidden'
                   }}>
                     {localVideoCard}
                     {remoteVideoCards}
@@ -6539,8 +6719,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                 flex: 1,
                 display: 'flex',
                 flexWrap: 'wrap',
-                gap: '1.25rem',
-                padding: '1.5rem',
+                gap: window.innerWidth < 768 ? '0.75rem' : '1.25rem',
+                padding: window.innerWidth < 768 ? '0.75rem' : '1.5rem',
                 overflowY: 'auto',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -6556,7 +6736,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
         {/* Collapsible Panels */}
         {activePanel === 'chat' && (
-          <div style={{
+          <div className="meeting-side-panel" style={{
             width: '320px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
@@ -6665,7 +6845,7 @@ Media encrypted in transit (DTLS-SRTP).`;
         )}
 
         {activePanel === 'participants' && (
-          <div style={{
+          <div className="meeting-side-panel" style={{
             width: '300px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
@@ -6783,8 +6963,8 @@ Media encrypted in transit (DTLS-SRTP).`;
 
               {/* Other participants */}
               {participants.map(p => (
-                <div key={p.id} className="flex-between" style={{ padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                <div key={p.id} className="flex-between" style={{ padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.02)', flexWrap: 'wrap', rowGap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0, flex: '1 1 140px' }}>
                     <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: p.avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '0.85rem', color: 'white', flexShrink: 0 }}>
                       {p.avatar}
                     </div>
@@ -6793,7 +6973,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{displayRoleLabel(p.role)}</div>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '100%' }}>
                     {p.isSpeaking && !p.isMuted && <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', animation: 'pulse-ring 2s infinite' }} />}
                     
                     {/* Fix Round 7 (#5): moderation is offered for guest
@@ -6865,7 +7045,9 @@ Media encrypted in transit (DTLS-SRTP).`;
 
                         {isAdmin && (
                         <button
+                          disabled={busyControlKey === p.id}
                           onClick={async () => {
+                            if (busyControlKey) return;
                             if (confirm(`Are you sure you want to remove ${p.name} from the meeting?`)) {
                               // Fix Round 7 (#1 + #3): the kick goes
                               // through the host-verified server route -
@@ -6874,19 +7056,23 @@ Media encrypted in transit (DTLS-SRTP).`;
                               // guest leaves even if the broadcast is
                               // missed (participants poll self-row-gone
                               // check).
+                              setBusyControlKey(p.id);
                               try {
                                 await giinApi.controlMeeting(meetingId, 'remove-participant', { targetUserId: p.userId || undefined, targetRowId: p.id });
                                 // Immediately clean up locally for instant UI feedback
                                 cleanupPeer(p.userId || p.id);
                               } catch (err: any) {
                                 triggerToast(err?.message || `Could not remove ${p.name} from the meeting - please try again.`);
+                              } finally {
+                                setBusyControlKey(null);
                               }
                             }
                           }}
                           style={{
                             border: 'none',
                             background: 'rgba(239, 68, 68, 0.1)',
-                            cursor: 'pointer',
+                            cursor: busyControlKey === p.id ? 'wait' : 'pointer',
+                            opacity: busyControlKey === p.id ? 0.5 : 1,
                             color: '#EF4444',
                             fontSize: '0.7rem',
                             fontWeight: 600,
@@ -6910,7 +7096,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           </div>
         )}
         {activePanel === 'host-settings' && isAdmin && (
-          <div style={{
+          <div className="meeting-side-panel" style={{
             width: '300px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
@@ -7224,7 +7410,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           </div>
         )}
         {activePanel === 'polls' && (
-          <div style={{
+          <div className="meeting-side-panel" style={{
             width: '300px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
@@ -7454,7 +7640,7 @@ Media encrypted in transit (DTLS-SRTP).`;
         )}
 
         {activePanel === 'filters' && (
-          <div style={{
+          <div className="meeting-side-panel" style={{
             width: '300px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
@@ -7587,7 +7773,7 @@ Media encrypted in transit (DTLS-SRTP).`;
         )}
 
         {activePanel === 'transcript' && (
-          <div style={{
+          <div className="meeting-side-panel" style={{
             width: '320px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
@@ -7774,7 +7960,7 @@ Media encrypted in transit (DTLS-SRTP).`;
         )}
 
         {activePanel === 'soundboard' && (
-          <div style={{
+          <div className="meeting-side-panel" style={{
             width: '300px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
@@ -7841,7 +8027,7 @@ Media encrypted in transit (DTLS-SRTP).`;
         )}
 
         {activePanel === 'info' && (
-          <div style={{
+          <div className="meeting-side-panel" style={{
             width: '300px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
@@ -7940,7 +8126,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           </div>
         )}
         {activePanel === 'workspace' && (
-          <div style={{
+          <div className="meeting-side-panel" style={{
             width: '350px',
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
@@ -8177,6 +8363,16 @@ Media encrypted in transit (DTLS-SRTP).`;
         )}
       </div>
 
+      {/* Fix Round 8 (#3): a failed screen share stays visible, not a
+          4-second toast that can be missed — with a one-tap retry. */}
+      {screenShareError && (
+        <div role="alert" style={{ margin: '0 1rem', padding: '0.6rem 0.9rem', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.45)', borderRadius: '8px', color: '#FCA5A5', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <span style={{ flex: 1, minWidth: '200px' }}>{screenShareError}</span>
+          <button type="button" onClick={() => { setScreenShareError(null); void handleToggleScreenShare(); }} style={{ padding: '0.4rem 0.9rem', borderRadius: '6px', border: 'none', backgroundColor: '#EF4444', color: 'white', fontWeight: 700, cursor: 'pointer' }}>Try again</button>
+          <button type="button" onClick={() => setScreenShareError(null)} style={{ background: 'none', border: 'none', color: '#FCA5A5', cursor: 'pointer', fontSize: '1.1rem' }} aria-label="Dismiss">&times;</button>
+        </div>
+      )}
+
       {/* Toolbar / Controls */}
       {isDirectCall ? (
         <div style={{
@@ -8186,6 +8382,9 @@ Media encrypted in transit (DTLS-SRTP).`;
           transform: 'translateX(-50%)',
           display: 'flex',
           alignItems: 'center',
+          flexWrap: 'wrap',
+          maxWidth: 'calc(100vw - 32px)',
+          justifyContent: 'center',
           gap: '1rem',
           padding: '0.75rem 1.5rem',
           borderRadius: '40px',
@@ -8268,7 +8467,31 @@ Media encrypted in transit (DTLS-SRTP).`;
             title="Share Screen (S)"
           >
             <Monitor size={18} />
-            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isScreenSharing ? 'Stop Share' : 'Share'}</span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{screenShareStarting ? 'Starting…' : isScreenSharing ? 'Stop Share' : 'Share'}</span>
+          </button>
+
+          {/* Speakers — one-tap feedback breaker (Fix Round 8 #4) */}
+          <button
+            onClick={() => setIsSpeakersMuted(!isSpeakersMuted)}
+            style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '14px',
+              backgroundColor: isSpeakersMuted ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
+              border: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              color: 'white',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            title={isSpeakersMuted ? 'Unmute speakers' : 'Mute speakers (stops echo / feedback)'}
+          >
+            {isSpeakersMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isSpeakersMuted ? 'Unmute' : 'Speakers'}</span>
           </button>
 
           {/* Record (local, on this device) */}
@@ -8446,6 +8669,25 @@ Media encrypted in transit (DTLS-SRTP).`;
           <div className="meeting-toolbar-left" style={{ gap: '0.5rem' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: </span>
             <span style={{ color: 'white', fontWeight: 600, fontSize: '0.85rem' }}>{meetingId.slice(0, 8)}</span>
+            {connectionQuality !== 'unknown' && (
+              <span title={`Connection quality: ${connectionQuality}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 700, color: connectionQuality === 'excellent' ? '#10B981' : connectionQuality === 'good' ? '#84CC16' : connectionQuality === 'poor' ? '#F59E0B' : '#EF4444' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: connectionQuality === 'excellent' ? '#10B981' : connectionQuality === 'good' ? '#84CC16' : connectionQuality === 'poor' ? '#F59E0B' : '#EF4444' }} />
+                {connectionQuality === 'excellent' ? 'Excellent' : connectionQuality === 'good' ? 'Good' : connectionQuality === 'poor' ? 'Poor' : 'Lost'}
+              </span>
+            )}
+            {/* Fix Round 8 (Evidence 1): the room retries the video
+                server on its own while on a direct connection, but the
+                host can also force one retry from here. */}
+            {engineType === 'P2P' && isAdmin && (
+              <button
+                onClick={handleRetryLiveKit}
+                className="premium-btn premium-btn-secondary"
+                style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="The room is on a direct connection because the video server could not be reached. Try the video server again."
+              >
+                Retry video
+              </button>
+            )}
             <button 
               onClick={() => setShowMeetingInfo(!showMeetingInfo)}
               className="premium-btn premium-btn-secondary" 
@@ -8571,6 +8813,27 @@ Media encrypted in transit (DTLS-SRTP).`;
               <Monitor size={18} />
             </button>
 
+            {/* Speakers — one-tap feedback breaker (Fix Round 8 #4) */}
+            <button
+              onClick={() => setIsSpeakersMuted(!isSpeakersMuted)}
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: isSpeakersMuted ? '#EF4444' : '#1E293B',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)'
+              }}
+              title={isSpeakersMuted ? 'Unmute speakers' : 'Mute speakers (stops echo / feedback)'}
+            >
+              {isSpeakersMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            </button>
+
             {/* Device Settings Toggle */}
             <button 
               onClick={() => setIsDeviceModalOpen(true)}
@@ -8655,7 +8918,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                     border: window.innerWidth < 768 ? 'none' : '1px solid #1E293B',
                     borderTop: window.innerWidth < 768 ? '1px solid #1E293B' : '1px solid #1E293B',
                     borderRadius: window.innerWidth < 768 ? '20px 20px 0 0' : '12px',
-                    padding: '1.5rem',
+                    padding: window.innerWidth < 768 ? '1rem 1rem 1.25rem' : '1.5rem',
+                    maxHeight: 'calc(100dvh - 80px)',
+                    overflowY: 'auto',
                     zIndex: 10000,
                     boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
                     backdropFilter: 'blur(20px)',
@@ -8683,8 +8948,9 @@ Media encrypted in transit (DTLS-SRTP).`;
 
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: '1fr 1fr',
-                    gap: '0.75rem'
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                    gap: '0.75rem',
+                    width: '100%'
                   }}>
                     {[
                       { label: '🙋 Question', value: 'Question', desc: 'Ask a question', color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.12)' },
@@ -8698,6 +8964,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         style={{
                           display: 'flex',
                           flexDirection: 'column',
+                          minWidth: 0,
                           alignItems: 'flex-start',
                           padding: '0.75rem',
                           borderRadius: '8px',
@@ -8857,7 +9124,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <>
                 <div 
                   onClick={() => setShowMoreMenu(false)} 
-                  style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 14000 }}
+                  style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 14000 }}
                 />
                 <div style={{
                   position: window.innerWidth < 768 ? 'fixed' : 'absolute',
@@ -9485,40 +9752,40 @@ Media encrypted in transit (DTLS-SRTP).`;
       {connectionNotice && (
         <div style={{
           position: 'fixed',
-          top: '16px',
+          top: '50%',
           left: '50%',
-          transform: 'translateX(-50%)',
-          maxWidth: '640px',
+          transform: 'translate(-50%, -50%)',
+          maxWidth: '480px',
           width: 'calc(100% - 32px)',
-          padding: '0.75rem 1rem',
-          backgroundColor: '#451A03',
-          border: '1px solid #F59E0B',
+          padding: '1.25rem 1.5rem',
+          backgroundColor: '#0F172A',
+          border: '1px solid #334155',
           borderRadius: 'var(--radius-md)',
-          color: '#FDE68A',
-          fontSize: '0.85rem',
+          color: 'white',
+          fontSize: '0.9rem',
+          lineHeight: 1.5,
           zIndex: 9999,
-          boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)',
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '0.5rem'
+          boxShadow: '0 20px 40px rgba(0,0,0,0.5)'
         }}>
-          <span>⚠ Connection degraded: {connectionNotice}</span>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+            <span style={{ flex: 1 }}>{connectionNotice}</span>
+            <button
+              onClick={() => setConnectionNotice(null)}
+              style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '1.25rem', lineHeight: 1, flexShrink: 0 }}
+              aria-label="Dismiss"
+            >
+              &times;
+            </button>
+          </div>
           {engineType === 'P2P' && (
             <button
               onClick={handleRetryLiveKit}
-              style={{ backgroundColor: 'var(--color-accent)', color: 'black', border: 'none', borderRadius: '6px', padding: '0.35rem 0.8rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}
+              style={{ marginTop: '1rem', backgroundColor: 'var(--color-accent)', color: 'black', border: 'none', borderRadius: '6px', padding: '0.5rem 1rem', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' }}
               title="Try connecting to the video server again with a fresh token"
             >
               Retry video server
             </button>
           )}
-          <button
-            onClick={() => setConnectionNotice(null)}
-            style={{ background: 'none', border: 'none', color: '#FDE68A', cursor: 'pointer', fontSize: '1rem', marginLeft: 'auto', flexShrink: 0 }}
-            aria-label="Dismiss connection notice"
-          >
-            &times;
-          </button>
         </div>
       )}
 
@@ -9527,6 +9794,8 @@ Media encrypted in transit (DTLS-SRTP).`;
           position: 'fixed',
           bottom: '24px',
           right: '24px',
+          maxWidth: '360px',
+          pointerEvents: 'none',
           padding: '0.75rem 1.5rem',
           backgroundColor: '#1E293B',
           border: '1px solid var(--border-color)',
@@ -9542,6 +9811,13 @@ Media encrypted in transit (DTLS-SRTP).`;
         }}>
           <Sparkles size={16} color="var(--color-primary)" />
           <span>{toastMessage}</span>
+          <button
+            onClick={() => setToastMessage(null)}
+            style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '1rem', lineHeight: 1, marginLeft: 'auto', pointerEvents: 'auto', flexShrink: 0 }}
+            aria-label="Dismiss"
+          >
+            &times;
+          </button>
         </div>
       )}
     </div>

@@ -56,7 +56,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
   useEffect(() => {
     if (isVideoOn) {
       const constraints = {
-        video: selectedCamera ? { deviceId: { exact: selectedCamera }, width: 640, height: 480 } : { width: 640, height: 480 },
+        video: selectedCamera ? { deviceId: { exact: selectedCamera }, width: { ideal: 1280 }, height: { ideal: 720 } } : { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false
       };
       navigator.mediaDevices.getUserMedia(constraints)
@@ -130,13 +130,13 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '1.2fr 1fr',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
         gap: '2.5rem',
         alignItems: 'start'
       }} className="grid-2">
         
         {/* Left Column: Camera Preview Box */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: 0 }}>
           <div style={{
             position: 'relative',
             aspectRatio: '16/9',
@@ -304,7 +304,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
         </div>
 
         {/* Right Column: Branded Meeting Info & Joins */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: 0 }}>
           <div className="glass-panel" style={{
             padding: '2rem',
             display: 'flex',

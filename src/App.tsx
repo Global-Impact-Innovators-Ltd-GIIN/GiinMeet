@@ -791,7 +791,12 @@ function App() {
     window.addEventListener('hashchange', handleHashChange);
     handleHashChange();
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+    // Fix Round 8 (#2): re-run when the signed-in user becomes known.
+    // On a cold page load the session restores asynchronously, so the
+    // first run can see no user and skip the host bypass — the host
+    // then lands in the join gate instead of straight into the room.
+    // The handler is idempotent for every other case.
+  }, [user]);
 
   // Sync session and fetch profile details on load
   useEffect(() => {
@@ -997,7 +1002,7 @@ function App() {
           let data = await giinApi.getMeetings(user.id);
 
           if (data && data.length > 0) {
-            const mapped: Meeting[] = data.map((m: any) => ({
+            const mapped: Meeting[] = data.filter((m: any) => m.status !== 'Cancelled').map((m: any) => ({
               id: m.id,
               title: m.title,
               time: m.time || new Date().toISOString(),
@@ -1030,6 +1035,51 @@ function App() {
       loadMeetings();
     }
   }, [user]);
+
+  // Fix Round 8 (Evidence 2): a dashboard tab left open never
+  // refetched its history — an ended meeting stayed "IN PROGRESS"
+  // with a Join Now button until a manual reload. Refetch on focus,
+  // on becoming visible, and every 60 s while the tab is open, using
+  // the same server-first merge as the startup load.
+  const refreshMeetingHistory = async () => {
+    if (!user?.id) return;
+    try {
+      const data = await giinApi.getMeetings(user.id);
+      if (!data) return;
+      const mapped: Meeting[] = data
+        .filter((m: any) => m.status !== 'Cancelled')
+        .map((m: any) => ({
+          id: m.id,
+          title: m.title,
+          time: m.time || new Date().toISOString(),
+          duration: m.duration || '40m limit',
+          status: m.status as 'Completed' | 'In Progress' | 'Scheduled',
+          host: m.host || 'You',
+          passcode: m.passcode
+        }));
+      setMeetingHistory(prev => {
+        const merged = [...mapped];
+        prev.forEach((cm: any) => {
+          if (!merged.some(m => m.id === cm.id)) merged.push(cm);
+        });
+        return merged;
+      });
+    } catch (err) {
+      console.warn('[GiinMeet] Meeting history refresh failed:', err);
+    }
+  };
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) void refreshMeetingHistory(); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = setInterval(() => { if (!document.hidden) void refreshMeetingHistory(); }, 60000);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // Active call states
   const [activeCallTitle, setActiveCallTitle] = useState<string | null>(null);
@@ -1580,6 +1630,19 @@ function App() {
     };
   }, [user]);
 
+
+  // Fix Round 8 (#12): cancel a scheduled meeting. The row is marked
+  // Cancelled on the server and dropped from the history here, so a
+  // cancelled meeting never renders again.
+  const handleCancelMeeting = async (meetingId: string, title: string) => {
+    if (!window.confirm(`Cancel "${title}"? Guests with the link will no longer be able to join.`)) return;
+    const { error } = await giinApi.updateMeetingStatus(meetingId, 'Cancelled');
+    if (error) {
+      window.alert('Could not cancel the meeting — please try again.');
+      return;
+    }
+    setMeetingHistory(prev => prev.filter(m => m.id !== meetingId));
+  };
 
   const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null }) => {
     if (!user || !user.id) {
@@ -2571,6 +2634,7 @@ function App() {
               onNavigate={setCurrentView}
               onStartMeeting={handleStartCall}
               meetingHistory={meetingHistory}
+              onCancelMeeting={handleCancelMeeting}
               onAddMeeting={handleAddMeeting}
               userName={user?.name || userName}
               userDomain={user?.domain}

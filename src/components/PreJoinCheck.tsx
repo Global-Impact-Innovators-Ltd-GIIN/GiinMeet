@@ -76,7 +76,18 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   onComplete,
   onBack,
 }) => {
-  const [displayName, setDisplayName] = useState(initialDisplayName || user?.name || '');
+  // Fix Round 8 (#1): pre-fill the name from the last join on this
+  // device (saved on every successful Continue) so a returning guest
+  // is never blocked by an empty name field they did not notice.
+  const [displayName, setDisplayName] = useState(() => {
+    if (initialDisplayName) return initialDisplayName;
+    if (user?.name) return user.name;
+    try {
+      return localStorage.getItem(`giin_display_name_${meetingId}`) || '';
+    } catch (e) {
+      return '';
+    }
+  });
   const [cameraStatus, setCameraStatus] = useState<CheckStatus>('checking');
   const [micStatus, setMicStatus] = useState<CheckStatus>('checking');
   // Speaker starts as 'warn' ("not tested yet"), NOT 'checking': nothing
@@ -110,6 +121,22 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
   const speakerTimerRef = useRef<number | null>(null);
+
+  // Fix Round 8 (#1): the Continue button never sits dead any more.
+  // When it cannot proceed, a tap explains the exact blocker, scrolls
+  // to it and highlights it. On a phone there is no hover tooltip, so
+  // a grey disabled button with no feedback is a dead end.
+  const [blockerMessage, setBlockerMessage] = useState<string | null>(null);
+  const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  // Live mirrors of the check states, so the settle watchdog reads the
+  // truth instead of the stale values its closure captured at mount.
+  const cameraStatusRef = useRef<CheckStatus>('checking');
+  const micStatusRef = useRef<CheckStatus>('checking');
+  const networkStatusRef = useRef<CheckStatus>('checking');
+  useEffect(() => { cameraStatusRef.current = cameraStatus; }, [cameraStatus]);
+  useEffect(() => { micStatusRef.current = micStatus; }, [micStatus]);
+  useEffect(() => { networkStatusRef.current = networkStatus; }, [networkStatus]);
 
   const stopStream = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -146,7 +173,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       const savedCam = useSaved ? localStorage.getItem('giin_selected_camera') || '' : '';
       const savedMic = useSaved ? localStorage.getItem('giin_selected_mic') || '' : '';
       const p = navigator.mediaDevices.getUserMedia({
-        video: savedCam ? { deviceId: { exact: savedCam }, width: 640, height: 480 } : { width: 640, height: 480 },
+        video: savedCam ? { deviceId: { exact: savedCam }, width: { ideal: 1280 }, height: { ideal: 720 } } : { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: savedMic
           ? { deviceId: { exact: savedMic }, echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: { ideal: 1 } }
           : { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: { ideal: 1 } },
@@ -296,9 +323,28 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       }
     };
 
+    // Fix Round 8 (#1): global settle. Every step above is bounded on
+    // its own, but a wedge outside them (a permissions query that never
+    // settles, a meter that never starts) used to leave a check on
+    // "Checking..." forever with no escape. After 20 s, anything still
+    // checking fails honestly, so the join-without-devices escape and
+    // the Continue explanation always appear.
+    const settleTimer = window.setTimeout(() => {
+      if (!active) return;
+      if (cameraStatusRef.current === 'checking') {
+        setCameraError('The camera check timed out - the browser never answered. Press Retry, or join without camera/microphone below.');
+        setCameraStatus('fail');
+      }
+      if (micStatusRef.current === 'checking') {
+        setMicError('The microphone check timed out - the browser never answered. Press Retry, or join without camera/microphone below.');
+        setMicStatus('fail');
+      }
+      if (networkStatusRef.current === 'checking') setNetworkStatus('fail');
+    }, 20000);
     runChecks();
     return () => {
       active = false;
+      window.clearTimeout(settleTimer);
       stopStream();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -388,6 +434,38 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
     (joinWithoutDevices ||
       (cameraStatus !== 'fail' && micStatus !== 'fail' && cameraStatus !== 'checking' && micStatus !== 'checking'));
 
+  // Fix Round 8 (#1): the first blocker, in the order the user meets
+  // it on the screen — name, connection, camera, microphone.
+  const firstBlocker = (): { key: string; text: string } | null => {
+    if (!displayName.trim()) return { key: 'name', text: 'Enter your display name above — the host and other participants will see this name.' };
+    if (networkStatus === 'fail' && !proceedDespiteNetwork) return { key: 'network', text: 'The connection check failed. Tap "Continue anyway" in the amber box above, or press Retry checks.' };
+    if (networkStatus === 'checking') return { key: 'network', text: 'The connection check is still running — give it a moment, or press Retry checks.' };
+    if (cameraStatus === 'checking' || micStatus === 'checking') return { key: cameraStatus === 'checking' ? 'camera' : 'mic', text: 'The camera/microphone check is still running — give it a moment, or tick "Join without camera / microphone" below.' };
+    if (cameraStatus === 'fail' && !joinWithoutDevices) return { key: 'camera', text: 'Your camera is not working — press Retry, or tick "Join without camera / microphone" below.' };
+    if (micStatus === 'fail' && !joinWithoutDevices) return { key: 'mic', text: 'Your microphone is not working — press Retry, or tick "Join without camera / microphone" below.' };
+    return null;
+  };
+
+  const handleContinueClick = () => {
+    if (canProceed) {
+      setBlockerMessage(null);
+      proceed();
+      return;
+    }
+    const blocker = firstBlocker();
+    if (!blocker) {
+      setBlockerMessage('Something is still being checked — give it a moment, then tap Continue again.');
+      return;
+    }
+    setBlockerMessage(blocker.text);
+    setHighlightKey(blocker.key);
+    window.setTimeout(() => setHighlightKey(null), 4000);
+    const targetId = blocker.key === 'name' ? 'pjc-name-field' : `pjc-${blocker.key}-row`;
+    const el = document.getElementById(targetId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (blocker.key === 'name') nameInputRef.current?.focus();
+  };
+
   const proceed = () => {
     stopStream();
     try {
@@ -407,6 +485,8 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
     detail,
     fix,
     children,
+    id,
+    highlight,
   }: {
     icon: React.ReactNode;
     title: string;
@@ -414,11 +494,16 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
     detail: string;
     fix?: string;
     children?: React.ReactNode;
+    id?: string;
+    highlight?: boolean;
   }) => (
     <div
+      id={id}
       style={{
         display: 'flex',
         gap: '0.75rem',
+        outline: highlight ? '2px solid #EF4444' : 'none',
+        outlineOffset: '2px',
         padding: '0.85rem 1rem',
         borderRadius: '10px',
         border: `1px solid ${status === 'fail' ? 'rgba(239,68,68,0.5)' : status === 'pass' ? 'rgba(16,185,129,0.4)' : 'var(--border-color)'}`,
@@ -496,7 +581,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
         </div>
 
         {/* Display name — the single source the Waitroom then uses */}
-        <div>
+        <div id="pjc-name-field" style={highlightKey === 'name' ? { outline: '2px solid #EF4444', outlineOffset: '2px', borderRadius: '10px', padding: '0.25rem' } : undefined}>
           <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
             <User size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} />
             Your display name
@@ -505,6 +590,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             type="text"
             className="premium-input"
             placeholder="Your name, as others will see it"
+            ref={nameInputRef}
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             style={{ height: '46px' }}
@@ -515,6 +601,8 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
         {/* Checks */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           <Row
+            id="pjc-camera-row"
+            highlight={highlightKey === 'camera'}
             icon={<Video size={16} />}
             title="Camera"
             status={cameraStatus}
@@ -525,6 +613,8 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
           </Row>
 
           <Row
+            id="pjc-mic-row"
+            highlight={highlightKey === 'mic'}
             icon={<Mic size={16} />}
             title="Microphone"
             status={micStatus}
@@ -563,6 +653,8 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
           </Row>
 
           <Row
+            id="pjc-network-row"
+            highlight={highlightKey === 'network'}
             icon={networkStatus === 'fail' ? <WifiOff size={16} /> : <Wifi size={16} />}
             title="Connection"
             status={networkStatus}
@@ -607,16 +699,20 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
           <button
             type="button"
             className="premium-btn premium-btn-primary"
-            style={{ flex: 2, justifyContent: 'center', padding: '0.9rem', fontSize: '1rem', fontWeight: 700, opacity: canProceed ? 1 : 0.5, cursor: canProceed ? 'pointer' : 'not-allowed' }}
-            disabled={!canProceed}
-            onClick={proceed}
-            title={!canProceed ? 'Finish the checks above first — a name, a live connection, and a working camera/microphone (or choose to join without them).' : 'Continue to the meeting'}
+            style={{ flex: 2, justifyContent: 'center', padding: '0.9rem', fontSize: '1rem', fontWeight: 700, opacity: canProceed ? 1 : 0.85, cursor: 'pointer' }}
+            onClick={handleContinueClick}
+            title={canProceed ? 'Continue to the meeting' : 'Tap to see what is still blocking you'}
           >
             <span>Continue</span>
             <ArrowRight size={18} />
           </button>
         </div>
-        {!canProceed && (
+        {blockerMessage && (
+          <p role="alert" style={{ fontSize: '0.85rem', color: '#FCA5A5', backgroundColor: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '8px', padding: '0.6rem 0.8rem', margin: 0, textAlign: 'left', lineHeight: 1.45 }}>
+            {blockerMessage}
+          </p>
+        )}
+        {!canProceed && !blockerMessage && (
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>
             {displayName.trim() ? 'Fix the failed checks above (or choose to join without camera/microphone) to continue.' : 'Enter your display name to continue.'}
           </p>

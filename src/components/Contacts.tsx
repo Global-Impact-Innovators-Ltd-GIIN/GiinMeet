@@ -50,6 +50,12 @@ export const Contacts: React.FC<ContactsProps> = ({
   const [showDetailsMobile, setShowDetailsMobile] = useState(false);
   
   const [contacts, setContacts] = useState<Contact[]>([]);
+  // Fix Round 8: a failed load used to look identical to "no
+  // contacts" — the page claimed the list was empty when the query
+  // had actually failed. Loading, error and empty are distinct now.
+  const [contactsLoading, setContactsLoading] = useState(true);
+  const [contactsError, setContactsError] = useState('');
+  const [contactsRefreshNonce, setContactsRefreshNonce] = useState(0);
   const [selectedContactId, setSelectedContactId] = useState<string>('');
   const selectedContact = contacts.find(c => c.id === selectedContactId) || contacts[0];
   const [onlinePresences, setOnlinePresences] = useState<{ [key: string]: string }>({});
@@ -94,7 +100,9 @@ export const Contacts: React.FC<ContactsProps> = ({
 
   useEffect(() => {
     const loadWorkspaceContacts = async () => {
-      if (!userDomain) return;
+      if (!userDomain) { setContactsLoading(false); return; }
+      setContactsLoading(true);
+      setContactsError('');
       try {
         const dbProfiles = await giinApi.getContacts(userDomain);
         if (dbProfiles) {
@@ -134,11 +142,25 @@ export const Contacts: React.FC<ContactsProps> = ({
         }
       } catch (err) {
         console.error('Failed to query workspace contacts:', err);
+        setContactsError('Could not load your contacts — check your connection and try again.');
+      } finally {
+        setContactsLoading(false);
       }
     };
 
     loadWorkspaceContacts();
-  }, [userDomain]);
+  }, [userDomain, contactsRefreshNonce]);
+
+  // Fix Round 8: refetch contacts when the tab comes back into focus.
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) setContactsRefreshNonce(n => n + 1); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   // Real-time Presence sync with Supabase
   useEffect(() => {
@@ -724,7 +746,18 @@ export const Contacts: React.FC<ContactsProps> = ({
                   ))}
                 </div>
               ))}
-              {filteredContacts.length === 0 && (
+              {contactsLoading && (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0', fontSize: '0.9rem' }}>
+                  Loading contacts…
+                </div>
+              )}
+              {!contactsLoading && contactsError && (
+                <div style={{ textAlign: 'center', padding: '2rem 0', fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center' }}>
+                  <span style={{ color: '#FCA5A5' }}>{contactsError}</span>
+                  <button className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 1rem', fontSize: '0.8rem' }} onClick={() => setContactsRefreshNonce(n => n + 1)}>Retry</button>
+                </div>
+              )}
+              {!contactsLoading && !contactsError && filteredContacts.length === 0 && (
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0', fontSize: '0.9rem' }}>
                   No contacts found
                 </div>
