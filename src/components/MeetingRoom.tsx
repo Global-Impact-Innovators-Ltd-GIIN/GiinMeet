@@ -160,7 +160,7 @@ export const getWebRTCScreenshareConstraints = () => {
   };
 };
 
-import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink } from '../supabaseClient';
+import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink, isMeetingHostForUser } from '../supabaseClient';
 
 // Helper functions defined outside the component to satisfy purity rules
 const generateRandomId = () => {
@@ -335,12 +335,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [waitingList, setWaitingList] = useState<any[]>([]);
   const [initialNotes, setInitialNotes] = useState<string>('');
   const [localAdminId, setLocalAdminId] = useState<string>('');
+  // Email-fallback host match (see isMeetingHostForUser): set when the
+  // meeting row loads, so a host whose meeting was created under their
+  // other auth UUID still gets host powers in the room.
+  const [hostEmailMatch, setHostEmailMatch] = useState(false);
   // Host truth: the meeting row's admin_id is the current host (it moves
   // on transfer). The isHost prop is only the fallback until the row
   // loads; localAdminId is the live override from host-transfer signals.
   // (Fix Round 6 / Phase 6: the old derivation never consulted the row,
   // so a transferred host gained no powers and the old host kept them.)
-  const isAdmin = (meetingAdminId ? meetingAdminId === currentUser?.id : isHost) || (currentUser != null && localAdminId === currentUser.id);
+  const isAdmin = (meetingAdminId ? meetingAdminId === currentUser?.id : isHost) || (currentUser != null && localAdminId === currentUser.id) || hostEmailMatch;
 
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [selectedNewAdminId, setSelectedNewAdminId] = useState<string>('');
@@ -2727,7 +2731,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // meeting row now - sync the toggle from the server value on
           // entry, so a host who re-opens the room sees the real state.
           void giinApi.getMeetingLock(meetingId).then(locked => setIsMeetingLocked(locked)).catch(() => { /* best-effort: keep the last known value */ });
-          const amHost = isHost || (currentUser?.id && (data.admin_id === currentUser.id || data.user_id === currentUser.id));
+          const emailHost = await isMeetingHostForUser(data, currentUser);
+          if (emailHost) setHostEmailMatch(true);
+          const amHost = isHost || emailHost;
           if (amHost) {
             const hostPasscode = await giinApi.getMeetingPasscode(meetingId);
             if (hostPasscode) setPasscode(hostPasscode);

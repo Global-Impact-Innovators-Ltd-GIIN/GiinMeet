@@ -225,6 +225,40 @@ export const isMeetingHost = (
   return meeting.user_id === userId;
 };
 
+// Host check that survives a split identity: Supabase does not link a
+// Google sign-in to an existing email/password user, so the same person
+// (same email) can hold TWO auth UUIDs. A meeting created under one UUID
+// is then invisible to, and unjoinable as host by, the other — the host
+// lands in their own waiting room and the meeting is missing from their
+// log (seen live 2026-11-14, meeting af6e9313). The verified account
+// email is the same human either way (only the email owner can hold a
+// live session for it), so a host match falls back to the meeting
+// creator's profile email. Profiles are publicly readable (directory
+// discovery). Cached per meeting+user: the join path calls this on
+// every hash change and waitroom mount.
+const hostEmailMatchCache = new Map<string, boolean>();
+export const isMeetingHostForUser = async (
+  meeting: { admin_id?: string | null; user_id?: string | null } | null | undefined,
+  user: { id?: string | null; email?: string | null } | null | undefined
+): Promise<boolean> => {
+  if (!meeting || !user?.id) return false;
+  if (isMeetingHost(meeting, user.id)) return true;
+  const email = (user.email || '').trim().toLowerCase();
+  if (!email) return false;
+  const creatorId = meeting.admin_id || meeting.user_id;
+  if (!creatorId) return false;
+  const key = `${creatorId}|${email}`;
+  const cached = hostEmailMatchCache.get(key);
+  if (cached !== undefined) return cached;
+  let match = false;
+  try {
+    const { data } = await giinApi.getProfile(creatorId);
+    match = !!data && String((data as any).email || '').trim().toLowerCase() === email;
+  } catch (e) { match = false; }
+  hostEmailMatchCache.set(key, match);
+  return match;
+};
+
 export const ensureMeetingRoom = async (
   meetingId: string,
   roomName: string,
@@ -534,6 +568,37 @@ export const giinApi = {
       .order('time', { ascending: false });
     if (error) throw new Error(`Could not load your meetings: ${error.message}`);
     return data || [];
+  },
+
+  // Meetings created by ANY auth account sharing one email (see
+  // isMeetingHostForUser): profiles are publicly readable, so look up
+  // every profile id for the email and fetch those meetings too.
+  getMeetingsForEmail: async (email: string) => {
+    const clean = (email || '').trim().toLowerCase();
+    if (!clean) return [];
+    const { data: profiles, error: pErr } = await supabase
+      .from('profiles')
+      .select('id')
+      .ilike('email', clean);
+    if (pErr || !profiles || profiles.length === 0) return [];
+    const ids = profiles.map((p: any) => p.id);
+    const { data, error } = await supabase
+      .from('meetings')
+      .select(MEETING_PUBLIC_COLUMNS)
+      .in('user_id', ids)
+      .order('time', { ascending: false });
+    if (error) throw new Error(`Could not load your meetings: ${error.message}`);
+    return data || [];
+  },
+
+  // History for one human: their own meetings plus any created under a
+  // second auth account sharing their email, deduplicated by id.
+  getMeetingsForUser: async (userId: string, email?: string | null) => {
+    const own = await giinApi.getMeetings(userId);
+    if (!email) return own;
+    const others = await giinApi.getMeetingsForEmail(email);
+    const seen = new Set((own as any[]).map((m: any) => m.id));
+    return [...(own as any[]), ...(others as any[]).filter((m: any) => !seen.has(m.id))];
   },
 
   // Save a new meeting with a random stored passcode, and create the LiveKit

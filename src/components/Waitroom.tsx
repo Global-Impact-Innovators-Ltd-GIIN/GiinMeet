@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, ArrowLeft, Loader2, Sparkles, UserPlus, CheckCircle } from 'lucide-react';
-import { giinApi, supabase, isMeetingHost } from '../supabaseClient';
+import { giinApi, supabase, isMeetingHostForUser } from '../supabaseClient';
 
 interface WaitroomProps {
   meetingId: string;
@@ -131,7 +131,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           }
           // Host bypass (server truth): the meeting's creator never verifies
           // a passcode and never waits. Admit them straight into the room.
-          if (user?.id && isMeetingHost(data, user.id)) {
+          if (user?.id && (await isMeetingHostForUser(data, user))) {
             try {
               const hostRow: any = await giinApi.joinMeetingRoom(meetingId, user.name || 'You', user.id, 'Admin', 'Admitted');
               if (hostRow?.id) {

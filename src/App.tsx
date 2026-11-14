@@ -18,7 +18,7 @@ import { Waitroom } from './components/Waitroom';
 import { PreJoinCheck } from './components/PreJoinCheck';
 import { Superadmin } from './components/Superadmin';
 import { MeetingLobby } from './components/MeetingLobby';
-import { giinApi, supabase, getTransparentLogo, isMeetingHost } from './supabaseClient';
+import { giinApi, supabase, getTransparentLogo, isMeetingHost, isMeetingHostForUser } from './supabaseClient';
 import { encryptMessage, decryptMessage } from './services/e2ee';
 
 
@@ -800,7 +800,7 @@ function App() {
         if (me?.id) {
           try {
             const { data } = await giinApi.getMeetingDetails(id);
-            if (data && isMeetingHost(data, me.id)) {
+            if (data && (await isMeetingHostForUser(data, me))) {
               try {
                 const hostRow: any = await giinApi.joinMeetingRoom(id, me.name || 'You', me.id, 'Admin', 'Admitted');
                 if (hostRow?.id) {
@@ -1060,7 +1060,7 @@ function App() {
             setMeetingHistory(cached);
           }
 
-          let data = await giinApi.getMeetings(user.id);
+          let data = await giinApi.getMeetingsForUser(user.id, user.email);
 
           if (data && data.length > 0) {
             const mapped: Meeting[] = data.filter((m: any) => m.status !== 'Cancelled').map((m: any) => ({
@@ -1105,7 +1105,7 @@ function App() {
   const refreshMeetingHistory = async () => {
     if (!user?.id) return;
     try {
-      const data = await giinApi.getMeetings(user.id);
+      const data = await giinApi.getMeetingsForUser(user.id, user.email);
       if (!data) return;
       const mapped: Meeting[] = data
         .filter((m: any) => m.status !== 'Cancelled')
@@ -1356,7 +1356,7 @@ function App() {
           // Anyone else goes through the waiting room like any other
           // joiner: passcode + host admission. Never register a joiner
           // as Admin — the old code did, which bypassed both.
-          const isCallerHost = data.admin_id === user.id || data.user_id === user.id;
+          const isCallerHost = await isMeetingHostForUser(data, user);
           if (!isCallerHost) {
             const joinHash = `#/join?id=${joinId}` + (joinPasscode ? `&passcode=${joinPasscode}` : '');
             window.location.hash = joinHash;
