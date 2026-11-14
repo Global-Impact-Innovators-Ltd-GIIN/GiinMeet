@@ -134,6 +134,12 @@ function App() {
   });
 
   const [joinMeetingData, setJoinMeetingData] = useState<{ meetingId: string; passcode: string } | null>(null);
+  // Phase 1 — personal room: while a #/room/<slug> link resolves to its
+  // session meeting, the app shows an "Opening your room…" card instead
+  // of the dashboard. resolvingRoomRef guards against resolving the same
+  // slug twice (the hash listener runs on mount and on every change).
+  const [resolvingPersonalRoom, setResolvingPersonalRoom] = useState(false);
+  const resolvingRoomRef = useRef<string | null>(null);
   // Password recovery: Supabase fires PASSWORD_RECOVERY when the user
   // opens the reset link from their email. While this is set, the Auth
   // screen shows the new-password form instead of the dashboard.
@@ -749,6 +755,30 @@ function App() {
   useEffect(() => {
     const handleHashChange = async () => {
       const hash = window.location.hash;
+      if (!hash.startsWith('#/room/')) resolvingRoomRef.current = null;
+      // Phase 1 — personal room link (#/room/<slug>): resolve the slug to
+      // its session meeting server-side, then hand over to the normal
+      // #/join flow (host bypass for the signed-in host, passcode gate +
+      // waiting room for everyone else). The hash is rewritten, so this
+      // branch runs once per link open.
+      if (hash.startsWith('#/room/')) {
+        const slug = hash.substring(7).split('?')[0].split('/')[0].trim().toLowerCase();
+        if (!slug) return;
+        if (resolvingRoomRef.current === slug) return;
+        resolvingRoomRef.current = slug;
+        setResolvingPersonalRoom(true);
+        try {
+          const resolved = await giinApi.resolvePersonalRoom(slug);
+          setResolvingPersonalRoom(false);
+          window.location.hash = `#/join?id=${resolved.meetingId}`;
+        } catch (e: any) {
+          setResolvingPersonalRoom(false);
+          resolvingRoomRef.current = null;
+          window.alert(e?.message || 'This personal room link could not be opened.');
+          if (window.location.hash !== '#/dashboard') window.location.hash = '#/dashboard';
+        }
+        return;
+      }
       if (hash.startsWith('#/join')) {
         const urlParams = new URLSearchParams(hash.split('?')[1]);
         const id = urlParams.get('id') || '';
@@ -1847,6 +1877,19 @@ function App() {
   };
 
   const unreadNotifCount = notifications.filter(n => !n.read).length;
+
+  // Phase 1 — personal room link resolving: show an opening card instead
+  // of the dashboard while the slug is resolved to its session meeting.
+  if (resolvingPersonalRoom) {
+    return (
+      <div style={{ width: '100vw', height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-app)', padding: '1.5rem' }}>
+        <div className="glass-panel" style={{ padding: '2rem', maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', fontFamily: 'var(--font-heading)' }}>Opening your personal room…</h2>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Finding the room and starting your session. This takes a moment.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (currentView === 'join' && joinMeetingData) {
     // Pre-join prerequisite check FIRST (defect #1): guests who follow a

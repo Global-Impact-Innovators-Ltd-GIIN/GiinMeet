@@ -67,6 +67,35 @@ export const buildJoinLink = (meetingId: string, passcode?: string | null): stri
   return passcode ? `${base}&passcode=${passcode}` : base;
 };
 
+// Personal rooms (Phase 1): one permanent room per user, addressed by a
+// stable slug under the user's name — the link never changes, so it can be
+// printed on a card, put in an email signature, or shared once in a group.
+// The slug is URL-safe, lowercase, and unique across all users.
+export const slugifyPersonalRoom = (source: string): string => {
+  const slug = (source || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 30);
+  return slug || 'room';
+};
+
+export const buildPersonalRoomLink = (slug: string): string => {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}/#/room/${slug}`;
+};
+
+export interface PersonalRoom {
+  id: string;
+  user_id: string;
+  slug: string;
+  title: string;
+  passcode?: string | null;
+  require_waiting_room?: boolean;
+}
+
 // Columns of `meetings` the browser is allowed to read. The `passcode`
 // column is deliberately NOT in this list: it is hidden from anon reads
 // by giinmeet_passcode_lockdown.sql, so every client-side meetings query
@@ -899,6 +928,88 @@ export const giinApi = {
       data.require_waiting_room = data.require_waiting_room ?? true;
     }
     return { data, error: null };
+  },
+
+  // ---- Personal rooms (Phase 1) -------------------------------------------
+  // Fetch the signed-in user's personal room row, or null when there is
+  // none yet (or when the Phase 1 SQL has not been run — the table simply
+  // does not exist, and that is a null, never a crash).
+  getMyPersonalRoom: async (): Promise<PersonalRoom | null> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data, error } = await supabase
+        .from('personal_rooms')
+        .select('id,user_id,slug,title,passcode,require_waiting_room')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data as PersonalRoom;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  // Create the signed-in user's personal room. The slug comes from their
+  // name (email prefix as fallback); on a collision the next free suffix
+  // wins (name-2, name-3, ...). Returns the row, or null when it cannot be
+  // created — for example the Phase 1 SQL has not been run yet.
+  createPersonalRoom: async (): Promise<PersonalRoom | null> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const existing = await giinApi.getMyPersonalRoom();
+      if (existing) return existing;
+      let displayName: string | undefined = (user.user_metadata as any)?.name;
+      try {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('name,email')
+          .eq('id', user.id)
+          .maybeSingle();
+        if ((prof as any)?.name) displayName = (prof as any).name;
+        else if ((prof as any)?.email) displayName = String((prof as any).email).split('@')[0];
+      } catch (e) { /* fall back to the auth record */ }
+      if (!displayName) displayName = (user.email || 'room').split('@')[0];
+      const base = slugifyPersonalRoom(displayName);
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const slug = attempt === 0 ? base : `${base}-${attempt + 1}`;
+        const { data, error } = await supabase
+          .from('personal_rooms')
+          .insert([{
+            user_id: user.id,
+            slug,
+            title: `${displayName}'s Room`,
+            passcode: null,
+            require_waiting_room: true,
+          }])
+          .select('id,user_id,slug,title,passcode,require_waiting_room')
+          .maybeSingle();
+        if (!error && data) return data as PersonalRoom;
+        if (error && !/duplicate|unique/i.test((error as any)?.message || '')) return null;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  // Resolve a personal-room slug to the current session meeting. The
+  // session row is created server-side (/api/rooms/resolve) for the ROOM'S
+  // host, so a guest opening the link first never becomes the host.
+  // Returns { meetingId, title, hasPasscode, hostName } or throws with the
+  // server's message.
+  resolvePersonalRoom: async (slug: string): Promise<{ meetingId: string; title: string; hasPasscode: boolean; hostName: string }> => {
+    const res = await fetch('/api/rooms/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || (data as any).error) {
+      throw new Error((data as any).message || 'Could not open this personal room.');
+    }
+    return data as { meetingId: string; title: string; hasPasscode: boolean; hostName: string };
   },
 
   // Add a participant to the waiting room. Always writes the real

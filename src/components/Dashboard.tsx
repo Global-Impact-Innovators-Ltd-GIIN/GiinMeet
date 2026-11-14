@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw } from 'lucide-react';
-import { buildJoinLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry } from '../supabaseClient';
+import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2 } from 'lucide-react';
+import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry } from '../supabaseClient';
 
 interface Meeting {
   id: string;
@@ -176,6 +176,56 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Attendance (recorded in this browser during the meeting).
   const [attendanceMeetingId, setAttendanceMeetingId] = useState<string | null>(null);
 
+  // Phase 1 — personal room: one permanent link for this user. Fetched on
+  // mount (never auto-created — the user creates it with one click).
+  const [personalRoom, setPersonalRoom] = useState<{ slug: string; title: string } | null>(null);
+  const [personalRoomLoading, setPersonalRoomLoading] = useState(true);
+  const [personalRoomCreating, setPersonalRoomCreating] = useState(false);
+  const [personalRoomUnavailable, setPersonalRoomUnavailable] = useState(false);
+  const [copiedPersonalLink, setCopiedPersonalLink] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    giinApi.getMyPersonalRoom().then((room) => {
+      if (cancelled) return;
+      setPersonalRoom(room ? { slug: room.slug, title: room.title } : null);
+      setPersonalRoomLoading(false);
+    }).catch(() => {
+      if (!cancelled) setPersonalRoomLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleCreatePersonalRoom = async () => {
+    setPersonalRoomCreating(true);
+    setPersonalRoomUnavailable(false);
+    const room = await giinApi.createPersonalRoom();
+    setPersonalRoomCreating(false);
+    if (room) setPersonalRoom({ slug: room.slug, title: room.title });
+    else setPersonalRoomUnavailable(true);
+  };
+
+  const handleCopyPersonalLink = async () => {
+    if (!personalRoom) return;
+    try {
+      await navigator.clipboard.writeText(buildPersonalRoomLink(personalRoom.slug));
+      setCopiedPersonalLink(true);
+      setTimeout(() => setCopiedPersonalLink(false), 2000);
+    } catch (e) {
+      window.alert(buildPersonalRoomLink(personalRoom.slug));
+    }
+  };
+
+  const handleStartPersonalRoom = async () => {
+    if (!personalRoom) return;
+    try {
+      const resolved = await giinApi.resolvePersonalRoom(personalRoom.slug);
+      window.location.hash = `#/join?id=${resolved.meetingId}`;
+    } catch (e: any) {
+      window.alert(e?.message || 'Could not open your personal room.');
+    }
+  };
+
   // Fetch the host-only passcode for a meeting (the passcode column is
   // hidden from anon reads), then run the callback with the full link.
   const withHostPasscode = async (meeting: Meeting) => {
@@ -264,6 +314,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <p className="welcome-subtext">
           Connect, collaborate, and virtualize with HD audio and video.
         </p>
+      </div>
+
+      {/* Phase 1 — Your personal room: one permanent link. */}
+      <div className="glass-panel" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <Link2 size={18} color="var(--color-accent)" />
+          <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)' }}>Your personal room</h3>
+        </div>
+        {personalRoomLoading ? (
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Loading your room…</p>
+        ) : personalRoom ? (
+          <>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>One link, always the same. Share it once — anyone with it can join your room.</p>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <code style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>{buildPersonalRoomLink(personalRoom.slug)}</code>
+              <button className="premium-btn premium-btn-secondary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleCopyPersonalLink}>{copiedPersonalLink ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy link</>}</button>
+              <button className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleStartPersonalRoom}><Video size={14} /> Start my room</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Get one permanent link for your room — it never changes, so you only ever share it once.</p>
+            <div>
+              <button className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleCreatePersonalRoom} disabled={personalRoomCreating}>{personalRoomCreating ? 'Creating…' : 'Create my personal room'}</button>
+            </div>
+            {personalRoomUnavailable && (
+              <p style={{ fontSize: '0.8rem', color: '#F59E0B' }}>Personal rooms need the Phase 1 database setup — run giinmeet_phase1.sql in the Supabase SQL Editor first.</p>
+            )}
+          </>
+        )}
       </div>
 
       {/* Quick Action Grid */}
