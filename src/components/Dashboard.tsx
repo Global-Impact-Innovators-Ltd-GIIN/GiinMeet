@@ -412,11 +412,38 @@ export const Dashboard: React.FC<DashboardProps> = ({
       display: 'flex',
       flexDirection: 'column'
     }}>
-      {/* Welcome Banner — static: new blue/gold/white backdrop, still image,
-          still text. Original static layout restored (heading + subtext),
-          set in white and gold on the dark image for contrast. */}
-      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: '16px', marginBottom: '1.5rem', minHeight: '190px', display: 'flex', alignItems: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.35)' }}>
-        <img src="/welcome-banner-bg.webp" alt="" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+      {/* Welcome Banner — animated in code: laptop opens, a meeting plays on
+          its screen, it closes, then the GIIN logo displays — After Effects
+          style, looping every 10s. Text stays exactly as it was (static,
+          white, name gold). No video file: the video budget is exhausted,
+          so this motion is pure CSS built live in the banner. */}
+      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: '16px', marginBottom: '1.5rem', minHeight: '190px', display: 'flex', alignItems: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', background: 'linear-gradient(115deg, #020617 0%, #001a4c 55%, #0a2a6b 100%)' }}>
+        {/* Static fallback image — only shown when the user prefers reduced motion. */}
+        <img className="welcome-banner-static-fallback" src="/welcome-banner-bg.webp" alt="" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'none' }} />
+        {/* Animated scene (decorative, aria-hidden) */}
+        <div className="bl-anim" aria-hidden="true">
+          <div className="bl-orb bl-orb-gold" />
+          <div className="bl-orb bl-orb-white" />
+          <div className="bl-orb bl-orb-blue" />
+          <div className="bl-scene">
+            <div className="bl-laptop">
+              <div className="bl-screen">
+                <div className="bl-screen-face">
+                  <div className="bl-tile bl-tile-a"><span className="bl-person" /></div>
+                  <div className="bl-tile bl-tile-b"><span className="bl-person" /></div>
+                  <div className="bl-tile bl-tile-c"><span className="bl-person" /></div>
+                  <div className="bl-tile bl-tile-d"><span className="bl-person" /><span className="bl-speaking" /></div>
+                </div>
+              </div>
+              <div className="bl-base" />
+            </div>
+            <div className="bl-logo">
+              <div className="bl-logo-panel">
+                <img src="/logo.png" alt="" />
+              </div>
+            </div>
+          </div>
+        </div>
         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(2,6,23,0.88) 0%, rgba(2,6,23,0.55) 55%, rgba(2,6,23,0.25) 100%)' }} />
         <div style={{ position: 'relative', zIndex: 2, padding: '1.75rem 2rem' }}>
           <h1 className="welcome-heading" style={{ color: 'white' }}>
