@@ -390,14 +390,29 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Q&A banner: every new question pops an animated ticker banner for
   // everyone in the room (the sender sees it too), auto-dismissed after
-  // 8 seconds, closable, and tappable to open the Q&A Hub. The question
+  // 30 seconds, closable, and tappable to open the Q&A Hub. The question
   // itself still lives in the Hub — the banner is only the announcement.
   const [qaBanner, setQaBanner] = useState<{ id: string; text: string; author: string } | null>(null);
   const qaBannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showQaBanner = (q: { id: string; text: string; author: string }) => {
     setQaBanner({ id: q.id, text: q.text, author: q.author });
     if (qaBannerTimeoutRef.current) clearTimeout(qaBannerTimeoutRef.current);
-    qaBannerTimeoutRef.current = setTimeout(() => setQaBanner(null), 8000);
+    qaBannerTimeoutRef.current = setTimeout(() => setQaBanner(null), 30000);
+  };
+  // Re-announce: tapping a question in the Hub highlights it and shows it
+  // again as the banner for everyone — a reminder for unanswered
+  // questions. Receivers dedupe by id, so the question is never added
+  // twice to anyone's list; the broadcast only re-shows the banner.
+  const [highlightedQaId, setHighlightedQaId] = useState<string | null>(null);
+  const highlightQaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reannounceQuestion = (q: { id: string; text: string; author: string; upvotes: number; upvotedBy: string[]; createdAt: number; answered: boolean }) => {
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({ type: 'broadcast', event: 'new-question', payload: q });
+    }
+    showQaBanner({ id: q.id, text: q.text, author: q.author });
+    setHighlightedQaId(q.id);
+    if (highlightQaTimeoutRef.current) clearTimeout(highlightQaTimeoutRef.current);
+    highlightQaTimeoutRef.current = setTimeout(() => setHighlightedQaId(null), 30000);
   };
   const [isQAActive, setIsQAActive] = useState(false);
 
@@ -6121,7 +6136,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           </div>
         )}
         
-        {/* Q&A banner: a new question scrolls across for everyone for 8s.
+        {/* Q&A banner: a new question scrolls across for everyone for 30s.
             Tap it to open the Q&A Hub; the X dismisses it early. */}
         {qaBanner && (
           <div
@@ -6135,7 +6150,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             <span style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <span key={qaBanner.id} className="qa-banner-scroll-text" style={{ display: 'inline-block', whiteSpace: 'nowrap', fontSize: '0.9rem', fontWeight: 600, color: 'white', animationDuration: `${Math.min(10, Math.max(5, Math.ceil(qaBanner.text.length / 12)))}s` }}>{qaBanner.text}</span>
             </span>
-            <button onClick={(e) => { e.stopPropagation(); setQaBanner(null); }} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '1.1rem', cursor: 'pointer', flexShrink: 0, padding: 0, lineHeight: 1 }}>&times;</button>
+            <button onClick={(e) => { e.stopPropagation(); setQaBanner(null); setHighlightedQaId(null); }} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '1.3rem', cursor: 'pointer', flexShrink: 0, padding: '0.35rem 0.5rem', minWidth: '36px', minHeight: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>&times;</button>
           </div>
         )}
 
@@ -8208,16 +8223,19 @@ Media encrypted in transit (DTLS-SRTP).`;
                         const userId = currentUser?.id || myKey;
                         const hasUpvoted = q.upvotedBy.includes(userId);
                         return (
-                          <div 
-                            key={q.id} 
-                            style={{ 
-                              padding: '0.75rem 1rem', 
-                              borderRadius: '8px', 
-                              border: '1px solid var(--border-color)', 
-                              backgroundColor: 'rgba(255,255,255,0.02)',
-                              display: 'flex', 
+                          <div
+                            key={q.id}
+                            onClick={() => reannounceQuestion(q)}
+                            title="Tap to show this question again as a banner"
+                            style={{
+                              padding: '0.75rem 1rem',
+                              borderRadius: '8px',
+                              border: highlightedQaId === q.id ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
+                              backgroundColor: highlightedQaId === q.id ? 'rgba(250, 189, 2, 0.08)' : 'rgba(255,255,255,0.02)',
+                              display: 'flex',
                               alignItems: 'flex-start',
-                              gap: '0.75rem' 
+                              gap: '0.75rem',
+                              cursor: 'pointer'
                             }}
                           >
                             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
@@ -8225,15 +8243,15 @@ Media encrypted in transit (DTLS-SRTP).`;
                               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Asked by {q.author}</span>
                               {isAdmin && (
                                 <button
-                                  onClick={() => markQuestionAnswered(q.id, true)}
+                                  onClick={(e) => { e.stopPropagation(); markQuestionAnswered(q.id, true); }}
                                   style={{ background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: 0, textAlign: 'left' }}
                                 >
                                   ✓ Mark answered
                                 </button>
                               )}
                             </div>
-                            <button 
-                              onClick={() => upvoteQuestion(q.id)}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); upvoteQuestion(q.id); }}
                               style={{ 
                                 display: 'flex', 
                                 flexDirection: 'column', 
