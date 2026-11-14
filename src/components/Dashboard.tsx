@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2 } from 'lucide-react';
-import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, supabase } from '../supabaseClient';
+import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 
 interface Meeting {
   id: string;
@@ -708,6 +708,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       >
                         <Calendar size={14} />
                         <span>.ics</span>
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const full = await withHostPasscode(meeting);
+                          window.open(buildGoogleCalendarUrl(full), '_blank', 'noopener,noreferrer');
+                        }}
+                        className="premium-btn premium-btn-secondary"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        title="Add this meeting to Google Calendar (opens Google Calendar with the details pre-filled)"
+                      >
+                        <Calendar size={14} />
+                        <span>Google</span>
                       </button>
                       <button
                         onClick={() => openInviteModal(meeting)}
@@ -1595,6 +1607,17 @@ Media encrypted in transit (DTLS-SRTP).`;
             >
               <Calendar size={16} />
               <span>Add to Calendar (.ics)</span>
+            </button>
+            <button
+              onClick={async () => {
+                const full = await withHostPasscode(scheduledMeetingDetails);
+                window.open(buildGoogleCalendarUrl(full), '_blank', 'noopener,noreferrer');
+              }}
+              className="premium-btn premium-btn-secondary"
+              style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem' }}
+            >
+              <Calendar size={16} />
+              <span>Add to Google Calendar</span>
             </button>
 
             <button

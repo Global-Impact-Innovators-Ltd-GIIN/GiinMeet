@@ -239,6 +239,29 @@ export const buildWhatsAppInviteUrl = (meeting: { id: string; title: string; tim
   const digits = (phone || '').replace(/\D/g, '');
   return digits ? `https://wa.me/${digits}?text=${text}` : `https://api.whatsapp.com/send?text=${text}`;
 };
+
+// Phase 2 (#5) — Google Calendar booking, no-OAuth path: a
+// calendar.google.com template link with the meeting pre-filled
+// (title, start/end, join link as details + location). The host or
+// guest just saves it in their own Google Calendar — no OAuth client,
+// no keys, no account needed. The full two-way sync (creating the
+// event in the host's calendar from GiinMeet) still needs a Google
+// Cloud OAuth client — see docs/phase2-setup.md.
+export const buildGoogleCalendarUrl = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }): string => {
+  const start = new Date(meeting.time);
+  const mins = parseInt(String(meeting.duration || '60').replace(/\D/g, ''), 10) || 60;
+  const end = new Date(start.getTime() + mins * 60000);
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const link = buildJoinLink(meeting.id, meeting.passcode);
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: meeting.title,
+    dates: `${fmt(start)}/${fmt(end)}`,
+    details: `GIIN Meet video meeting. Join: ${link}`,
+    location: link,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+};
 // The CURRENT host is meetings.admin_id (it moves on transfer). The
 // creator (user_id) only counts when admin_id was never set (old rows).
 // (Fix Round 6 / Phase 6: the old OR meant a transferred-away host
