@@ -124,13 +124,14 @@ export const HelpCenter: React.FC = () => {
           padding: '1.1rem 1.25rem',
           borderRadius: 'var(--radius-md)',
           background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)',
-          color: 'white', boxShadow: 'var(--shadow-sm)'
+          color: 'white', boxShadow: 'var(--shadow-sm)',
+          border: '1px solid rgba(250,189,2,0.35)'
         }}>
           <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'rgba(250,189,2,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-accent)', flexShrink: 0 }}>
             <HelpCircle size={22} />
           </div>
           <div>
-            <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', margin: 0, lineHeight: 1.2 }}>Frequently Asked Questions</h2>
+            <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', margin: 0, lineHeight: 1.2, color: '#FFFFFF' }}>Frequently Asked Questions</h2>
             <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.75)', margin: '0.25rem 0 0' }}>Browse common user issues or use the search bar to find answers.</p>
           </div>
         </div>
@@ -154,7 +155,8 @@ export const HelpCenter: React.FC = () => {
             const isExpanded = expandedFAQIndex === index;
             return (
               <div 
-                key={index} 
+                key={index}
+                className="hc-faq" 
                 style={{ 
                   border: '1px solid var(--border-color)', 
                   borderRadius: 'var(--radius-md)', 

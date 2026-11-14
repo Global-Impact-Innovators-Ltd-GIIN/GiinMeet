@@ -3,7 +3,7 @@ import {
   User, Bell, Video, Shield, Globe, Moon, Sun, Save, Check, 
   Terminal, Volume2, Camera, Sliders, RefreshCw, 
   Smartphone, Activity, Database, Zap, Download, Keyboard,
-  Image as ImageIcon, Trash2, Cpu
+  Image as ImageIcon, Trash2, Cpu, Type, Palette
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
@@ -126,16 +126,34 @@ const PanelHeader = ({ icon: Icon, title, subtitle }: { icon: any; title: string
     padding: '1.1rem 1.25rem', marginBottom: '1.5rem',
     borderRadius: 'var(--radius-md)',
     background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)',
-    color: 'white', boxShadow: 'var(--shadow-sm)'
+    color: 'white', boxShadow: 'var(--shadow-sm)',
+    border: '1px solid rgba(250,189,2,0.35)'
   }}>
     <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'rgba(250,189,2,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-accent)', flexShrink: 0 }}>
       <Icon size={22} />
     </div>
     <div>
-      <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', margin: 0, lineHeight: 1.2 }}>{title}</h2>
+      <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', margin: 0, lineHeight: 1.2, color: '#FFFFFF' }}>{title}</h2>
       <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.75)', margin: '0.25rem 0 0' }}>{subtitle}</p>
     </div>
   </div>
+);
+
+// Section card: a premium grouped card inside a settings panel — icon chip,
+// title + subtitle header, then the fields. Presentation only; no behaviour change.
+const SectionCard = ({ icon: Icon, title, subtitle, children }: { icon?: any; title: string; subtitle?: string; children: React.ReactNode }) => (
+  <section className="stg-section">
+    <div className="stg-section-head">
+      {Icon ? (
+        <div className="stg-section-icon"><Icon size={17} /></div>
+      ) : null}
+      <div>
+        <h3 className="stg-section-title">{title}</h3>
+        {subtitle ? <p className="stg-section-sub">{subtitle}</p> : null}
+      </div>
+    </div>
+    {children}
+  </section>
 );
 
 export const Settings: React.FC<SettingsProps> = ({
@@ -800,6 +818,7 @@ export const Settings: React.FC<SettingsProps> = ({
             return (
               <button
                 key={cat.id}
+                className="stg-hub-btn"
                 onClick={() => setActiveCategory(cat.id as any)}
                 style={{
                   display: 'flex',
@@ -809,6 +828,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   borderRadius: 'var(--radius-md)',
                   border: 'none',
                   background: isSelected ? 'var(--color-primary)' : 'transparent',
+                  boxShadow: isSelected ? 'inset 3px 0 0 var(--color-accent)' : 'none',
                   color: isSelected ? 'white' : 'var(--text-main)',
                   textAlign: 'left',
                   cursor: 'pointer',
@@ -858,9 +878,10 @@ export const Settings: React.FC<SettingsProps> = ({
           <div>
             <PanelHeader icon={User} title="Profile Coordinates" subtitle="Update your corporate identification details, job specs, and contact numbers." />
             
-            <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '520px' }}>
+            <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '780px', width: '100%' }}>
+              <SectionCard icon={Camera} title="Profile Photo" subtitle="Your avatar shown across meetings and chat.">
               {/* Picture Upload */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginBottom: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
                 <input 
                   type="file" 
                   ref={fileInputRef} 
@@ -903,50 +924,56 @@ export const Settings: React.FC<SettingsProps> = ({
                   <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>PNG, JPG or JPEG up to 5MB.</span>
                 </div>
               </div>
+              </SectionCard>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <SectionCard icon={User} title="Identity" subtitle="How your name and role appear to other participants.">
+              <div className="stg-grid-2">
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Display Name</label>
                   <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="premium-input" required />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Email Address</label>
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="premium-input" required />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Phone Number</label>
-                  <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className="premium-input" />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Job Title / Role</label>
                   <input type="text" value={role} onChange={(e) => setRole(e.target.value)} className="premium-input" />
                 </div>
               </div>
+              </SectionCard>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <SectionCard icon={Smartphone} title="Contact Details" subtitle="Where we reach you — shown in full, never clipped.">
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Email Address</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="premium-input" required />
+              </div>
+              <div className="stg-grid-2" style={{ marginTop: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Phone Number</label>
+                  <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className="premium-input" />
+                </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Office Location</label>
                   <input type="text" value={location} onChange={(e) => setLocation(e.target.value)} className="premium-input" />
                 </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Primary Timezone</label>
-                  <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="premium-input">
-                    <option value="America/New_York">Eastern Time (New York)</option>
-                    <option value="America/Chicago">Central Time (Chicago)</option>
-                    <option value="America/Denver">Mountain Time (Denver)</option>
-                    <option value="America/Los_Angeles">Pacific Time (Los Angeles)</option>
-                    <option value="Europe/London">Greenwich Mean Time (London)</option>
-                    <option value="Europe/Berlin">Central European Time (Berlin)</option>
-                    <option value="Asia/Singapore">Singapore Standard Time (Singapore)</option>
-                    <option value="Asia/Tokyo">Japan Standard Time (Tokyo)</option>
-                    <option value="UTC">UTC / Coordinated Universal Time</option>
-                  </select>
-                </div>
               </div>
+              </SectionCard>
 
+              <SectionCard icon={Activity} title="Work & Time" subtitle="Your timezone sets meeting times across the platform.">
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Primary Timezone</label>
+                <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="premium-input">
+                  <option value="America/New_York">Eastern Time (New York)</option>
+                  <option value="America/Chicago">Central Time (Chicago)</option>
+                  <option value="America/Denver">Mountain Time (Denver)</option>
+                  <option value="America/Los_Angeles">Pacific Time (Los Angeles)</option>
+                  <option value="Europe/London">Greenwich Mean Time (London)</option>
+                  <option value="Europe/Berlin">Central European Time (Berlin)</option>
+                  <option value="Asia/Singapore">Singapore Standard Time (Singapore)</option>
+                  <option value="Asia/Tokyo">Japan Standard Time (Tokyo)</option>
+                  <option value="UTC">UTC / Coordinated Universal Time</option>
+                </select>
+              </div>
+              </SectionCard>
+
+              <SectionCard icon={Zap} title="Professional Skills" subtitle="Comma-separated — shown on your profile.">
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Professional Skills (comma-separated)</label>
                 <input 
@@ -957,44 +984,40 @@ export const Settings: React.FC<SettingsProps> = ({
                   placeholder="e.g. React, WebRTC, Devops" 
                 />
               </div>
+              </SectionCard>
 
-              {/* Social Media Handles */}
-              <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '1.5rem', marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, fontFamily: 'var(--font-heading)' }}>Social Directory Handles</h4>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>LinkedIn Profile URL</label>
-                    <input type="url" placeholder="https://linkedin.com/in/username" value={linkedin} onChange={(e) => setLinkedin(e.target.value)} className="premium-input" />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>GitHub Profile URL</label>
-                    <input type="url" placeholder="https://github.com/username" value={github} onChange={(e) => setGithub(e.target.value)} className="premium-input" />
-                  </div>
+              <SectionCard icon={Globe} title="Social Directory" subtitle="Your public profiles, linked from your workspace directory.">
+              <div className="stg-grid-2">
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>LinkedIn Profile URL</label>
+                  <input type="url" placeholder="https://linkedin.com/in/username" value={linkedin} onChange={(e) => setLinkedin(e.target.value)} className="premium-input" />
                 </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>X (Twitter) Profile URL</label>
-                    <input type="url" placeholder="https://x.com/username" value={twitter} onChange={(e) => setTwitter(e.target.value)} className="premium-input" />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Instagram Profile URL</label>
-                    <input type="url" placeholder="https://instagram.com/username" value={instagram} onChange={(e) => setInstagram(e.target.value)} className="premium-input" />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Facebook Profile URL</label>
-                    <input type="url" placeholder="https://facebook.com/username" value={facebook} onChange={(e) => setFacebook(e.target.value)} className="premium-input" />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>TikTok Profile URL</label>
-                    <input type="url" placeholder="https://tiktok.com/@username" value={tiktok} onChange={(e) => setTiktok(e.target.value)} className="premium-input" />
-                  </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>GitHub Profile URL</label>
+                  <input type="url" placeholder="https://github.com/username" value={github} onChange={(e) => setGithub(e.target.value)} className="premium-input" />
                 </div>
               </div>
+              <div className="stg-grid-2" style={{ marginTop: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>X (Twitter) Profile URL</label>
+                  <input type="url" placeholder="https://x.com/username" value={twitter} onChange={(e) => setTwitter(e.target.value)} className="premium-input" />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Instagram Profile URL</label>
+                  <input type="url" placeholder="https://instagram.com/username" value={instagram} onChange={(e) => setInstagram(e.target.value)} className="premium-input" />
+                </div>
+              </div>
+              <div className="stg-grid-2" style={{ marginTop: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Facebook Profile URL</label>
+                  <input type="url" placeholder="https://facebook.com/username" value={facebook} onChange={(e) => setFacebook(e.target.value)} className="premium-input" />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>TikTok Profile URL</label>
+                  <input type="url" placeholder="https://tiktok.com/@username" value={tiktok} onChange={(e) => setTikTok(e.target.value)} className="premium-input" />
+                </div>
+              </div>
+              </SectionCard>
 
               <button type="submit" className="premium-btn premium-btn-accent" style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem', marginTop: '0.25rem' }}>
                 <Save size={16} />
@@ -1009,11 +1032,10 @@ export const Settings: React.FC<SettingsProps> = ({
           <div>
             <PanelHeader icon={ImageIcon} title="Branding & Aesthetic Styles" subtitle="Customize global branding themes, accent colors, custom logo headers, and meeting layouts." />
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '520px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '780px', width: '100%' }}>
               
               {/* Brand Identity Details */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600 }}>Brand Identity Texts</span>
+              <SectionCard icon={Type} title="Brand Identity Texts" subtitle="The name and tagline shown across the platform.">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Company/App Name</label>
@@ -1034,12 +1056,10 @@ export const Settings: React.FC<SettingsProps> = ({
                     />
                   </div>
                 </div>
-              </div>
+              </SectionCard>
 
               {/* Custom Logo Upload */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Custom Branding Logo Header</span>
-                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>Upload your corporate brand icon to replace the default logo dynamically.</span>
+              <SectionCard icon={ImageIcon} title="Custom Branding Logo" subtitle="Upload your corporate brand icon to replace the default logo dynamically.">
                 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
                   <input type="file" ref={logoInputRef} onChange={handleLogoUpload} accept="image/*" style={{ display: 'none' }} />
@@ -1071,11 +1091,10 @@ export const Settings: React.FC<SettingsProps> = ({
                     )}
                   </div>
                 </div>
-              </div>
+              </SectionCard>
 
               {/* Theme Primary Accent */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Theme Primary Accent</span>
+              <SectionCard icon={Palette} title="Theme Primary Accent" subtitle="The accent colour used across buttons and highlights.">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center', marginBottom: '1rem' }}>
                   {[
                     { name: 'Azul Brant', primary: '#3B82F6', hover: '#2563EB' },
@@ -1127,11 +1146,10 @@ export const Settings: React.FC<SettingsProps> = ({
                     />
                   </div>
                 </div>
-              </div>
+              </SectionCard>
 
               {/* UI Theme Style Effect */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>UI Styling Theme Effect</span>
+              <SectionCard icon={Zap} title="UI Styling Theme Effect" subtitle="Choose the visual language of the whole app.">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                   {[
                     { id: 'glassmorphism', label: 'Glassmorphism' },
@@ -1156,12 +1174,11 @@ export const Settings: React.FC<SettingsProps> = ({
                     </button>
                   ))}
                 </div>
-              </div>
+              </SectionCard>
 
               {/* Glassmorphism Blur Filter (Only visible if glassmorphism is selected) */}
               {uiStyle === 'glassmorphism' && (
-                <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                  <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Glassmorphism Blur Filter</span>
+                <SectionCard icon={Sliders} title="Glassmorphism Blur Filter" subtitle="How frosted the glass panels look.">
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     {[
                       { id: 'frosted', label: 'Frosted Glass' },
@@ -1179,12 +1196,11 @@ export const Settings: React.FC<SettingsProps> = ({
                       </button>
                     ))}
                   </div>
-                </div>
+                </SectionCard>
               )}
 
               {/* Premium Typography (Fonts) */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Premium Typography (Fonts)</span>
+              <SectionCard icon={Type} title="Premium Typography (Fonts)" subtitle="Heading and body fonts for the whole app.">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {[
                     { id: 'sleek', label: 'Sleek Sans (Outfit / Inter)', heading: 'Outfit', body: 'Inter' },
@@ -1207,11 +1223,10 @@ export const Settings: React.FC<SettingsProps> = ({
                     );
                   })}
                 </div>
-              </div>
+              </SectionCard>
 
               {/* Corner Shapes (Border Radius) */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.65rem' }}>Corner Shapes (Border Radius)</span>
+              <SectionCard icon={Sliders} title="Corner Shapes (Border Radius)" subtitle="How sharp or rounded corners feel.">
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   {[
                     { val: '0', label: 'Sharp' },
@@ -1230,10 +1245,10 @@ export const Settings: React.FC<SettingsProps> = ({
                     </button>
                   ))}
                 </div>
-              </div>
+              </SectionCard>
 
               {/* Watermark & Layout Configuration */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <SectionCard icon={Video} title="Watermark & Layout Configuration" subtitle="Logo overlays on video feeds and the navigation layout.">
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Video Feed Watermark</label>
                   <select value={meetingWatermark} onChange={(e) => saveBrandingConfig(e.target.value, layoutStyle)} className="premium-input">
@@ -1281,7 +1296,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     <option value="header-only">Top Navbar Menu (Horizontal bar)</option>
                   </select>
                 </div>
-              </div>
+              </SectionCard>
 
             </div>
           </div>
@@ -1292,7 +1307,8 @@ export const Settings: React.FC<SettingsProps> = ({
           <div>
             <PanelHeader icon={Globe} title="Workspace Administration" subtitle="Manage domain registration rules, directory searches, export logs, and flush cache." />
             
-            <form onSubmit={handleWorkspaceSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '520px' }}>
+            <form onSubmit={handleWorkspaceSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '780px', width: '100%' }}>
+              <SectionCard icon={Globe} title="Workspace Identity" subtitle="Your workspace name and subdomain.">
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Workspace Name</label>
                 <input type="text" value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} className="premium-input" required />
@@ -1306,8 +1322,9 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600 }}>Directory Security & Visibility Rules</span>
+              </SectionCard>
+
+              <SectionCard icon={Shield} title="Directory Security & Visibility Rules" subtitle="Who can register and see the directory.">
                 
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8rem' }}>
                   <input type="checkbox" checked={gatedRegistration} onChange={() => setGatedRegistration(!gatedRegistration)} style={{ marginTop: '3px' }} />
@@ -1332,12 +1349,10 @@ export const Settings: React.FC<SettingsProps> = ({
                     <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Gated guest users must wait for host approval before being admitted.</span>
                   </div>
                 </label>
-              </div>
+              </SectionCard>
 
               {/* Data Portability Tools */}
-              <div style={{ border: '1.5px dashed var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-primary)' }}>Workspace Data Portability & Resets</span>
-                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Export your profile records and aesthetic settings, or clear temporary local storage configurations.</span>
+              <SectionCard icon={Download} title="Workspace Data Portability & Resets" subtitle="Export your profile records and aesthetic settings, or clear temporary local storage configurations.">
                 
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button type="button" onClick={handleExportWorkspace} className="premium-btn premium-btn-primary" style={{ flex: 1, fontSize: '0.75rem', gap: '4px', justifyContent: 'center' }}>
@@ -1349,7 +1364,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     <span>Flush App Cache</span>
                   </button>
                 </div>
-              </div>
+              </SectionCard>
 
               <button type="submit" className="premium-btn premium-btn-accent" style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem' }}>
                 <Save size={16} />
@@ -1364,7 +1379,8 @@ export const Settings: React.FC<SettingsProps> = ({
           <div>
             <PanelHeader icon={Video} title="Audio, Video & Filters" subtitle="Manage hardware inputs, test microphones, and adjust audio enhancement." />
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '780px', width: '100%' }}>
+              <SectionCard icon={Video} title="Input Sources" subtitle="Camera, microphone and speaker used in meetings.">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Camera Input Source</label>
@@ -1395,10 +1411,10 @@ export const Settings: React.FC<SettingsProps> = ({
                   {devicesList.speakers.length === 0 && <option value="">Default system speaker</option>}
                 </select>
               </div>
+              </SectionCard>
 
               {/* Audio enhancement filters */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-primary)' }}>Audio Settings</span>
+              <SectionCard icon={Volume2} title="Audio Settings" subtitle="Enhancement and spatial audio for your meetings.">
                 
 
 
@@ -1413,9 +1429,10 @@ export const Settings: React.FC<SettingsProps> = ({
                   </label>
                 </div>
 
-              </div>
+              </SectionCard>
 
               {/* Live Webcam & Microphone decibels tests */}
+              <SectionCard icon={Camera} title="Hardware Tests" subtitle="Test your camera and microphone live before joining a call.">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1458,6 +1475,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   </button>
                 </div>
               </div>
+              </SectionCard>
             </div>
           </div>
         )}
@@ -1467,7 +1485,8 @@ export const Settings: React.FC<SettingsProps> = ({
           <div>
             <PanelHeader icon={Keyboard} title="Keyboard Shortcuts Manager" subtitle="Bind custom keyboard keys to trigger application functions instantly during calls." />
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '520px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '780px', width: '100%' }}>
+              <SectionCard icon={Keyboard} title="Keyboard Bindings" subtitle="Press a key to rebind each action.">
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 
                 {/* Mute bind */}
@@ -1522,6 +1541,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
 
               </div>
+              </SectionCard>
             </div>
           </div>
         )}
@@ -1531,23 +1551,13 @@ export const Settings: React.FC<SettingsProps> = ({
           <div>
             <PanelHeader icon={Shield} title="Connection Security & Active Logins" subtitle="Review how your calls and messages are protected, and manage active device sessions." />
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px' }}>
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Shield size={20} color="var(--color-primary)" />
-                  <div>
-                    <strong style={{ display: 'block', fontSize: '0.9rem' }}>How your calls and messages are protected</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Calls use standard WebRTC transport encryption (DTLS-SRTP). Direct messages are encrypted with AES-GCM using a key derived from the channel. This is not end-to-end encryption — there is no media end-to-end encryption in GIIN MEET yet.</span>
-                  </div>
-                </div>
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '780px', width: '100%' }}>
+              <SectionCard icon={Shield} title="Protection Overview" subtitle="How your calls and messages are protected.">
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>Calls use standard WebRTC transport encryption (DTLS-SRTP). Direct messages are encrypted with AES-GCM using a key derived from the channel. This is not end-to-end encryption — there is no media end-to-end encryption in GIIN MEET yet.</p>
+              </SectionCard>
 
               {/* Active Sessions Lists */}
-              <div>
-                <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Smartphone size={16} color="var(--color-accent)" />
-                  <span>Active Sessions Logins</span>
-                </h3>
+              <SectionCard icon={Smartphone} title="Active Sessions" subtitle="Devices signed in to your account — revoke any you do not recognise.">
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                   {activeSessions.map(session => (
@@ -1575,7 +1585,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     </div>
                   ))}
                 </div>
-              </div>
+              </SectionCard>
             </div>
           </div>
         )}
@@ -1585,7 +1595,8 @@ export const Settings: React.FC<SettingsProps> = ({
           <div>
             <PanelHeader icon={Terminal} title="System Terminal & Telemetry" subtitle="Monitor real-time network latencies, CPU core loads, bandwidth packets, and execute diagnostic pings." />
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '600px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '780px', width: '100%' }}>
+              <SectionCard icon={Terminal} title="Real-time Telemetry" subtitle="Live bandwidth, CPU and latency, plus connectivity tests.">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Database size={16} color="var(--color-primary)" />
@@ -1619,8 +1630,10 @@ export const Settings: React.FC<SettingsProps> = ({
                   <canvas ref={telemetryCanvasRef} width={540} height={150} style={{ width: '100%', height: '100%', borderRadius: '6px' }} />
                 </div>
               </div>
+              </SectionCard>
 
               {/* Scrolling logs console */}
+              <SectionCard icon={Terminal} title="Diagnostics Console" subtitle="Live system log — errors in red, warnings in amber.">
               <div style={{
                 height: '180px',
                 backgroundColor: '#05070B',
@@ -1644,6 +1657,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   </div>
                 ))}
               </div>
+              </SectionCard>
             </div>
           </div>
         )}
@@ -1653,7 +1667,8 @@ export const Settings: React.FC<SettingsProps> = ({
           <div>
             <PanelHeader icon={Bell} title="Notification Gating" subtitle="Set your email rules, desktop alerts, and communication filters." />
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '520px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '780px', width: '100%' }}>
+              <SectionCard icon={Bell} title="Notification Channels" subtitle="Email digests and push call alerts.">
               <div className="flex-between" style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                 <div>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>System Email Logs</h4>
@@ -1669,6 +1684,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
                 <input type="checkbox" defaultChecked style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
               </div>
+              </SectionCard>
             </div>
           </div>
         )}
@@ -1678,7 +1694,8 @@ export const Settings: React.FC<SettingsProps> = ({
           <div>
             <PanelHeader icon={Sliders} title="Meeting Presets" subtitle="Configure active hardware switches upon joining active call channels." />
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '520px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '780px', width: '100%' }}>
+              <SectionCard icon={Sliders} title="Join Presets" subtitle="Microphone and camera state when you join a meeting.">
               <div className="flex-between" style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                 <div>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>Mute sound on join</h4>
@@ -1694,6 +1711,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
                 <input type="checkbox" checked={videoOffOnJoin} onChange={(e) => handleToggleVideoOffOnJoin(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
               </div>
+              </SectionCard>
             </div>
           </div>
         )}
