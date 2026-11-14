@@ -6,13 +6,7 @@
 // NEVER in chat — it reaches the app only as the RESEND_API_KEY env var,
 // which Suku sets in Vercel env vars and in the laptop .env.local after
 // this code lands. Nothing is hardcoded here and no value is invented.
-// From: onboarding@resend.dev (Resend's placeholder) until a domain is
-// verified for the GIIN account.
-// IMPORTANT delivery limit: without a verified domain, Resend only
-// delivers to the account owner's own email address
-// (globalimpactinnovators26@gmail.com). Reminders and attendance reports
-// addressed to anyone else will be rejected by Resend until the domain
-// verification step is done in the Resend dashboard.
+// From: GIIN Meet <noreply@mail.nimdaukus.com> (domain mail.nimdaukus.com verified in Resend 2026-11-14).
 // Without RESEND_API_KEY, sendMail() returns { ok: false,
 // reason: 'NO_RESEND_CONFIG' } and the caller queues the email as
 // awaiting_provider. Nothing is ever faked as sent: an email only counts
@@ -34,7 +28,7 @@ export async function sendMail(to: string, subject: string, text: string, html?:
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'GIIN Meet <onboarding@resend.dev>',
+        from: 'GIIN Meet <noreply@mail.nimdaukus.com>',
         to: [to],
         subject,
         text,
