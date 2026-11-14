@@ -19,6 +19,8 @@ import { RoomServiceClient } from 'livekit-server-sdk';
 //      room stayed in the room.)
 //   5. Waiting-room rows for this meeting are closed (Declined), so
 //      nobody sits in a waiting room for a meeting that no longer exists.
+//   6. The meeting's shared chat files are deleted from the chat-files
+//      bucket, so nothing shared in the meeting survives it.
 // The token route additionally rejects mints for Completed meetings, so
 // even a stale room row cannot be re-entered, and in-room clients watch
 // the meeting row (Realtime + polling) so a missed broadcast still ends
@@ -129,7 +131,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ ok: true, livekitRoomDeleted, ...(livekitWarning ? { livekitWarning } : {}) });
+    // 6. The meeting's shared chat files are done when the meeting ends:
+    // delete every object under <meetingId>/ in the chat-files bucket.
+    // The service-role client does this (there is deliberately no
+    // client DELETE policy), and the meeting is already host-verified
+    // above. Best-effort: the end never fails because of it, and the
+    // count is reported honestly. After this, thumbnails and viewer
+    // links for those files stop resolving.
+    let chatFilesDeleted = 0;
+    try {
+      let offset = 0;
+      for (;;) {
+        const { data: objects, error: listError } = await admin.storage
+          .from('chat-files')
+          .list(meetingId, { limit: 100, offset });
+        if (listError || !objects || objects.length === 0) break;
+        const paths = objects.map((o: any) => `${meetingId}/${o.name}`);
+        const { error: removeError } = await admin.storage.from('chat-files').remove(paths);
+        if (removeError) break;
+        chatFilesDeleted += paths.length;
+        if (objects.length < 100) break;
+        offset += 100;
+      }
+    } catch (e: any) {
+      console.error('[End Meeting API] Could not delete meeting chat files:', e?.message || e);
+    }
+
+    return NextResponse.json({ ok: true, livekitRoomDeleted, chatFilesDeleted, ...(livekitWarning ? { livekitWarning } : {}) });
   } catch (err: any) {
     console.error('[End Meeting API] Internal Exception:', err);
     return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });

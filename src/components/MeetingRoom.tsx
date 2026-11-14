@@ -5244,9 +5244,32 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
 
 
+  // In-meeting file viewer (view-only): images full-size, PDFs in an
+  // in-app frame, plain-text files as text. No download button, no
+  // link — a shared file stays in the meeting, and the server deletes
+  // it when the host ends the meeting (see the end-meeting API route).
+  const [fileViewer, setFileViewer] = useState<{ name: string; url: string; kind: 'image' | 'pdf' | 'text' | 'other' } | null>(null);
+  const [fileViewerText, setFileViewerText] = useState<string | null>(null);
+  const [fileViewerGone, setFileViewerGone] = useState(false);
+  const openFileViewer = (f: { name: string; url: string; kind: 'image' | 'pdf' | 'text' | 'other' }) => {
+    setFileViewer(f);
+    setFileViewerText(null);
+    setFileViewerGone(false);
+    // A definite 404/410 here means the file was already deleted
+    // (meeting ended) — only that counts; other failures leave the
+    // viewer to show whatever it can.
+    fetch(f.url, { method: 'HEAD' }).then(r => { if (r.status === 404 || r.status === 410) setFileViewerGone(true); }).catch(() => {});
+    if (f.kind === 'text') {
+      fetch(f.url).then(r => { if (!r.ok) throw new Error('gone'); return r.text(); }).then(t => setFileViewerText(t)).catch(() => setFileViewerGone(true));
+    }
+  };
+
   // Chat file sharing: upload to the 'chat-files' bucket, then post the
-  // file as a chat message (text is `📎 name — url`, rendered as a
-  // clickable link by renderChatText). Guests cannot send files — same
+  // file as a chat message. The message text carries only the storage
+  // path (`📎 name — file:<meetingId>/<file>`) — never a raw URL — and
+  // renderChatText shows it VIEW-ONLY (inline thumbnail for images,
+  // in-app viewer for everything, no download link). Guests cannot send
+  // files — same
   // as text chat, sending needs a signed-in session — and the file is
   // only uploaded after that check, so a guest never uploads a file
   // that can never be posted.
@@ -5265,12 +5288,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     triggerToast(`Uploading ${file.name}…`);
     try {
-      const { url, name } = await giinApi.uploadChatFile(meetingId, file);
+      const { name, path } = await giinApi.uploadChatFile(meetingId, file);
       const senderName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Guest';
       await giinApi.sendMessage({
         thread_id: meetingId,
         sender_name: senderName,
-        text: `📎 ${name} — ${url}`,
+        text: `📎 ${name} — file:${path}`,
         user_id: currentUser?.id
       });
       const list = await giinApi.getMessages(meetingId);
@@ -5289,18 +5312,56 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // A file message (`📎 name — url`) renders as a real download link;
-  // anything else renders as plain text.
+  // A file message renders VIEW-ONLY, inside the meeting — never as a
+  // download link. Images get an inline thumbnail; every file opens in
+  // the in-app viewer (openFileViewer). The message text carries only
+  // the storage path (`📎 name — file:<meetingId>/<file>`); older
+  // messages that still carry a full https URL render the same way,
+  // with the URL hidden. Anything else renders as plain text.
+  const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'bmp', 'svg'];
+  const TEXT_EXTS = ['txt', 'md', 'csv', 'json', 'log'];
+  const fileViewerKind = (name: string): 'image' | 'pdf' | 'text' | 'other' => {
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    if (IMAGE_EXTS.includes(ext)) return 'image';
+    if (ext === 'pdf') return 'pdf';
+    if (TEXT_EXTS.includes(ext)) return 'text';
+    return 'other';
+  };
   const renderChatText = (text: string) => {
-    const m = text.match(/^📎 (.+) — (https?:\/\/\S+)$/);
-    if (m) {
+    const m = text.match(/^📎 (.+) — (?:file:)?(\S+)$/);
+    if (!m) return text;
+    const name = m[1];
+    const ref = m[2];
+    const url = ref.startsWith('http') ? ref : giinApi.getChatFileUrl(ref);
+    if (!url) return (<span>📎 {name}</span>);
+    const kind = fileViewerKind(name);
+    if (kind === 'image') {
       return (
-        <span>
-          📎 <a href={m[2]} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{m[1]}</a>
+        <span style={{ display: 'block', maxWidth: '220px' }}>
+          <img
+            src={url}
+            alt={name}
+            onClick={() => openFileViewer({ name, url, kind: 'image' })}
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            style={{ width: '100%', maxHeight: '160px', objectFit: 'cover', borderRadius: '6px', cursor: 'pointer', display: 'block' }}
+          />
+          <span
+            onClick={() => openFileViewer({ name, url, kind: 'image' })}
+            style={{ display: 'block', marginTop: '0.3rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-accent)', cursor: 'pointer', overflowWrap: 'break-word' }}
+          >
+            📎 {name} — tap to view
+          </span>
         </span>
       );
     }
-    return text;
+    return (
+      <span
+        onClick={() => openFileViewer({ name, url, kind })}
+        style={{ color: 'var(--color-accent)', fontWeight: 600, cursor: 'pointer' }}
+      >
+        📎 {name} — tap to view
+      </span>
+    );
   };
 
   const sendChatMessage = async (e: React.FormEvent) => {
@@ -9945,6 +10006,36 @@ Media encrypted in transit (DTLS-SRTP).`;
       )}
 
       {/* Leave Meeting Modal for Admin */}
+      {/* In-meeting file viewer — view-only. No download button, no link. */}
+      {fileViewer && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(2, 6, 23, 0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10001, padding: '1rem' }} onClick={() => setFileViewer(null)}>
+          <div style={{ width: 'min(92vw, 760px)', maxHeight: '86dvh', backgroundColor: '#0B0F19', border: '1px solid #1E293B', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.9rem 1.1rem', borderBottom: '1px solid #1E293B' }}>
+              <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📎 {fileViewer.name}</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>View only — stays in this meeting</span>
+              <button onClick={() => setFileViewer(null)} className="panel-close-btn" aria-label="Close viewer">&times;</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+              {fileViewerGone ? (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.5 }}>This file is no longer available — shared files are removed when the meeting ends.</p>
+              ) : fileViewer.kind === 'image' ? (
+                <img src={fileViewer.url} alt={fileViewer.name} onError={() => setFileViewerGone(true)} style={{ maxWidth: '100%', maxHeight: 'calc(86dvh - 120px)', objectFit: 'contain', borderRadius: '8px' }} />
+              ) : fileViewer.kind === 'pdf' ? (
+                <iframe src={fileViewer.url} title={fileViewer.name} style={{ width: '100%', height: 'calc(86dvh - 120px)', border: 'none', borderRadius: '8px', backgroundColor: 'white' }} />
+              ) : fileViewer.kind === 'text' ? (
+                fileViewerText === null ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Loading preview…</p>
+                ) : (
+                  <pre style={{ margin: 0, width: '100%', maxHeight: 'calc(86dvh - 120px)', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.85rem', color: 'white', fontFamily: 'monospace' }}>{fileViewerText}</pre>
+                )
+              ) : (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', maxWidth: '420px', lineHeight: 1.5 }}>Preview isn't available for this file type inside the meeting. Files shared here are view-only and are removed when the meeting ends.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showLeaveModal && (
         <div style={{
           position: 'absolute',

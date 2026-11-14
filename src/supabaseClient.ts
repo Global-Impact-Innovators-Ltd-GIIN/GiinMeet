@@ -1467,7 +1467,16 @@ export const giinApi = {
     if (!publicUrlData?.publicUrl) {
       throw new Error('Could not get a shareable link for the uploaded file.');
     }
-    return { url: publicUrlData.publicUrl, name: file.name };
+    return { url: publicUrlData.publicUrl, name: file.name, path: filePath };
+  },
+
+  // Public view URL for a chat file stored under <meetingId>/<file>.
+  // Viewing only: the app never renders this as a download link — the
+  // file opens in the in-app viewer, and the server deletes it when
+  // the host ends the meeting.
+  getChatFileUrl: (storagePath: string) => {
+    const { data } = supabase.storage.from('chat-files').getPublicUrl(storagePath);
+    return data?.publicUrl || '';
   },
 
   // Get all users in the system (for Superadmin)
