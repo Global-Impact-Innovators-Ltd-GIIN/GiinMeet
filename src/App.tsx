@@ -928,6 +928,19 @@ function App() {
             localStorage.setItem('giin_view', 'dashboard');
           }
         }
+      } else {
+        // No live Supabase session: the cached giin_user (if any) is
+        // stale — it was restored into state on load and would present
+        // a signed-out (or different-account) user as signed in, so
+        // every write checked against auth.uid() (e.g. scheduling a
+        // meeting) fails RLS. Clear it so the app shows the sign-in
+        // screen instead of a signed-in dashboard that cannot save.
+        try {
+          localStorage.removeItem('giin_user');
+          localStorage.removeItem('giin_name');
+          localStorage.removeItem('giin_email');
+        } catch (e) {}
+        setUser(null);
       }
     };
     checkSession();
@@ -1022,6 +1035,11 @@ function App() {
         }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
+        try {
+          localStorage.removeItem('giin_user');
+          localStorage.removeItem('giin_name');
+          localStorage.removeItem('giin_email');
+        } catch (e) {}
       }
     });
 
@@ -1763,6 +1781,24 @@ function App() {
       window.alert('Sign in to schedule a meeting.');
       return null;
     }
+    // The dashboard can show a cached user after the live session has
+    // expired (or changed accounts); the meetings INSERT policy checks
+    // auth.uid() against user_id, so scheduling with a stale id fails
+    // RLS. Check the live session first and say so plainly.
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        window.alert('Your session has expired. Please sign in again to schedule a meeting.');
+        return null;
+      }
+      if (session.user.id !== user.id) {
+        window.alert('You are signed in with a different account than this dashboard shows. Please sign out and sign in again to schedule a meeting.');
+        return null;
+      }
+    } catch (e) {
+      // If the session check itself fails, fall through to the save —
+      // the save will fail honestly and the catch below translates it.
+    }
     try {
       const newDbMeet: any = {
         user_id: user.id,
@@ -1830,6 +1866,11 @@ function App() {
       return finalMeet;
     } catch (err: any) {
       console.error('Failed to schedule meeting in database:', err);
+      const msg = String(err?.message || '');
+      if (msg.toLowerCase().includes('row-level security')) {
+        window.alert('Could not schedule the meeting: your session has expired. Please sign in again and try scheduling once more.');
+        return null;
+      }
       window.alert(`Could not schedule the meeting: ${err?.message || 'the meeting could not be saved.'} Please check your connection and try again.`);
       return null;
     }
