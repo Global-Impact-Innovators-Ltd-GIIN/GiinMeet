@@ -118,6 +118,26 @@ interface SettingsProps {
   ) => void;
 }
 
+// Panel header band: gradient band with an icon chip, title and subtitle,
+// so every settings panel presents the same way. Content unchanged.
+const PanelHeader = ({ icon: Icon, title, subtitle }: { icon: any; title: string; subtitle: string }) => (
+  <div style={{
+    display: 'flex', alignItems: 'center', gap: '1rem',
+    padding: '1.1rem 1.25rem', marginBottom: '1.5rem',
+    borderRadius: 'var(--radius-md)',
+    background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)',
+    color: 'white', boxShadow: 'var(--shadow-sm)'
+  }}>
+    <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'rgba(250,189,2,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-accent)', flexShrink: 0 }}>
+      <Icon size={22} />
+    </div>
+    <div>
+      <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', margin: 0, lineHeight: 1.2 }}>{title}</h2>
+      <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.75)', margin: '0.25rem 0 0' }}>{subtitle}</p>
+    </div>
+  </div>
+);
+
 export const Settings: React.FC<SettingsProps> = ({
   isDarkMode,
   onToggleTheme,
@@ -830,8 +850,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Profile Details */}
         {activeCategory === 'profile' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Profile Coordinates</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Update your corporate identification details, job specs, and contact numbers.</p>
+            <PanelHeader icon={User} title="Profile Coordinates" subtitle="Update your corporate identification details, job specs, and contact numbers." />
             
             <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '520px' }}>
               {/* Picture Upload */}
@@ -982,8 +1001,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Branding & Custom Logo */}
         {activeCategory === 'branding' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Branding & Aesthetic Styles</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Customize global branding themes, accent colors, custom logo headers, and meeting layouts.</p>
+            <PanelHeader icon={ImageIcon} title="Branding & Aesthetic Styles" subtitle="Customize global branding themes, accent colors, custom logo headers, and meeting layouts." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '520px' }}>
               
@@ -1266,8 +1284,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Workspace Gating & Exports */}
         {activeCategory === 'workspace' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Workspace Administration</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Manage domain registration rules, directory searches, export logs, and flush cache.</p>
+            <PanelHeader icon={Globe} title="Workspace Administration" subtitle="Manage domain registration rules, directory searches, export logs, and flush cache." />
             
             <form onSubmit={handleWorkspaceSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '520px' }}>
               <div>
@@ -1339,8 +1356,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Hardware Devices & Filters */}
         {activeCategory === 'devices' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Audio, Video & Filters</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Manage hardware inputs, test microphones, and adjust audio enhancement.</p>
+            <PanelHeader icon={Video} title="Audio, Video & Filters" subtitle="Manage hardware inputs, test microphones, and adjust audio enhancement." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -1443,8 +1459,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Keyboard Shortcuts */}
         {activeCategory === 'shortcuts' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Keyboard Shortcuts Manager</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Bind custom keyboard keys to trigger application functions instantly during calls.</p>
+            <PanelHeader icon={Keyboard} title="Keyboard Shortcuts Manager" subtitle="Bind custom keyboard keys to trigger application functions instantly during calls." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '520px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -1508,8 +1523,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Connection Security & Logins */}
         {activeCategory === 'security' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Connection Security & Active Logins</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Review how your calls and messages are protected, and manage active device sessions.</p>
+            <PanelHeader icon={Shield} title="Connection Security & Active Logins" subtitle="Review how your calls and messages are protected, and manage active device sessions." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px' }}>
               <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
@@ -1563,8 +1577,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Diagnostics & Telemetry Graphs */}
         {activeCategory === 'diagnostics' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>System Terminal & Telemetry</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Monitor real-time network latencies, CPU core loads, bandwidth packets, and execute diagnostic pings.</p>
+            <PanelHeader icon={Terminal} title="System Terminal & Telemetry" subtitle="Monitor real-time network latencies, CPU core loads, bandwidth packets, and execute diagnostic pings." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '600px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1632,8 +1645,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Notifications */}
         {activeCategory === 'notifications' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Notification Gating</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Set your email rules, desktop alerts, and communication filters.</p>
+            <PanelHeader icon={Bell} title="Notification Gating" subtitle="Set your email rules, desktop alerts, and communication filters." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '520px' }}>
               <div className="flex-between" style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
@@ -1658,8 +1670,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Meetings Defaults */}
         {activeCategory === 'meetings' && (
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Meeting Presets</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Configure active hardware switches upon joining active call channels.</p>
+            <PanelHeader icon={Sliders} title="Meeting Presets" subtitle="Configure active hardware switches upon joining active call channels." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '520px' }}>
               <div className="flex-between" style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>

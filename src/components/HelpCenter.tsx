@@ -119,9 +119,20 @@ export const HelpCenter: React.FC = () => {
       
       {/* Left Column: FAQ Search & Accordion */}
       <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', overflowY: 'auto' }}>
-        <div>
-          <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.25rem' }}>Frequently Asked Questions</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Browse common user issues or use the search bar to find answers.</p>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '1rem',
+          padding: '1.1rem 1.25rem',
+          borderRadius: 'var(--radius-md)',
+          background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)',
+          color: 'white', boxShadow: 'var(--shadow-sm)'
+        }}>
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'rgba(250,189,2,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-accent)', flexShrink: 0 }}>
+            <HelpCircle size={22} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', margin: 0, lineHeight: 1.2 }}>Frequently Asked Questions</h2>
+            <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.75)', margin: '0.25rem 0 0' }}>Browse common user issues or use the search bar to find answers.</p>
+          </div>
         </div>
 
         {/* Search */}
@@ -171,6 +182,7 @@ export const HelpCenter: React.FC = () => {
                 >
                   <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <HelpCircle size={16} color="var(--color-secondary)" />
+                    <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.04em', color: 'var(--color-primary)', backgroundColor: 'rgba(var(--color-primary-rgb), 0.1)', border: '1px solid rgba(var(--color-primary-rgb), 0.25)', padding: '0.15rem 0.5rem', borderRadius: '9999px', whiteSpace: 'nowrap', flexShrink: 0 }}>{faq.category}</span>
                     <span>{faq.question}</span>
                   </span>
                   {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -195,6 +207,19 @@ export const HelpCenter: React.FC = () => {
               No matches found for your query.
             </div>
           )}
+        </div>
+
+        {/* Still need help? — points to the GIIN Bot panel on the right */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '1rem',
+          padding: '1rem 1.25rem', borderRadius: 'var(--radius-md)',
+          border: '1px solid rgba(250,189,2,0.4)', backgroundColor: 'rgba(250,189,2,0.07)'
+        }}>
+          <Bot size={22} color="var(--color-accent)" style={{ flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-main)' }}>Still need help?</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Ask GIIN Bot on the right — it answers questions about Pro, screen sharing, and security.</div>
+          </div>
         </div>
       </div>
 
