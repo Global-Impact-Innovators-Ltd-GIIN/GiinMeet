@@ -1424,3 +1424,16 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 
+
+/* Q&A banner ticker: the question text travels left to right across
+   the banner while it is visible. margin-left % is of the banner's own
+   width, so the text enters off the left edge and exits off the right one. */
+.qa-banner-scroll-text {
+  animation-name: qa-banner-scroll;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes qa-banner-scroll {
+  from { margin-left: -100%; }
+  to { margin-left: 100%; }
+}

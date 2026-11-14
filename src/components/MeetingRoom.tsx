@@ -374,6 +374,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Q&A Board States
   const [qaQuestions, setQaQuestions] = useState<{ id: string; text: string; author: string; upvotes: number; upvotedBy: string[]; createdAt: number; answered: boolean }[]>([]);
   const [newQuestionText, setNewQuestionText] = useState('');
+
+  // Q&A banner: every new question pops an animated ticker banner for
+  // everyone in the room (the sender sees it too), auto-dismissed after
+  // 8 seconds, closable, and tappable to open the Q&A Hub. The question
+  // itself still lives in the Hub — the banner is only the announcement.
+  const [qaBanner, setQaBanner] = useState<{ id: string; text: string; author: string } | null>(null);
+  const qaBannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showQaBanner = (q: { id: string; text: string; author: string }) => {
+    setQaBanner({ id: q.id, text: q.text, author: q.author });
+    if (qaBannerTimeoutRef.current) clearTimeout(qaBannerTimeoutRef.current);
+    qaBannerTimeoutRef.current = setTimeout(() => setQaBanner(null), 8000);
+  };
   const [isQAActive, setIsQAActive] = useState(false);
 
   // Handraise / Speaker Queue States
@@ -2509,6 +2521,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     
     setQaQuestions(prev => [...prev, newQ]);
+    showQaBanner(newQ);
     setNewQuestionText('');
   };
 
@@ -3679,6 +3692,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (prev.some(q => q.id === data.id)) return prev;
           return [...prev, { ...data, createdAt: data.createdAt ?? Date.now(), answered: data.answered ?? false }];
         });
+        showQaBanner({ id: data.id, text: data.text, author: data.author || 'Guest' });
       })
       .on('broadcast', { event: 'upvote-question' }, (payload: any) => {
         const data = payload.payload;
@@ -6039,6 +6053,24 @@ Media encrypted in transit (DTLS-SRTP).`;
           </div>
         )}
         
+        {/* Q&A banner: a new question scrolls across for everyone for 8s.
+            Tap it to open the Q&A Hub; the X dismisses it early. */}
+        {qaBanner && (
+          <div
+            style={{ position: 'absolute', top: '12px', left: '50%', transform: 'translateX(-50%)', width: 'min(680px, calc(100% - 2rem))', backgroundColor: 'rgba(2, 6, 23, 0.95)', border: '1px solid var(--color-accent)', borderRadius: '10px', padding: '0.6rem 0.9rem', zIndex: 101, boxShadow: '0 8px 30px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', animation: 'pop-in 0.25s ease' }}
+            onClick={() => { setActivePanel('polls'); setIsQAActive(true); setQaBanner(null); }}
+            role="button"
+            title="Open the Q&A Hub"
+          >
+            <span style={{ fontSize: '1rem', flexShrink: 0 }}>❓</span>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--color-accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>NEW QUESTION · {qaBanner.author}</span>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <span key={qaBanner.id} className="qa-banner-scroll-text" style={{ display: 'inline-block', whiteSpace: 'nowrap', fontSize: '0.9rem', fontWeight: 600, color: 'white', animationDuration: `${Math.min(10, Math.max(5, Math.ceil(qaBanner.text.length / 12)))}s` }}>{qaBanner.text}</span>
+            </span>
+            <button onClick={(e) => { e.stopPropagation(); setQaBanner(null); }} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '1.1rem', cursor: 'pointer', flexShrink: 0, padding: 0, lineHeight: 1 }}>&times;</button>
+          </div>
+        )}
+
         {isDirectCall ? (
           <div style={{
             flex: 1,
