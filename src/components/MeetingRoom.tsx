@@ -7003,22 +7003,20 @@ Media encrypted in transit (DTLS-SRTP).`;
                   }}>
                     <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>{p.name}{tileRoleSuffix(p.role)}</span>
                     {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
-                    <span
-                      style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: pState.isReconnecting ? 'var(--color-accent)' : hasConnection ? (typeof pState.latency === 'number' ? (pState.latency < 150 ? '#10B981' : pState.latency < 400 ? 'var(--color-accent)' : '#EF4444') : '#10B981') : '#64748B' }}
-                      title={pState.isReconnecting ? 'Reconnecting...' : hasConnection ? (typeof pState.latency === 'number' ? `Connection latency ${pState.latency} ms` : 'Connected') : tile.connecting ? 'Connecting...' : 'In the meeting — camera off' }
-                    />
-                    {typeof pState.latency === 'number' && (
-                      <span
-                        style={{
-                          color: pState.latency < 150 ? '#10B981' : pState.latency < 400 ? 'var(--color-accent)' : '#EF4444',
-                          fontFamily: 'monospace',
-                          fontSize: '0.7rem'
-                        }}
-                        title="Connection latency to this participant"
-                      >
-                        {pState.latency} ms
-                      </span>
-                    )}
+                    {(() => {
+                      // Signal dot: shown ONLY when this participant's
+                      // connection is bad/unstable (poor or lost). Hidden
+                      // completely while the connection is stable, and the
+                      // latency number is never printed on the tile.
+                      const badConnection = pState.isReconnecting || !hasConnection || (typeof pState.latency === 'number' && pState.latency >= 400);
+                      if (!badConnection) return null;
+                      return (
+                        <span
+                          style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: pState.isReconnecting ? 'var(--color-accent)' : !hasConnection ? '#64748B' : '#EF4444' }}
+                          title={pState.isReconnecting ? 'Reconnecting...' : !hasConnection ? 'Connection lost' : `Unstable connection (latency ${pState.latency} ms)`}
+                        />
+                      );
+                    })()}
                   </div>
 
                   {activeReactions.filter(r => r.senderKey === peerKey).map(r => (
