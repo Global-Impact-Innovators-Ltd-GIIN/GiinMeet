@@ -1352,25 +1352,6 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
-/* Welcome banner: animated backdrop (generated still + slow cinematic motion) */
-.welcome-banner-bg { animation: welcome-banner-pan 36s ease-in-out infinite alternate; }
-@keyframes welcome-banner-pan {
-  0% { transform: scale(1.02) translateX(0); }
-  100% { transform: scale(1.12) translateX(-1.5%); }
-}
-.welcome-marquee { animation: welcome-marquee 48s linear infinite; }
-@keyframes welcome-marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-.welcome-particle { position: absolute; border-radius: 50%; background: radial-gradient(circle, rgba(250,189,2,0.9), rgba(250,189,2,0) 70%); animation: welcome-particle-float 9s ease-in-out infinite; z-index: 1; pointer-events: none; }
-@keyframes welcome-particle-float {
-  0%, 100% { transform: translateY(0); opacity: 0.35; }
-  50% { transform: translateY(-14px); opacity: 0.9; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .welcome-banner-bg, .welcome-marquee, .welcome-particle { animation: none; }
-}
 /* Dashboard welcome heading responsive size */
 .welcome-heading {
   font-size: 2.5rem;
