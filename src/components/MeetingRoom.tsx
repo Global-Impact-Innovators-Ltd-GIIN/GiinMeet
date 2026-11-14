@@ -372,7 +372,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [showEmojiReactions, setShowEmojiReactions] = useState(false);
 
   // Q&A Board States
-  const [qaQuestions, setQaQuestions] = useState<{ id: string; text: string; author: string; upvotes: number; upvotedBy: string[] }[]>([]);
+  const [qaQuestions, setQaQuestions] = useState<{ id: string; text: string; author: string; upvotes: number; upvotedBy: string[]; createdAt: number; answered: boolean }[]>([]);
   const [newQuestionText, setNewQuestionText] = useState('');
   const [isQAActive, setIsQAActive] = useState(false);
 
@@ -2495,7 +2495,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       text: text,
       author: authorName,
       upvotes: 0,
-      upvotedBy: []
+      upvotedBy: [],
+      createdAt: Date.now(),
+      answered: false
     };
     
     if (sigChannelRef.current) {
@@ -2536,6 +2538,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         return q;
       });
     });
+  };
+
+  // Phase 2 (#13) — Q&A queue: the host (or co-host) marks a question
+  // answered; it leaves the open queue for the Answered section below
+  // and can be reopened. Same broadcast pattern as the polls: one
+  // event, every client applies it, no server round-trip.
+  const markQuestionAnswered = (questionId: string, answered: boolean) => {
+    if (!isAdmin) return;
+    setQaQuestions(prev => prev.map(q => q.id === questionId ? { ...q, answered } : q));
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'answer-question',
+        payload: { questionId, answered }
+      });
+    }
   };
 
   // Emoji Reactions Functions
@@ -3659,12 +3677,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const data = payload.payload;
         setQaQuestions(prev => {
           if (prev.some(q => q.id === data.id)) return prev;
-          return [...prev, data];
+          return [...prev, { ...data, createdAt: data.createdAt ?? Date.now(), answered: data.answered ?? false }];
         });
       })
       .on('broadcast', { event: 'upvote-question' }, (payload: any) => {
         const data = payload.payload;
         setQaQuestions(prev => prev.map(q => q.id === data.questionId ? { ...q, upvotes: data.upvotes, upvotedBy: data.upvotedBy } : q));
+      })
+      .on('broadcast', { event: 'answer-question' }, (payload: any) => {
+        const data = payload.payload;
+        setQaQuestions(prev => prev.map(q => q.id === data.questionId ? { ...q, answered: !!data.answered } : q));
       })
       .on('broadcast', { event: 'draw-whiteboard' }, (payload: any) => {
         const data = payload.payload;
@@ -7999,14 +8021,15 @@ Media encrypted in transit (DTLS-SRTP).`;
                 </form>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>QUESTIONS ({qaQuestions.length})</span>
-                  {qaQuestions.length === 0 ? (
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>QUESTIONS ({qaQuestions.filter(q => !q.answered).length})</span>
+                  {qaQuestions.filter(q => !q.answered).length === 0 ? (
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', display: 'block', padding: '1rem 0' }}>
-                      No questions asked yet. Be the first!
+                      No open questions. Be the first to ask!
                     </span>
                   ) : (
                     [...qaQuestions]
-                      .sort((a, b) => b.upvotes - a.upvotes)
+                      .filter(q => !q.answered)
+                      .sort((a, b) => (b.upvotes - a.upvotes) || ((b.createdAt ?? 0) - (a.createdAt ?? 0)))
                       .map(q => {
                         const userId = currentUser?.id || myKey;
                         const hasUpvoted = q.upvotedBy.includes(userId);
@@ -8026,6 +8049,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                               <span style={{ fontSize: '0.8rem', color: 'white', fontWeight: 500 }}>{q.text}</span>
                               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Asked by {q.author}</span>
+                              {isAdmin && (
+                                <button
+                                  onClick={() => markQuestionAnswered(q.id, true)}
+                                  style={{ background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: 0, textAlign: 'left' }}
+                                >
+                                  ✓ Mark answered
+                                </button>
+                              )}
                             </div>
                             <button 
                               onClick={() => upvoteQuestion(q.id)}
@@ -8047,6 +8078,42 @@ Media encrypted in transit (DTLS-SRTP).`;
                           </div>
                         );
                       })
+                  )}
+                  {qaQuestions.some(q => q.answered) && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>ANSWERED ({qaQuestions.filter(q => q.answered).length})</span>
+                      {[...qaQuestions]
+                        .filter(q => q.answered)
+                        .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+                        .map(q => (
+                          <div
+                            key={q.id}
+                            style={{
+                              padding: '0.75rem 1rem',
+                              borderRadius: '8px',
+                              border: '1px solid var(--border-color)',
+                              backgroundColor: 'rgba(255,255,255,0.02)',
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '0.75rem',
+                              opacity: 0.6
+                            }}
+                          >
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <span style={{ fontSize: '0.8rem', color: 'white', fontWeight: 500 }}>✓ {q.text}</span>
+                              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Asked by {q.author} · {q.upvotes} upvote{q.upvotes === 1 ? '' : 's'}</span>
+                            </div>
+                            {isAdmin && (
+                              <button
+                                onClick={() => markQuestionAnswered(q.id, false)}
+                                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: 0, whiteSpace: 'nowrap' }}
+                              >
+                                Reopen
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                    </div>
                   )}
                 </div>
               </div>
