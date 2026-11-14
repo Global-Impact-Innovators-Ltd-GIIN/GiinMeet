@@ -62,6 +62,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [schedulePasscode, setSchedulePasscode] = useState('');
   const [scheduledMeetingDetails, setScheduledMeetingDetails] = useState<Meeting | null>(null);
   const [copiedSuccessId, setCopiedSuccessId] = useState<'link' | 'details' | null>(null);
+  const [copyFailedId, setCopyFailedId] = useState<'link' | 'details' | null>(null);
+  const joinLinkInputRef = useRef<HTMLInputElement>(null);
+
+  // Honest copy: the 'Copied' state only shows when the clipboard write
+  // really succeeds. On failure the button says so, and the join-link
+  // input is selected so the user can copy it manually instead.
+  const copyTextHonest = async (id: 'link' | 'details', text: string) => {
+    setCopyFailedId(null);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSuccessId(id);
+      setTimeout(() => setCopiedSuccessId(null), 2000);
+    } catch (e) {
+      setCopiedSuccessId((prev) => (prev === id ? null : prev));
+      setCopyFailedId(id);
+      joinLinkInputRef.current?.focus();
+      joinLinkInputRef.current?.select();
+      setTimeout(() => setCopyFailedId(null), 3000);
+    }
+  };
   
   // Track copying in history list
   const [copiedHistoryId, setCopiedHistoryId] = useState<string | null>(null);
@@ -1419,9 +1439,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Meeting Join Link</label>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <input 
-                  type="text" 
-                  readOnly 
+                <input
+                  ref={joinLinkInputRef}
+                  type="text"
+                  readOnly
                   className="premium-input"
                   style={{ fontSize: '0.8rem', backgroundColor: 'rgba(0,0,0,0.1)', flex: 1 }}
                   value={buildJoinLink(scheduledMeetingDetails.id, scheduledMeetingDetails.passcode)}
@@ -1429,15 +1450,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <button
                   onClick={() => {
                     const link = buildJoinLink(scheduledMeetingDetails.id, scheduledMeetingDetails.passcode);
-                    navigator.clipboard.writeText(link);
-                    setCopiedSuccessId('link');
-                    setTimeout(() => setCopiedSuccessId(null), 2000);
+                    void copyTextHonest('link', link);
                   }}
                   className={`premium-btn ${copiedSuccessId === 'link' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
                   style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
                 >
-                  {copiedSuccessId === 'link' ? <Check size={14} /> : <Copy size={14} />}
-                  <span>{copiedSuccessId === 'link' ? 'Copied' : 'Copy'}</span>
+                  {copiedSuccessId === 'link' ? <Check size={14} /> : copyFailedId === 'link' ? <AlertCircle size={14} /> : <Copy size={14} />}
+                  <span>{copiedSuccessId === 'link' ? 'Copied' : copyFailedId === 'link' ? 'Copy failed — tap to retry' : 'Copy'}</span>
                 </button>
               </div>
             </div>
@@ -1463,15 +1482,13 @@ Meeting ID: ${scheduledMeetingDetails.id}
 Passcode: ${scheduledMeetingDetails.passcode || 'none - open link'}
 
 Media encrypted in transit (DTLS-SRTP).`;
-                navigator.clipboard.writeText(invitation);
-                setCopiedSuccessId('details');
-                setTimeout(() => setCopiedSuccessId(null), 2000);
+                void copyTextHonest('details', invitation);
               }}
               className={`premium-btn ${copiedSuccessId === 'details' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
               style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem' }}
             >
-              {copiedSuccessId === 'details' ? <Check size={16} /> : <Copy size={16} />}
-              <span>{copiedSuccessId === 'details' ? 'Invitation Details Copied' : 'Copy Invitation Email'}</span>
+              {copiedSuccessId === 'details' ? <Check size={16} /> : copyFailedId === 'details' ? <AlertCircle size={16} /> : <Copy size={16} />}
+              <span>{copiedSuccessId === 'details' ? 'Invitation Copied' : copyFailedId === 'details' ? 'Copy failed — tap to retry' : 'Copy Invitation'}</span>
             </button>
 
             <button
