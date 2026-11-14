@@ -1443,11 +1443,18 @@ export const giinApi = {
   },
 
   // Upload a file shared in meeting chat. Uses the 'chat-files' storage
-  // bucket (public read, authenticated upload). The bucket must exist —
-  // create it in the Supabase dashboard (Storage > New bucket
-  // 'chat-files', public) — until then this throws an honest error and
-  // the UI says file sharing is not set up yet instead of faking it.
+  // bucket (public read, authenticated upload). The bucket is created by
+  // giinmeet_phase2_chat_files_bucket.sql (run once in the Supabase SQL
+  // Editor) — until then this throws an honest error and the UI says
+  // file sharing is not set up yet instead of faking it.
   uploadChatFile: async (meetingId: string, file: File) => {
+    // Executable / script types are never shared in chat — a download
+    // link in a meeting must not become a malware drop. (Size is
+    // checked by the caller: 25 MB, in handleAttachFile.)
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (['exe', 'bat', 'sh', 'js', 'mjs', 'msi', 'ps1', 'vbs', 'apk', 'dmg', 'cmd', 'com', 'scr', 'jar', 'app', 'deb', 'rpm'].includes(ext)) {
+      throw new Error(`Files of type .${ext} cannot be shared in chat.`);
+    }
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const filePath = `${meetingId}/${Date.now()}-${safeName}`;
     const { error } = await supabase.storage
