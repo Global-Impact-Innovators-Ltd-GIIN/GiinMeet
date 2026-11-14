@@ -387,6 +387,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try { return localStorage.getItem('giin_sound_effects') !== 'off'; } catch (e) { return true; }
   });
   const soundEffectsEnabledRef = useRef(soundEffectsEnabled);
+
+  // Round 3: shared sounds. `pendingSoundsRef` holds sounds that
+  // arrived while this device's AudioContext was suspended (iOS
+  // Safari outside a user gesture) — they flush on the next gesture
+  // instead of scheduling against a frozen clock and staying silent.
+  // `joinSoundSeenRef` + `joinedAtRef` power the shared join sound:
+  // only a genuinely new joiner (first presence sight, after our own
+  // 15s entry grace) plays it, never the 6s presence heartbeat.
+  const pendingSoundsRef = useRef<{ type: string; at: number }[]>([]);
+  const joinSoundSeenRef = useRef<Record<string, number>>({});
+  const joinedAtRef = useRef<number>(Date.now());
   const toggleSoundEffects = () => {
     const next = !soundEffectsEnabledRef.current;
     soundEffectsEnabledRef.current = next;
@@ -400,6 +411,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const engineTypeRef = useRef<'LIVEKIT' | 'P2P'>('LIVEKIT');
   useEffect(() => { engineTypeRef.current = engineType; }, [engineType]);
   const [livekitToken, setLivekitToken] = useState<string>('');
+
+  // Round 3: participant limit for this meeting's host tier, from the
+  // token route (Free 50 / Pro 100 / Enterprise 250). Null until the
+  // first token mint, so the count shows plain until the limit is known.
+  const [roomCapacity, setRoomCapacity] = useState<number | null>(null);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   // Bumped to force the LiveKit connect effect to re-run (disconnect +
   // reconnect with a fresh token) when the token nears expiry.
@@ -1110,8 +1126,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // pretend to work as a 5-way peer-to-peer mesh. The user stays
           // out of the media path with a clear message and a retry — the
           // capacity count is live now, so a slot frees as soon as
-          // someone really leaves.
-          setConnectionNotice('This meeting room is full (8 participants). You cannot join the video yet — wait for someone to leave, then press "Retry video server".');
+          // someone really leaves. The limit comes from the server
+          // (host tier: Free 50 / Pro 100 / Enterprise 250), never a
+          // hardcoded number.
+          if (typeof data.maxCapacity === 'number') setRoomCapacity(data.maxCapacity);
+          setConnectionNotice(data.message || 'This meeting room is full. You cannot join the video yet — wait for someone to leave, then press "Retry video server".');
 
           return;
         }
@@ -1143,7 +1162,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           throw new Error(data.message || data.error || 'Could not get a video token.');
         }
 
-        const { token, expiresAt: tokenExpiry, livekitUrl: serverLivekitUrl, role: serverRole } = data;
+        const { token, expiresAt: tokenExpiry, livekitUrl: serverLivekitUrl, role: serverRole, maxCapacity: serverMaxCapacity } = data;
+        if (typeof serverMaxCapacity === 'number') setRoomCapacity(serverMaxCapacity);
         setLivekitToken(token);
         setExpiresAt(tokenExpiry);
         if (serverRole === 'HOST' || serverRole === 'COHOST' || serverRole === 'GUEST') {
@@ -1458,6 +1478,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       const data = await fetchLiveKitToken(slug);
       if (data.error || !data.token) throw new Error(data.message || data.error || 'Could not refresh the video token.');
+      if (typeof data.maxCapacity === 'number') setRoomCapacity(data.maxCapacity);
       await room.updateToken(data.token);
       setExpiresAt(data.expiresAt);
       setLivekitToken(data.token);
@@ -1736,19 +1757,29 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Relocated states/constants to consolidated top block
 
+  // Round 3: one send path for shared sound/state events. The
+  // signalling effect re-subscribes whenever `stream` changes, so the
+  // channel ref can be briefly null mid-teardown — retry once instead
+  // of silently dropping the event.
+  const broadcastEvent = (event: string, payload: any) => {
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({ type: 'broadcast', event, payload });
+      return;
+    }
+    setTimeout(() => {
+      if (sigChannelRef.current) {
+        sigChannelRef.current.send({ type: 'broadcast', event, payload });
+      }
+    }, 600);
+  };
+
   const toggleHandRaise = (reason?: string) => {
     if (localHandRaised) {
       // Lower hand
       setLocalHandRaised(false);
       setHandRaiseReason(null);
       setHandRaises(prev => prev.filter(hr => hr.userId !== myKey));
-      if (sigChannelRef.current) {
-        sigChannelRef.current.send({
-          type: 'broadcast',
-          event: 'lower-hand',
-          payload: { userId: myKey }
-        });
-      }
+      broadcastEvent('lower-hand', { userId: myKey });
     } else {
       // Raise hand
       setLocalHandRaised(true);
@@ -1760,13 +1791,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         reason
       };
       setHandRaises(prev => [...prev.filter(hr => hr.userId !== myKey), newRaise]);
-      if (sigChannelRef.current) {
-        sigChannelRef.current.send({
-          type: 'broadcast',
-          event: 'hand-raise',
-          payload: newRaise
-        });
-      }
+      broadcastEvent('hand-raise', newRaise);
       // A broadcast is never echoed back to its sender, so the raiser
       // plays their own reason sound locally; every other participant
       // plays it when the 'hand-raise' event arrives.
@@ -1781,26 +1806,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setHandRaiseReason(null);
     }
     setHandRaises(prev => prev.filter(hr => hr.userId !== userId));
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'lower-hand',
-        payload: { userId }
-      });
-    }
+    broadcastEvent('lower-hand', { userId });
   };
 
   const clearAllHands = () => {
     setLocalHandRaised(false);
     setHandRaiseReason(null);
     setHandRaises([]);
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'clear-all-hands',
-        payload: {}
-      });
-    }
+    broadcastEvent('clear-all-hands', {});
   };
 
   // Active peer connection keys state to avoid ref access during render
@@ -2517,16 +2530,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Emoji Reactions Functions
   const sendReaction = (emoji: string) => {
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'reaction',
-        payload: {
-          senderKey: myKey,
-          emoji: emoji
-        }
-      });
-    }
+    broadcastEvent('reaction', {
+      senderKey: myKey,
+      emoji: emoji
+    });
     triggerReaction(myKey, emoji);
     // 👏 is the toolbar twin of the soundboard Applause: the 'reaction'
     // broadcast carries it to everyone, who play it on receipt (above).
@@ -3318,7 +3325,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const senderKey = data.senderKey;
         
         if (senderKey !== myKey) {
-          playUserJoinSound();
+          // Round 3: shared join sound — only a genuinely new joiner.
+          // Presence is a 6s heartbeat, so first sight of a senderKey
+          // (after our own 15s entry grace, so joining a full room
+          // does not fire one chime per person already there) plays
+          // one soft tone; a return within 60s stays silent. The old
+          // join chime was silenced because it fired on every heartbeat.
+          const lastSeen = joinSoundSeenRef.current[senderKey] || 0;
+          const nowSeen = Date.now();
+          joinSoundSeenRef.current[senderKey] = nowSeen;
+          if (nowSeen - lastSeen > 60000 && nowSeen - joinedAtRef.current > 15000) {
+            playSynthesizedSound('join');
+          }
           // Fix Round 6: remember the peer's engine. A peer on the SFU
           // needs no P2P link — and if we built one while their engine
           // was unknown, close it now that we know.
@@ -3398,6 +3416,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       .on('broadcast', { event: 'leave' }, (payload: any) => {
         const data = payload.payload;
         cleanupPeer(data.senderKey);
+        // Round 3: shared leave sound — one soft tone when someone
+        // really leaves (the sender never hears their own: self:false).
+        if (data.senderKey !== myKey) playSynthesizedSound('leave');
       })
       .on('broadcast', { event: 'waitroom-request' }, (payload: any) => {
         if (isAdmin) {
@@ -4833,6 +4854,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // touches the microphone or anyone else's audio.
       if (!soundEffectsEnabledRef.current) return;
       const ctx = getAudioCtx();
+      // Round 3: a suspended AudioContext (iOS Safari outside a user
+      // gesture) schedules tones against a frozen clock — they never
+      // sound. That is why a hand-raise chime was only heard by the
+      // raiser (who had just tapped): everyone else's context was
+      // suspended. Queue the sound instead and flush it on the next
+      // gesture / foreground return (see the unlock effect below);
+      // stale entries (>15s) are dropped so nothing fires minutes late.
+      if (ctx.state !== 'running') {
+        void ctx.resume().catch(() => {});
+        if (ctx.state !== 'running') {
+          const queuedAt = Date.now();
+          pendingSoundsRef.current = pendingSoundsRef.current.filter(p => queuedAt - p.at < 15000);
+          if (!pendingSoundsRef.current.some(p => p.type === type)) {
+            pendingSoundsRef.current.push({ type, at: queuedAt });
+          }
+          return;
+        }
+      }
       const now = ctx.currentTime;
 
       // Click-free tone: ramp up from silence over `attack`, then decay
@@ -4936,11 +4975,26 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         tone({ wave: 'triangle', freq: 1174.66, at: 0, dur: 0.28, peak: 0.12 });
         tone({ wave: 'triangle', freq: 1174.66, at: 0.3, dur: 0.35, peak: 0.12 });
         tone({ wave: 'sine', freq: 196, at: 0, dur: 0.65, peak: 0.06 });
+      } else if (type === 'join') {
+        // Round 3: join — soft rising two-note blip, a new person arrived.
+        tone({ wave: 'sine', freq: 587.33, at: 0, dur: 0.35, peak: 0.07 });
+        tone({ wave: 'sine', freq: 880, at: 0.1, dur: 0.45, peak: 0.07 });
+      } else if (type === 'leave') {
+        // Round 3: leave — soft falling tone, someone left.
+        tone({ wave: 'sine', freq: 440, at: 0, dur: 0.4, peak: 0.06 });
+        tone({ wave: 'sine', freq: 329.63, at: 0.12, dur: 0.4, peak: 0.05 });
       } else {
         // Neutral default ("Just Raise Hand" and anything unknown):
         // a single soft chime.
         tone({ wave: 'sine', freq: 783.99, at: 0, dur: 0.5, peak: 0.10 });
         tone({ wave: 'sine', freq: 1046.5, at: 0.08, dur: 0.45, peak: 0.05 });
+      }
+      // Flush anything queued while the context was suspended — a
+      // remote chime that arrived before this client ever tapped.
+      if (pendingSoundsRef.current.length > 0) {
+        const queued = pendingSoundsRef.current;
+        pendingSoundsRef.current = [];
+        queued.forEach(q => { if (q.type !== type) playSynthesizedSound(q.type); });
       }
     } catch (e) {
       console.warn(e);
@@ -4949,14 +5003,44 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const triggerSoundboard = (soundType: string) => {
     playSynthesizedSound(soundType);
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'play-sound',
-        payload: { soundType }
-      });
-    }
+    broadcastEvent('play-sound', { soundType });
   };
+
+  // Round 3: WebAudio unlock. iOS Safari keeps the shared
+  // AudioContext suspended until a user gesture, so shared sounds
+  // that arrive over the network (hand-raise chimes, soundboard,
+  // join/leave) stay silent until the user taps something. Resume on
+  // every gesture and on return to the foreground, and flush any
+  // sounds queued while suspended.
+  useEffect(() => {
+    const unlock = () => {
+      try {
+        const ctx = getAudioCtx();
+        const flush = () => {
+          if (pendingSoundsRef.current.length === 0) return;
+          const queued = pendingSoundsRef.current;
+          pendingSoundsRef.current = [];
+          queued.forEach(q => playSynthesizedSound(q.type));
+        };
+        if (ctx.state === 'suspended') {
+          void ctx.resume().then(() => { if (ctx.state === 'running') flush(); }).catch(() => {});
+        } else if (ctx.state === 'running') {
+          flush();
+        }
+      } catch (e) { /* audio unavailable on this device */ }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') unlock(); };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('touchstart', unlock, { passive: true });
+    window.addEventListener('keydown', unlock);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('touchstart', unlock);
+      window.removeEventListener('keydown', unlock);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   const handleCreatePoll = () => {
     if (!newPollQuestion.trim()) return;
@@ -6984,7 +7068,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             zIndex: 5
           }}>
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
-              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Participants ({participants.length + 1})</h4>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Participants ({participants.length + 1}{roomCapacity ? ` / ${roomCapacity}` : ''})</h4>
               <button 
                 onClick={() => setActivePanel('none')}
                 className="panel-close-btn" aria-label="Close panel"

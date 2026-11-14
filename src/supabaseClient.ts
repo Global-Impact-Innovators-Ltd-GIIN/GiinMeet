@@ -210,7 +210,7 @@ export const ensureMeetingRoom = async (
         organization_id: hostId,
         host_id: hostId,
         is_active: true,
-        max_capacity: 8,
+        max_capacity: 50,
         current_engine: 'LIVEKIT'
       }])
       .select('id, slug')

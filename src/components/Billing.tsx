@@ -26,7 +26,7 @@ export const Billing: React.FC<BillingProps> = ({
       description: 'Core tools for small personal calls.',
       features: [
         'Up to 40 minutes per meeting',
-        'Up to 8 participants per room (today\'s limit)',
+        'Up to 50 participants per room',
         'Standard layout grid options',
         'Live in-meeting text chat',
       ],
@@ -42,7 +42,7 @@ export const Billing: React.FC<BillingProps> = ({
       description: 'Enhanced features for growing startup teams.',
       features: [
         'Unlimited meeting duration (up to 24h)',
-        'Up to 8 participants per room today (larger rooms planned)',
+        'Up to 100 participants per room',
         'Custom virtual backgrounds & canvas sharing',
         'Full meeting history log retrieval',
         'Premium customer support bot replies',
@@ -60,7 +60,7 @@ export const Billing: React.FC<BillingProps> = ({
       description: 'Next-generation features for large operations.',
       features: [
         'Everything in Pro plan',
-        'Larger rooms planned (8 participants per room today)',
+        'Up to 250 participants per room',
         'Dedicated virtualization servers (Ultra-HD)',
         'Custom integrations API token',
         '24/7 Priority support hotline assistance',

@@ -49,7 +49,7 @@ export const HelpCenter: React.FC = () => {
     {
       category: 'General',
       question: 'Is there a limit on meeting durations for free users?',
-      answer: 'Meetings today support up to 8 participants per room, whatever the plan — that is the room limit built into the system. Free meetings are up to 40 minutes. Paid Pro and Enterprise tiers are coming soon; their larger participant numbers are targets, not limits that work today.'
+      answer: 'Participant limits depend on the host plan: Free meetings support up to 50 participants per room, Pro up to 100, and Enterprise up to 250. Free meetings are up to 40 minutes. Paid Pro and Enterprise tiers are coming soon; no payment is taken yet.'
     }
   ];
 
@@ -83,7 +83,7 @@ export const HelpCenter: React.FC = () => {
       let replyText = "I'm sorry, I didn't quite catch that. Could you please specify if you're asking about 'Pro upgrade', 'pricing', 'screen sharing', or 'security'?";
 
       if (questionText.includes('pro') || questionText.includes('upgrade') || questionText.includes('premium')) {
-        replyText = "Paid upgrades are coming soon. The Billing tab shows the Pro Plan ($9.99/mo) and the Enterprise Plan ($19.99/mo) for reference, but no payment is taken yet — and note that every meeting today is limited to 8 participants, whatever the plan says.";
+        replyText = "Paid upgrades are coming soon. The Billing tab shows the Pro Plan ($9.99/mo) and the Enterprise Plan ($19.99/mo) for reference, but no payment is taken yet. Participant limits depend on the host plan: Free 50, Pro 100, Enterprise 250 per room.";
       } else if (questionText.includes('screen') || questionText.includes('share') || questionText.includes('monitor')) {
         replyText = "During any active meeting, look at the bottom control bar and click the Monitor icon. Your desktop window is then shared live with the other participants.";
       } else if (questionText.includes('price') || questionText.includes('cost') || questionText.includes('money')) {

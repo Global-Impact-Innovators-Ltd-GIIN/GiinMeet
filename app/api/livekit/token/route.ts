@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../../../src/supabaseClient';
+import { tierLimitForPremium, tierForPremium, TIER_LABELS } from '../../../../src/utils/tiers';
 
 // Server-only Supabase admin client. It uses SUPABASE_SERVICE_ROLE_KEY,
 // which bypasses RLS, so it must NEVER be imported by client code and the
@@ -250,7 +251,32 @@ export async function POST(req: NextRequest) {
     // 403 the next real person. LiveKit's room service is the truth about
     // who is actually connected right now; the database count is only a
     // fallback when LiveKit cannot be reached.
-    const maxCapacity = room.max_capacity || 8;
+    // Round 3: participant limit by HOST TIER (Free 50 / Pro 100 /
+    // Enterprise 250 — see src/utils/tiers.ts). The tier is the
+    // authority: rooms created when the cap was 8 still carry
+    // max_capacity 8, so the stored value must never shrink a tier's
+    // limit. A missing profile (or a host with no account) resolves
+    // to Free. The stored value is updated best-effort so the room
+    // row stays honest for display.
+    const hostUserId = meeting.admin_id || meeting.user_id;
+    let hostIsPremium = false;
+    if (hostUserId) {
+      try {
+        const { data: hostProfile } = await admin
+          .from('profiles')
+          .select('is_premium')
+          .eq('id', hostUserId)
+          .maybeSingle();
+        hostIsPremium = !!(hostProfile as any)?.is_premium;
+      } catch (e) { /* profile unreadable: Free tier */ }
+    }
+    const hostTier = tierForPremium(hostIsPremium);
+    const maxCapacity = tierLimitForPremium(hostIsPremium);
+    try {
+      if (room.max_capacity !== maxCapacity) {
+        await admin.from('rooms').update({ max_capacity: maxCapacity }).eq('id', room.id);
+      }
+    } catch (e) { /* stored cap is cosmetic: the tier limit above rules */ }
     let liveCount: number | null = null;
     let liveIdentities: string[] | null = null;
     const lkUrl = process.env.LIVEKIT_URL;
@@ -304,7 +330,9 @@ export async function POST(req: NextRequest) {
     if (!isAlreadyJoined && joinedCount !== null && joinedCount >= maxCapacity) {
       return NextResponse.json({
         error: 'MAX_CAPACITY_REACHED',
-        message: `The meeting room is full. Maximum capacity is ${maxCapacity} participants.`,
+        message: `This meeting room is full for the host's ${TIER_LABELS[hostTier]} plan. Maximum capacity is ${maxCapacity} participants.`,
+        maxCapacity,
+        tier: hostTier,
       }, { status: 403 });
     }
 
@@ -385,6 +413,8 @@ export async function POST(req: NextRequest) {
       roomSlug: room.slug,
       livekitUrl,
       role: derivedRole,
+      maxCapacity,
+      tier: hostTier,
     });
   } catch (err: any) {
     console.error('[Token API] Internal Exception:', err);

@@ -647,7 +647,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 
                 <ul style={{ color: 'white', fontSize: '0.85rem', paddingLeft: '1.25rem', marginBottom: '2rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <li>Unlimited meeting durations (up to 24h)</li>
-                  <li>Up to 8 participants per room (today's limit)</li>
+                  <li>Up to 100 participants per room</li>
                   <li>Pro customization virtualization tools</li>
                   <li>Direct AI chat assistant response</li>
                 </ul>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { tierLimitForPremium, tierForPremium, TIER_LABELS } from '../../../../src/utils/tiers';
 
 // Admit or decline a waiting-room participant, server-side. (Fix
 // Round 7, finding #4: admission used to be a direct client-side row
@@ -114,6 +115,44 @@ export async function POST(req: NextRequest) {
     }
     if (!isHost && !isCoHost) {
       return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host or a co-host can admit people.' }, { status: 403 });
+    }
+
+    // Round 3: participant limit by host tier, checked at admit time.
+    // The token route is the exact final gate (live LiveKit count);
+    // this is the early, human-readable one, so the host is not
+    // offered an admit that can never join. Count Admitted rows; the
+    // host occupies one seat on top. (Edge: if the host also holds an
+    // Admitted row, this blocks one seat early — the token route's
+    // live count stays the exact arbiter.)
+    if (status === 'Admitted') {
+      const hostUserId = meeting.admin_id || meeting.user_id;
+      let hostIsPremium = false;
+      if (hostUserId) {
+        try {
+          const { data: hostProfile } = await admin
+            .from('profiles')
+            .select('is_premium')
+            .eq('id', hostUserId)
+            .maybeSingle();
+          hostIsPremium = !!(hostProfile as any)?.is_premium;
+        } catch (e) { /* profile unreadable: Free tier */ }
+      }
+      const hostTier = tierForPremium(hostIsPremium);
+      const maxCapacity = tierLimitForPremium(hostIsPremium);
+      const { count: admittedCount } = await admin
+        .from('meeting_participants')
+        .select('*', { count: 'exact', head: true })
+        .eq('meeting_id', meetingId)
+        .eq('status', 'Admitted');
+      const seatsTaken = (admittedCount ?? 0) + 1;
+      if (seatsTaken >= maxCapacity) {
+        return NextResponse.json({
+          error: 'MAX_CAPACITY_REACHED',
+          message: `This meeting is full for the host's ${TIER_LABELS[hostTier]} plan. Maximum capacity is ${maxCapacity} participants.`,
+          maxCapacity,
+          tier: hostTier,
+        }, { status: 403 });
+      }
     }
 
     // Flip the row with the service-role key.
