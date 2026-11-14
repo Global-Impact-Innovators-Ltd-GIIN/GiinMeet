@@ -12,9 +12,9 @@ import { sendMail } from '../../../../src/utils/mailer';
 //      A reminder is queued exactly once (unique index on
 //      (meeting_id, type) + the meetings.reminder_sent_at marker).
 //   B. Send queued mail: up to 20 pending rows per run (attempts < 5).
-//      A row only counts as sent when the SMTP server accepts it. With no
-//      SMTP configured the row becomes awaiting_provider and waits —
-//      nothing is ever faked as sent.
+//      A row only counts as sent when Resend accepts it (HTTP 200). With
+//      no Resend API key configured the row becomes awaiting_provider and
+//      waits — nothing is ever faked as sent.
 // Auth: when CRON_SECRET is set in Vercel env vars, the caller must send
 // `Authorization: Bearer <CRON_SECRET>` (Vercel Cron does this
 // automatically when the secret is configured). Without it the endpoint
@@ -136,8 +136,8 @@ export async function GET(req: NextRequest) {
       if (result.ok) {
         await admin.from('pending_emails').update({ status: 'sent', sent_at: new Date().toISOString(), attempts: (row as any).attempts + 1 }).eq('id', (row as any).id);
         sent++;
-      } else if ((result as any).reason === 'NO_SMTP_CONFIG') {
-        await admin.from('pending_emails').update({ status: 'awaiting_provider', attempts: (row as any).attempts + 1, last_error: 'No SMTP provider configured (SMTP_HOST/SMTP_USER/SMTP_PASS).' }).eq('id', (row as any).id);
+      } else if ((result as any).reason === 'NO_RESEND_CONFIG') {
+        await admin.from('pending_emails').update({ status: 'awaiting_provider', attempts: (row as any).attempts + 1, last_error: 'No Resend API key configured (RESEND_API_KEY).' }).eq('id', (row as any).id);
         awaitingProvider++;
       } else {
         await admin.from('pending_emails').update({ status: 'failed', attempts: (row as any).attempts + 1, last_error: (result as any).reason || 'Send failed.' }).eq('id', (row as any).id);

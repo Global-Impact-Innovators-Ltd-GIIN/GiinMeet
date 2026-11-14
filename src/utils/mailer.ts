@@ -1,45 +1,50 @@
-import nodemailer from 'nodemailer';
-
 // Phase 1 — the app's only mail sender (reminders + attendance reports).
-// There is NO mail provider configured until Suku adds SMTP settings as
-// Vercel env vars:
-//   SMTP_HOST, SMTP_PORT (default 587), SMTP_USER, SMTP_PASS,
-//   SMTP_FROM (e.g. "GIIN Meet <meetings@giinmeet.nimdaukus.com>"),
-//   SMTP_SECURE ("true" only for port 465, otherwise false).
-// The same SMTP server Supabase uses for its own auth emails (configured
-// in the Supabase dashboard) can be reused here — same host, user and
-// password — but those values live in the dashboard, not in this repo, so
-// they must be copied into Vercel env vars by hand.
-// Without them sendMail() returns { ok: false, reason: 'NO_SMTP_CONFIG' }
-// and the caller queues the email as awaiting_provider. Nothing is ever
-// faked as sent: an email only counts as sent when the SMTP server
-// accepts it.
+// Provider: Resend, over its HTTP API (POST https://api.resend.com/emails).
+// Suku created the Resend account himself (globalimpactinnovators26@gmail.com)
+// and made an API key named "GiinMeet" with Sending access, stored in the
+// secure connector custom.resend. The key value is NEVER in this repo and
+// NEVER in chat — it reaches the app only as the RESEND_API_KEY env var,
+// which Suku sets in Vercel env vars and in the laptop .env.local after
+// this code lands. Nothing is hardcoded here and no value is invented.
+// From: onboarding@resend.dev (Resend's placeholder) until a domain is
+// verified for the GIIN account.
+// IMPORTANT delivery limit: without a verified domain, Resend only
+// delivers to the account owner's own email address
+// (globalimpactinnovators26@gmail.com). Reminders and attendance reports
+// addressed to anyone else will be rejected by Resend until the domain
+// verification step is done in the Resend dashboard.
+// Without RESEND_API_KEY, sendMail() returns { ok: false,
+// reason: 'NO_RESEND_CONFIG' } and the caller queues the email as
+// awaiting_provider. Nothing is ever faked as sent: an email only counts
+// as sent when Resend accepts it (HTTP 200).
 export type MailResult = { ok: true } | { ok: false; reason: string };
 
-let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
-
 export function mailerConfigured(): boolean {
-  return !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  return !!process.env.RESEND_API_KEY;
 }
 
 export async function sendMail(to: string, subject: string, text: string, html?: string): Promise<MailResult> {
-  if (!mailerConfigured()) return { ok: false, reason: 'NO_SMTP_CONFIG' };
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return { ok: false, reason: 'NO_RESEND_CONFIG' };
   try {
-    if (!transporter) {
-      transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587', 10),
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      });
-    }
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to,
-      subject,
-      text,
-      html: html || undefined,
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'GIIN Meet <onboarding@resend.dev>',
+        to: [to],
+        subject,
+        text,
+        html: html || undefined,
+      }),
     });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      return { ok: false, reason: `RESEND_${res.status}${detail ? `: ${detail.slice(0, 200)}` : ''}` };
+    }
     return { ok: true };
   } catch (e: any) {
     return { ok: false, reason: String(e?.message || e) };

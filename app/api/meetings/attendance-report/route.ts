@@ -14,7 +14,8 @@ import { createClient } from '@supabase/supabase-js';
 //   4. Queues ONE attendance_report email to the host (unique index on
 //      (meeting_id, type) prevents a second end from queueing a second
 //      copy). The email itself is sent by the /api/cron/due-emails runner,
-//      so it only goes out once SMTP is configured — until then the row
+//      so it only goes out once the Resend API key is configured — until
+//      then the row
 //      waits as awaiting_provider and the report stays in the dashboard.
 // Needs giinmeet_phase1.sql (meeting_attendance + pending_emails);
 // without it the route answers honestly instead of pretending to work.

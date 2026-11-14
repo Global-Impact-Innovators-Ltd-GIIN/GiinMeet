@@ -4568,8 +4568,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // send the local attendance record (localStorage, per meeting) to the
   // host's email via the server route (host-verified, stored + queued).
   // Fire-and-forget: the end never waits for it and never fails because
-  // of it. Until SMTP is configured the email waits in the outbox and
-  // the report stays viewable in the dashboard.
+  // of it. Until the Resend API key is configured the email waits in the
+  // outbox and the report stays viewable in the dashboard.
   const sendAttendanceReport = async () => {
     try {
       const raw = localStorage.getItem(`giin_attendance_${meetingId}`);

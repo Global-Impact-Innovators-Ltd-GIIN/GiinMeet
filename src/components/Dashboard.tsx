@@ -222,7 +222,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
   // Phase 1 — meeting reminder: emailed to the host before the meeting.
   // Default on, 15 minutes before (the reminder itself only sends once
-  // SMTP is configured — see src/utils/mailer.ts).
+  // the Resend API key is configured — see src/utils/mailer.ts).
   const [scheduleReminderEnabled, setScheduleReminderEnabled] = useState(true);
   const [scheduleReminderMinutes, setScheduleReminderMinutes] = useState(15);
   const [seriesCreated, setSeriesCreated] = useState(0);
@@ -1046,7 +1046,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                 )}
                 <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                  The reminder goes to your email. Sending starts once email is configured for the app (SMTP settings) — until then the reminder is saved and queued.
+                  The reminder goes to your email. Sending starts once email is configured for the app (Resend API key) — until then the reminder is saved and queued.
                 </span>
               </div>
 
