@@ -1722,7 +1722,43 @@ function App() {
     setMeetingHistory(prev => prev.filter(m => m.id !== meetingId));
   };
 
-  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number } }) => {
+  // Phase 1 — cancel a whole recurring series: every still-Scheduled
+  // instance in the series becomes Cancelled (past/completed instances
+  // are untouched). The server path (giinApi.cancelSeries) only works
+  // once giinmeet_phase1.sql has run; until then the series lives in
+  // localStorage, so the instances are cancelled one by one instead.
+  const handleCancelSeries = async (seriesId: string, title: string) => {
+    const seriesMeetings = meetingHistory.filter((m: any) => {
+      const sid = m.series_id || (() => { try { const raw = localStorage.getItem(`giin_series_${m.id}`); return raw ? JSON.parse(raw).seriesId : null; } catch (e) { return null; } })();
+      return sid === seriesId && m.status === 'Scheduled';
+    });
+    if (seriesMeetings.length === 0) return;
+    if (!window.confirm(`Cancel the whole series "${title}"? ${seriesMeetings.length} upcoming meeting${seriesMeetings.length === 1 ? '' : 's'} will be cancelled.`)) return;
+    const { count, error } = await giinApi.cancelSeries(seriesId);
+    if (error) {
+      // No series columns yet — cancel the known instances one by one.
+      let failed = 0;
+      for (const m of seriesMeetings) {
+        const { error: oneError } = await giinApi.updateMeetingStatus(m.id, 'Cancelled');
+        if (oneError) failed++;
+      }
+      if (failed > 0) {
+        window.alert(`Could not cancel ${failed} of the ${seriesMeetings.length} meetings — please try again.`);
+      }
+    } else if (count === 0) {
+      // The server found nothing (columns missing or rows already gone) —
+      // fall back to the instances we know about.
+      for (const m of seriesMeetings) {
+        await giinApi.updateMeetingStatus(m.id, 'Cancelled');
+      }
+    }
+    setMeetingHistory(prev => prev.filter((m: any) => {
+      const sid = m.series_id || (() => { try { const raw = localStorage.getItem(`giin_series_${m.id}`); return raw ? JSON.parse(raw).seriesId : null; } catch (e) { return null; } })();
+      return !(sid === seriesId && m.status === 'Scheduled');
+    }));
+  };
+
+  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number } }) => {
     if (!user || !user.id) {
       window.alert('Sign in to schedule a meeting.');
       return null;
@@ -1752,6 +1788,12 @@ function App() {
         newDbMeet.reminder_enabled = meet.reminder.enabled;
         newDbMeet.reminder_minutes_before = meet.reminder.minutesBefore;
       }
+      // Phase 1 — the recurring-series link travels the same way.
+      if (meet.series) {
+        newDbMeet.series_id = meet.series.id;
+        newDbMeet.recurrence_rule = meet.series.rule;
+        newDbMeet.recurrence_count = meet.series.count;
+      }
       const savedMeet = await giinApi.createMeeting(newDbMeet);
 
       const finalMeet: Meeting = {
@@ -1767,7 +1809,12 @@ function App() {
         // Phase 1 — reminder setting, so the dashboard can show it without
         // a re-read (the columns may not exist yet — see createMeeting).
         reminder_enabled: (savedMeet as any).reminder_enabled ?? meet.reminder?.enabled ?? true,
-        reminder_minutes_before: (savedMeet as any).reminder_minutes_before ?? meet.reminder?.minutesBefore ?? 15
+        reminder_minutes_before: (savedMeet as any).reminder_minutes_before ?? meet.reminder?.minutesBefore ?? 15,
+        // Phase 1 — series link, so the dashboard can badge and cancel the
+        // series without a re-read.
+        series_id: (savedMeet as any).series_id ?? meet.series?.id ?? null,
+        recurrence_rule: (savedMeet as any).recurrence_rule ?? meet.series?.rule ?? null,
+        recurrence_count: (savedMeet as any).recurrence_count ?? meet.series?.count ?? null
       };
 
       setMeetingHistory(prev => [finalMeet, ...prev]);
@@ -2746,6 +2793,7 @@ function App() {
               onStartMeeting={handleStartCall}
               meetingHistory={meetingHistory}
               onCancelMeeting={handleCancelMeeting}
+              onCancelSeries={handleCancelSeries}
               onAddMeeting={handleAddMeeting}
               userName={user?.name || userName}
               userDomain={user?.domain}

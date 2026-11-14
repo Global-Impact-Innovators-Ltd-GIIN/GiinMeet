@@ -542,7 +542,7 @@ export const giinApi = {
   // best-effort here (it is retried when the meeting is joined); if it
   // fails, a clear warning is logged and the video call will surface the
   // missing room instead of silently dropping to a peer-to-peer call.
-  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null; reminder_enabled?: boolean; reminder_minutes_before?: number }) => {
+  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null; reminder_enabled?: boolean; reminder_minutes_before?: number; series_id?: string; recurrence_rule?: string; recurrence_count?: number }) => {
     // Generate UUID on the client side to avoid race conditions and mismatches
     const meetingId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -598,6 +598,27 @@ export const giinApi = {
       }
     }
 
+    // Phase 1 — recurring series (same probe pattern): the series id,
+    // rule and count ride in the spread, so strip them and re-add only
+    // when the columns exist. Until giinmeet_phase1.sql runs, the series
+    // link is kept in localStorage so the dashboard can still group and
+    // cancel the series.
+    delete payload.series_id;
+    delete payload.recurrence_rule;
+    delete payload.recurrence_count;
+    const serId = (meeting as any).series_id as string | undefined;
+    const serRule = (meeting as any).recurrence_rule as string | undefined;
+    const serCount = (meeting as any).recurrence_count as number | undefined;
+    if (serId) {
+      if (await probeSeriesSupport()) {
+        payload.series_id = serId;
+        payload.recurrence_rule = serRule || null;
+        payload.recurrence_count = serCount ?? null;
+      } else {
+        try { localStorage.setItem(`giin_series_${meetingId}`, JSON.stringify({ seriesId: serId, rule: serRule || null, count: serCount ?? null })); } catch (e) {}
+      }
+    }
+
     const { error } = await supabase
       .from('meetings')
       .insert([payload]);
@@ -646,6 +667,27 @@ export const giinApi = {
       .update({ status })
       .eq('id', meetingId);
     return { error };
+  },
+
+  // Phase 1 — cancel a whole recurring series: every still-Scheduled
+  // instance in the series becomes Cancelled (past and completed
+  // instances are untouched). Returns how many were cancelled. Uses the
+  // same "update own meetings" RLS policy as updateMeetingStatus, so
+  // only the host's own series can be cancelled. When the series columns
+  // do not exist yet (giinmeet_phase1.sql not run) there is no series to
+  // find in the database, so the caller falls back to cancelling the
+  // instances it knows about one by one.
+  cancelSeries: async (seriesId: string) => {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('meetings')
+      .update({ status: 'Cancelled' })
+      .eq('series_id', seriesId)
+      .eq('status', 'Scheduled')
+      .gt('time', now)
+      .select('id');
+    if (error) return { count: 0, error };
+    return { count: (data || []).length, error: null };
   },
 
   // End a meeting for everyone, server-side (host only): marks the

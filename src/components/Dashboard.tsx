@@ -30,8 +30,10 @@ interface DashboardProps {
   onNavigate: (view: string) => void;
   onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean, passcode?: string | null) => void;
   meetingHistory: Meeting[];
-  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number } }) => Promise<Meeting | null>;
+  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number } }) => Promise<Meeting | null>;
   onCancelMeeting?: (meetingId: string, title: string) => void;
+  // Phase 1 — cancel every upcoming meeting in a recurring series.
+  onCancelSeries?: (seriesId: string, title: string) => void;
   userName: string;
   userDomain?: string;
 }
@@ -43,6 +45,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   meetingHistory,
   onAddMeeting,
   onCancelMeeting,
+  onCancelSeries,
   userName,
   userDomain,
 }) => {
@@ -172,8 +175,51 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Recurring meetings: a series is real separate meetings (one per
   // occurrence), all sharing the same passcode, so each occurrence has
   // its own join link and waiting room.
-  const [scheduleRecurrence, setScheduleRecurrence] = useState<'none' | 'weekly' | 'monthly'>('none');
+  const [scheduleRecurrence, setScheduleRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none');
   const [scheduleRecurrenceCount, setScheduleRecurrenceCount] = useState(4);
+  // Phase 1 — recurring series end: after N meetings (count) or on a date.
+  const [scheduleEndMode, setScheduleEndMode] = useState<'count' | 'date'>('count');
+  const [scheduleEndDate, setScheduleEndDate] = useState('');
+
+  // Phase 1 — how many instances the current Repeat settings create
+  // (cap 12, so a daily series can never run away).
+  const countRecurrences = (base: Date): number => {
+    if (scheduleRecurrence === 'none') return 1;
+    if (scheduleEndMode === 'date' && scheduleEndDate) {
+      const endAt = new Date(scheduleEndDate + 'T23:59:59');
+      let n = 0;
+      for (let i = 0; i < 12; i++) {
+        const t = new Date(base);
+        if (scheduleRecurrence === 'daily') t.setDate(t.getDate() + i);
+        else if (scheduleRecurrence === 'weekly') t.setDate(t.getDate() + 7 * i);
+        else t.setMonth(t.getMonth() + i);
+        if (t.getTime() > endAt.getTime()) break;
+        n++;
+      }
+      return Math.max(1, n);
+    }
+    return Math.max(2, Math.min(12, scheduleRecurrenceCount));
+  };
+
+  // Phase 1 — series info for one meeting: from the row when present, else
+  // the localStorage fallback kept at creation time. Returns the series id,
+  // rule label, position (1-based, by start time) and total, or null.
+  const seriesInfoFor = (meeting: Meeting): { seriesId: string; rule: string; position: number; total: number } | null => {
+    const raw = (meeting as any).series_id
+      ? { seriesId: (meeting as any).series_id, rule: (meeting as any).recurrence_rule || 'weekly', count: (meeting as any).recurrence_count ?? null }
+      : (() => { try { const r = localStorage.getItem(`giin_series_${meeting.id}`); return r ? JSON.parse(r) : null; } catch (e) { return null; } })();
+    if (!raw || !raw.seriesId) return null;
+    const siblings = meetingHistory
+      .filter((m) => {
+        const s = (m as any).series_id
+          ? (m as any).series_id
+          : (() => { try { const r = localStorage.getItem(`giin_series_${m.id}`); return r ? JSON.parse(r).seriesId : null; } catch (e) { return null; } })();
+        return s === raw.seriesId;
+      })
+      .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    const position = siblings.findIndex((m) => m.id === meeting.id) + 1;
+    return { seriesId: raw.seriesId, rule: raw.rule || 'weekly', position: position || 1, total: raw.count || siblings.length };
+  };
   // Phase 1 — meeting reminder: emailed to the host before the meeting.
   // Default on, 15 minutes before (the reminder itself only sends once
   // SMTP is configured — see src/utils/mailer.ts).
@@ -252,11 +298,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     const baseTime = new Date(meetingTime);
     const passcode = schedulePasscodeEnabled ? schedulePasscode : null;
-    const occurrences = scheduleRecurrence === 'none' ? 1 : Math.max(2, Math.min(12, scheduleRecurrenceCount));
+    const occurrences = countRecurrences(baseTime);
+    // Phase 1 — one series id links every instance (client-generated UUID;
+    // the series columns only exist once giinmeet_phase1.sql runs, and
+    // createMeeting keeps the link in localStorage until then).
+    const seriesId = scheduleRecurrence === 'none'
+      ? null
+      : (typeof crypto !== 'undefined' && (crypto as any).randomUUID
+          ? (crypto as any).randomUUID()
+          : `series-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     let firstSaved: Meeting | null = null;
     let created = 0;
     for (let i = 0; i < occurrences; i++) {
       const t = new Date(baseTime);
+      if (scheduleRecurrence === 'daily') t.setDate(t.getDate() + i);
       if (scheduleRecurrence === 'weekly') t.setDate(t.getDate() + 7 * i);
       if (scheduleRecurrence === 'monthly') t.setMonth(t.getMonth() + i);
       const saved = await onAddMeeting({
@@ -266,7 +321,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         requireWaitingRoom,
         passcode,
         linkExpiry: { mode: scheduleLinkExpiry, expiresAt: computeLinkExpiry(scheduleLinkExpiry, t.toISOString()) },
-        reminder: { enabled: scheduleReminderEnabled, minutesBefore: scheduleReminderMinutes }
+        reminder: { enabled: scheduleReminderEnabled, minutesBefore: scheduleReminderMinutes },
+        series: seriesId ? { id: seriesId, rule: scheduleRecurrence, count: occurrences } : undefined
       });
       if (saved) {
         created++;
@@ -565,6 +621,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           if (!rem || !rem.enabled) return null;
                           return <span>🔔 Reminder {rem.minutesBefore} min before</span>;
                         })()}
+                        {(() => {
+                          // Phase 1 — series badge (e.g. "🔁 Weekly • 2 of 5").
+                          const info = seriesInfoFor(meeting);
+                          if (!info) return null;
+                          const label = info.rule === 'daily' ? 'Daily' : info.rule === 'weekly' ? 'Weekly' : 'Monthly';
+                          return <span>🔁 {label} • {info.position} of {info.total}</span>;
+                        })()}
                         <select
                           value={linkExpiryMode(meeting)}
                           onChange={(e) => handleLinkExpiryChange(meeting, e.target.value)}
@@ -649,6 +712,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       >
                         Cancel
                       </button>
+                      {(() => {
+                        // Phase 1 — cancel the whole series from one button.
+                        const info = seriesInfoFor(meeting);
+                        if (!info) return null;
+                        return (
+                          <button
+                            onClick={() => onCancelSeries?.(info.seriesId, meeting.title)}
+                            className="premium-btn premium-btn-secondary"
+                            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444' }}
+                            title="Cancel every upcoming meeting in this series"
+                          >
+                            Cancel series
+                          </button>
+                        );
+                      })()}
                     </div>
                   ) : (
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -894,29 +972,50 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <select
                     className="premium-input"
                     value={scheduleRecurrence}
-                    onChange={(e) => setScheduleRecurrence(e.target.value as 'none' | 'weekly' | 'monthly')}
+                    onChange={(e) => setScheduleRecurrence(e.target.value as 'none' | 'daily' | 'weekly' | 'monthly')}
                     style={{ flex: 1 }}
                   >
                     <option value="none">Does not repeat</option>
+                    <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
                     <option value="monthly">Monthly</option>
                   </select>
-                  {scheduleRecurrence !== 'none' && (
+                </div>
+                {scheduleRecurrence !== 'none' && (
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                      <input type="radio" checked={scheduleEndMode === 'count'} onChange={() => setScheduleEndMode('count')} />
+                      After
+                    </label>
                     <input
                       type="number"
                       min={2}
                       max={12}
                       className="premium-input"
                       value={scheduleRecurrenceCount}
+                      disabled={scheduleEndMode !== 'count'}
                       onChange={(e) => setScheduleRecurrenceCount(parseInt(e.target.value) || 4)}
                       title="Number of occurrences"
                       style={{ width: '70px', textAlign: 'center' }}
                     />
-                  )}
-                </div>
+                    <span style={{ fontSize: '0.85rem' }}>meetings</span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                      <input type="radio" checked={scheduleEndMode === 'date'} onChange={() => setScheduleEndMode('date')} />
+                      Ends on
+                    </label>
+                    <input
+                      type="date"
+                      className="premium-input"
+                      value={scheduleEndDate}
+                      disabled={scheduleEndMode !== 'date'}
+                      onChange={(e) => setScheduleEndDate(e.target.value)}
+                      style={{ flex: 1, minWidth: '140px' }}
+                    />
+                  </div>
+                )}
                 {scheduleRecurrence !== 'none' && (
                   <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                    Creates {scheduleRecurrenceCount} separate meetings ({scheduleRecurrence}), each with its own join link. They share one passcode.
+                    Creates {meetingTime ? countRecurrences(new Date(meetingTime)) : scheduleRecurrenceCount} linked meetings ({scheduleRecurrence}), each with its own join link. They share one passcode, and the whole series can be cancelled together from the list below.
                   </span>
                 )}
               </div>
