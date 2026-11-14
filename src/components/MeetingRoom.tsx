@@ -717,6 +717,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [userVotes, setUserVotes] = useState<{ [pollId: string]: number }>({});
   const [newPollQuestion, setNewPollQuestion] = useState('');
   const [newPollOptions, setNewPollOptions] = useState(['', '']);
+  // Phase 1 — quiz mode: the host marks one option as the correct answer.
+  // Scoring is DERIVED from the votes (never stored separately): every
+  // client runs the same vote logic, so all clients agree on the
+  // leaderboard without a separate broadcast.
+  const [newPollIsQuiz, setNewPollIsQuiz] = useState(false);
+  const [newPollCorrectOption, setNewPollCorrectOption] = useState<number | null>(null);
   const [videoFilter, setVideoFilter] = useState('none');
 
   const [isAudioEnhanced, setIsAudioEnhanced] = useState(false);
@@ -3574,6 +3580,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const data = payload.payload;
         setPolls(prev => prev.map(p => p.id === data.pollId ? { ...p, votes: data.votes } : p));
       })
+      .on('broadcast', { event: 'close-poll' }, (payload: any) => {
+        // Phase 1 — the host closed a poll: voting stops everywhere at
+        // once, results are shown to everyone, and a quiz reveals its
+        // correct answer + leaderboard.
+        const data = payload.payload;
+        if (!data?.pollId) return;
+        setPolls(prev => prev.map(p => p.id === data.pollId ? { ...p, isClosed: true } : p));
+      })
       .on('broadcast', { event: 'media-filter' }, (payload: any) => {
         const data = payload.payload;
         setPeerStates(prev => {
@@ -5046,18 +5060,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!newPollQuestion.trim()) return;
     const cleanOptions = newPollOptions.filter(o => o.trim() !== '');
     if (cleanOptions.length < 2) return;
+    // Quiz mode needs a correct answer picked before launch. The answer is
+    // matched by its TEXT, not its row number — empty options are filtered
+    // out of cleanOptions, which would shift the indices.
+    const correctText = newPollIsQuiz && newPollCorrectOption !== null
+      ? (newPollOptions[newPollCorrectOption] || '').trim()
+      : '';
+    const correctIndex = correctText ? cleanOptions.indexOf(correctText) : -1;
+    if (newPollIsQuiz && correctIndex < 0) return;
 
     const newPoll = {
       id: 'poll-' + Math.random().toString(36).substring(2, 9),
       question: newPollQuestion,
       options: cleanOptions,
       votes: cleanOptions.map(() => 0),
-      creatorId: currentUser?.id || myKey
+      creatorId: currentUser?.id || myKey,
+      // Phase 1 — quiz mode + closed state. isClosed freezes voting and
+      // reveals results to everyone; correctOption is only revealed once
+      // the poll is closed.
+      isQuiz: newPollIsQuiz,
+      correctOption: newPollIsQuiz ? correctIndex : null,
+      isClosed: false
     };
 
     setPolls(prev => [...prev, newPoll]);
     setNewPollQuestion('');
     setNewPollOptions(['', '']);
+    setNewPollIsQuiz(false);
+    setNewPollCorrectOption(null);
 
     if (sigChannelRef.current) {
       sigChannelRef.current.send({
@@ -5091,6 +5121,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleVotePoll = (pollId: string, optionIndex: number) => {
+    // A closed poll takes no more votes (the close broadcast may still be
+    // in flight when the tap lands).
+    const poll = polls.find(p => p.id === pollId);
+    if (!poll || poll.isClosed) return;
     setUserVotes(prev => ({ ...prev, [pollId]: optionIndex }));
     applyPollVote(pollId, optionIndex, myKey);
     if (sigChannelRef.current) {
@@ -5100,6 +5134,38 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         payload: { pollId, optionIndex, voterId: myKey }
       });
     }
+  };
+
+  // Phase 1 — host closes a poll: voting stops, results are shown to
+  // everyone, and a quiz reveals its correct answer + leaderboard.
+  const handleClosePoll = (pollId: string) => {
+    setPolls(prev => prev.map(p => p.id === pollId ? { ...p, isClosed: true } : p));
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({
+        type: 'broadcast',
+        event: 'close-poll',
+        payload: { pollId }
+      });
+    }
+  };
+
+  // Phase 1 — quiz leaderboard, derived from the votes: a voter scores 1
+  // point while their CURRENT vote is the correct answer (changing a vote
+  // away from the right answer loses the point, exactly like the totals).
+  const participantNameForKey = (key: string): string => {
+    if (key === myKey) return currentUser?.name || 'You';
+    const found = participants.find((p: any) => (p.userId || p.id) === key);
+    return found?.name || 'Guest';
+  };
+
+  const quizScores = (poll: any): { voterId: string; name: string; points: number }[] => {
+    if (!poll?.isQuiz || poll.correctOption === null || poll.correctOption === undefined) return [];
+    const votedBy: { [voterId: string]: number } = poll.votedBy || {};
+    const rows = Object.entries(votedBy)
+      .filter(([, idx]) => idx === poll.correctOption)
+      .map(([voterId]) => ({ voterId, name: participantNameForKey(voterId), points: 1 }));
+    rows.sort((a, b) => a.name.localeCompare(b.name));
+    return rows;
   };
 
   // Screen Share Canvas Animation Simulation (unused, but kept for safe ref compatibility)
@@ -7714,31 +7780,56 @@ Media encrypted in transit (DTLS-SRTP).`;
                     />
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                       {newPollOptions.map((opt, idx) => (
-                        <input 
-                          key={idx}
-                          type="text" 
-                          placeholder={`Option ${idx + 1}`}
-                          value={opt}
-                          onChange={(e) => {
-                            const copy = [...newPollOptions];
-                            copy[idx] = e.target.value;
-                            setNewPollOptions(copy);
-                          }}
-                          className="premium-input"
-                          style={{ fontSize: '0.8rem', height: '32px' }}
-                        />
+                        <div key={idx} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            placeholder={`Option ${idx + 1}`}
+                            value={opt}
+                            onChange={(e) => {
+                              const copy = [...newPollOptions];
+                              copy[idx] = e.target.value;
+                              setNewPollOptions(copy);
+                            }}
+                            className="premium-input"
+                            style={{ fontSize: '0.8rem', height: '32px', flex: 1, minWidth: 0 }}
+                          />
+                          {newPollIsQuiz && (
+                            <label title="Mark as the correct answer" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                              <input
+                                type="radio"
+                                name="quiz-correct-option"
+                                checked={newPollCorrectOption === idx}
+                                onChange={() => setNewPollCorrectOption(idx)}
+                              />
+                              Correct
+                            </label>
+                          )}
+                        </div>
                       ))}
-                      <button 
+                      <button
                         onClick={() => setNewPollOptions([...newPollOptions, ''])}
                         style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: '0.75rem', textAlign: 'left', cursor: 'pointer', padding: 0 }}
                       >
                         + Add Option
                       </button>
                     </div>
-                    <button 
+                    {/* Phase 1 — quiz mode: one option is the correct answer. */}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'white', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={newPollIsQuiz}
+                        onChange={(e) => { setNewPollIsQuiz(e.target.checked); if (!e.target.checked) setNewPollCorrectOption(null); }}
+                      />
+                      Quiz mode — mark one correct answer and score voters
+                    </label>
+                    {newPollIsQuiz && newPollCorrectOption === null && (
+                      <span style={{ fontSize: '0.75rem', color: '#F59E0B' }}>Pick the correct answer above before launching.</span>
+                    )}
+                    <button
                       onClick={handleCreatePoll}
                       className="premium-btn premium-btn-primary"
                       style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', height: '36px' }}
+                      disabled={newPollIsQuiz && newPollCorrectOption === null}
                     >
                       Launch Poll
                     </button>
@@ -7754,34 +7845,48 @@ Media encrypted in transit (DTLS-SRTP).`;
                     polls.map(p => {
                       const totalVotes = p.votes.reduce((a: number, b: number) => a + b, 0);
                       const hasVoted = userVotes[p.id] !== undefined;
+                      // Phase 1 — a closed poll shows its results to everyone,
+                      // even those who never voted. The correct answer of a
+                      // quiz is only revealed once the poll is closed.
+                      const showResults = hasVoted || p.isClosed;
+                      const scores = p.isQuiz && p.isClosed ? quizScores(p) : [];
 
                       return (
                         <div key={p.id} style={{ padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{p.question}</span>
-                          
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white', flex: 1, minWidth: 0 }}>{p.question}</span>
+                            {p.isQuiz && (
+                              <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#F59E0B', border: '1px solid #F59E0B', borderRadius: '4px', padding: '0.1rem 0.35rem', whiteSpace: 'nowrap' }}>QUIZ</span>
+                            )}
+                            {p.isClosed && (
+                              <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '0.1rem 0.35rem', whiteSpace: 'nowrap' }}>CLOSED</span>
+                            )}
+                          </div>
+
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             {p.options.map((opt: string, idx: number) => {
                               const voteCount = p.votes[idx] || 0;
                               const percent = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
                               const isMyVote = userVotes[p.id] === idx;
+                              const isCorrectAnswer = p.isQuiz && p.isClosed && idx === p.correctOption;
 
-                              if (hasVoted) {
+                              if (showResults) {
                                 return (
                                   <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                                     <div className="flex-between" style={{ fontSize: '0.8rem' }}>
-                                      <span style={{ color: isMyVote ? 'var(--color-accent)' : 'white' }}>
-                                        {opt} {isMyVote && '✓'}
+                                      <span style={{ color: isCorrectAnswer ? '#10B981' : isMyVote ? 'var(--color-accent)' : 'white' }}>
+                                        {opt} {isMyVote && '✓'}{isCorrectAnswer && ' ✓ Correct answer'}
                                       </span>
                                       <span style={{ color: 'var(--text-muted)' }}>{voteCount} ({percent}%)</span>
                                     </div>
                                     <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
-                                      <div style={{ width: `${percent}%`, height: '100%', backgroundColor: isMyVote ? 'var(--color-accent)' : 'var(--color-primary)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                                      <div style={{ width: `${percent}%`, height: '100%', backgroundColor: isCorrectAnswer ? '#10B981' : isMyVote ? 'var(--color-accent)' : 'var(--color-primary)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
                                     </div>
                                   </div>
                                 );
                               } else {
                                 return (
-                                  <button 
+                                  <button
                                     key={idx}
                                     onClick={() => handleVotePoll(p.id, idx)}
                                     className="premium-btn premium-btn-secondary"
@@ -7793,7 +7898,32 @@ Media encrypted in transit (DTLS-SRTP).`;
                               }
                             })}
                           </div>
-                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total votes: {totalVotes}</span>
+                          {p.isQuiz && p.isClosed && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.6rem' }}>
+                              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>LEADERBOARD</span>
+                              {scores.length === 0 ? (
+                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No one got it right yet.</span>
+                              ) : (
+                                scores.map((s) => (
+                                  <div key={s.voterId} className="flex-between" style={{ fontSize: '0.8rem' }}>
+                                    <span style={{ color: 'white' }}>🏆 {s.name}</span>
+                                    <span style={{ color: '#10B981', fontWeight: 700 }}>{s.points} pt{s.points === 1 ? '' : 's'}</span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                          <div className="flex-between" style={{ alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total votes: {totalVotes}</span>
+                            {isAdmin && !p.isClosed && (
+                              <button
+                                onClick={() => handleClosePoll(p.id)}
+                                style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                              >
+                                Close poll
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     })
