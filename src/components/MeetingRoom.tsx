@@ -6824,17 +6824,30 @@ Media encrypted in transit (DTLS-SRTP).`;
               <div className={`meeting-grid${layoutMode === 'speaker' ? ' speaker-mode' : ''}`} style={{
                 flex: 1,
                 display: 'flex',
-                flexWrap: 'wrap',
-                gap: window.innerWidth < 768 ? '0.75rem' : '1.25rem',
+                flexDirection: 'column',
                 padding: window.innerWidth < 768 ? '0.75rem' : '1.5rem',
                 overflowY: 'auto',
-                alignItems: 'center',
-                justifyContent: 'center',
-                alignContent: 'center',
                 background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E'
               }}>
-                {localVideoCard}
-                {remoteVideoCards}
+                {/* Portrait-phone tile auto-size: this inner wrapper carries
+                    the wrap layout and margin:auto centres the tiles when
+                    they fit, but collapses to the top (never clips the
+                    first tiles) when 3+ tiles overflow the viewport height
+                    — plain align/justify centering on a scrollable flex
+                    container hides the top rows above the scroll origin. */}
+                <div style={{
+                  margin: 'auto',
+                  flexShrink: 0,
+                  width: '100%',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: window.innerWidth < 768 ? '0.75rem' : '1.25rem',
+                  justifyContent: 'center',
+                  alignContent: 'center'
+                }}>
+                  {localVideoCard}
+                  {remoteVideoCards}
+                </div>
               </div>
             );
           })()
@@ -8829,7 +8842,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <button
                 onClick={handleRetryLiveKit}
                 className="premium-btn premium-btn-secondary"
-                style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                style={{ padding: '0.35rem 0.7rem', fontSize: '0.75rem', borderRadius: '6px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 title="The room is on a direct connection because the video server could not be reached. Try the video server again."
               >
                 Retry video
@@ -8838,7 +8851,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             <button 
               onClick={() => setShowMeetingInfo(!showMeetingInfo)}
               className="premium-btn premium-btn-secondary" 
-              style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ padding: '0.35rem 0.7rem', fontSize: '0.75rem', borderRadius: '6px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               title="View meeting info and share"
             >
               Share
@@ -8898,6 +8911,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           <div className="meeting-toolbar-center" style={{ gap: '0.75rem', position: 'relative' }}>
             {/* Mute Audio */}
             <button 
+              className="toolbar-control-btn"
               onClick={toggleMute}
               style={{
                 width: '40px',
@@ -8919,6 +8933,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* Stop Video */}
             <button 
+              className="toolbar-control-btn"
               onClick={toggleVideo}
               style={{
                 width: '40px',
@@ -8940,6 +8955,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* Screen Share */}
             <button 
+              className="toolbar-control-btn"
               onClick={handleToggleScreenShare}
               style={{
                 width: '40px',
@@ -8962,6 +8978,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* Speakers — one-tap feedback breaker (Fix Round 8 #4) */}
             <button
+              className="toolbar-control-btn"
               onClick={() => setIsSpeakersMuted(!isSpeakersMuted)}
               style={{
                 width: '40px',
@@ -8983,6 +9000,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* Device Settings Toggle */}
             <button 
+              className="toolbar-control-btn"
               onClick={() => setIsDeviceModalOpen(true)}
               style={{
                 width: '40px',
@@ -9004,6 +9022,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* Full Screen Toggle */}
             <button 
+              className="toolbar-control-btn"
               onClick={toggleFullscreen}
               style={{
                 width: '40px',
@@ -9026,6 +9045,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             {/* Hand Raise / Lower */}
             <div style={{ position: 'relative' }}>
               <button 
+                className="toolbar-control-btn"
                 onClick={() => {
                   if (localHandRaised) {
                     toggleHandRaise();
@@ -9183,6 +9203,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             {/* Annotate Screen */}
             {isScreenSharing && (
               <button 
+                className="toolbar-control-btn"
                 onClick={() => setIsAnnotating(!isAnnotating)}
                 style={{
                   width: '40px',
@@ -9205,6 +9226,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* More Options Dropdown Toggle */}
             <button 
+              className="toolbar-control-btn"
               onClick={() => setShowMoreMenu(!showMoreMenu)}
               style={{
                 width: '40px',
@@ -9227,6 +9249,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             {/* Emoji Reactions Trigger */}
             <div style={{ position: 'relative' }}>
               <button 
+                className="toolbar-control-btn"
                 onClick={() => setShowEmojiReactions(!showEmojiReactions)}
                 style={{
                   width: '40px',
@@ -9555,7 +9578,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 height: '36px'
               }}
             >
-              <Users size={15} />
+              <Users size={16} />
               <span className="hide-mobile-text">Participants</span>
             </button>
 
@@ -9575,7 +9598,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 height: '36px'
               }}
             >
-              <MessageSquare size={15} />
+              <MessageSquare size={16} />
               <span className="hide-mobile-text">Chat</span>
             </button>
 
@@ -9592,7 +9615,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 height: '36px'
               }}
             >
-              <PhoneOff size={15} />
+              <PhoneOff size={16} />
               <span className="hide-mobile-text">{isAdmin ? 'End for All' : 'Leave Call'}</span>
             </button>
           </div>

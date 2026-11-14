@@ -559,21 +559,30 @@ h1, h2, h3, h4, h5, h6 {
   .mobile-only-back {
     display: flex !important;
   }
-  
-  .meeting-grid {
-    grid-template-columns: 1fr !important;
-    grid-template-rows: auto !important;
-  }
 }
 
 @media (max-width: 640px) {
   .hide-mobile-text {
     display: none !important;
   }
-  
-  .meeting-grid {
-    gap: 0.5rem !important;
-    padding: 0.5rem !important;
+}
+
+/* Portrait phones: video tiles auto-size from the available space. One
+   tile per row, full width, 16/9 kept by .meeting-card aspect-ratio; the
+   speaker-mode filmstrip shrinks to 150px so two tiles always fit side
+   by side on a 360-430px phone. (The old rules here set grid-template-*
+   on .meeting-grid, but the grid is a flex container, so they did
+   nothing; the sizing lives here and in the component's margin:auto
+   tile wrapper, which centres tiles when they fit and scrolls from the
+   top — never clipping the first tiles — when 3+ overflow the height.) */
+@media (max-width: 480px) and (orientation: portrait) {
+  .meeting-grid .meeting-card:not(.spotlight) {
+    flex: 1 1 100% !important;
+    max-width: 100% !important;
+  }
+  .meeting-grid.speaker-mode .meeting-card:not(.spotlight) {
+    flex: 0 0 150px !important;
+    max-width: 150px !important;
   }
 }
 
@@ -656,12 +665,16 @@ h1, h2, h3, h4, h5, h6 {
     order: 1;
   }
 
-  /* Only the toolbar's own control buttons get the fixed size. This used
-     to be a descendant selector, so it also crushed every button inside
-     the pop-up menus/sheets that render inside this container (More menu
-     items, Raise Hand options) to 36x36px on phones. */
-  .meeting-toolbar-center > button,
-  .meeting-toolbar-center > div > button {
+  /* Only the toolbar's own round control buttons get the fixed size, and
+     only when marked .toolbar-control-btn. A structural selector here is
+     a trap: the More menu panel and the Raise Hand sheet also render
+     inside this container (the menu via a React fragment, so its panel
+     is a direct-child div), and a plain "> div > button" rule crushed
+     their item buttons to 44x44px and squeezed every menu label to zero
+     width — the labels were invisible on phones. With the class scope,
+     no pop-up content inside this container can ever be caught again. */
+  .meeting-toolbar-center > button.toolbar-control-btn,
+  .meeting-toolbar-center > div > button.toolbar-control-btn {
     width: 44px !important;
     height: 44px !important;
     flex-shrink: 0 !important;
