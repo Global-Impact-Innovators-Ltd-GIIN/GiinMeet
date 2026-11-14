@@ -35,6 +35,14 @@ interface Meeting {
   passcode?: string;
   link_expires_at?: string | null;
   link_expiry_mode?: string | null;
+  // Phase 1 — all optional: the columns only exist once
+  // giinmeet_phase1.sql runs, so every reader must tolerate absence.
+  reminder_enabled?: boolean;
+  reminder_minutes_before?: number;
+  series_id?: string | null;
+  recurrence_rule?: string | null;
+  recurrence_count?: number | null;
+  personal_room_slug?: string | null;
 }
 
 const applyFont = (fontFamilyHeading: string, fontFamilyBody: string) => {
@@ -1714,7 +1722,7 @@ function App() {
     setMeetingHistory(prev => prev.filter(m => m.id !== meetingId));
   };
 
-  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null } }) => {
+  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number } }) => {
     if (!user || !user.id) {
       window.alert('Sign in to schedule a meeting.');
       return null;
@@ -1738,6 +1746,12 @@ function App() {
         newDbMeet.link_expiry_mode = meet.linkExpiry.mode;
         newDbMeet.link_expires_at = meet.linkExpiry.expiresAt;
       }
+      // Phase 1 — the reminder setting travels the same way (createMeeting
+      // probe-gates the reminder columns, localStorage until then).
+      if (meet.reminder) {
+        newDbMeet.reminder_enabled = meet.reminder.enabled;
+        newDbMeet.reminder_minutes_before = meet.reminder.minutesBefore;
+      }
       const savedMeet = await giinApi.createMeeting(newDbMeet);
 
       const finalMeet: Meeting = {
@@ -1749,7 +1763,11 @@ function App() {
         host: savedMeet.host || 'You',
         passcode: savedMeet.passcode,
         link_expires_at: savedMeet.link_expires_at || meet.linkExpiry?.expiresAt || null,
-        link_expiry_mode: savedMeet.link_expiry_mode || meet.linkExpiry?.mode || 'on-end'
+        link_expiry_mode: savedMeet.link_expiry_mode || meet.linkExpiry?.mode || 'on-end',
+        // Phase 1 — reminder setting, so the dashboard can show it without
+        // a re-read (the columns may not exist yet — see createMeeting).
+        reminder_enabled: (savedMeet as any).reminder_enabled ?? meet.reminder?.enabled ?? true,
+        reminder_minutes_before: (savedMeet as any).reminder_minutes_before ?? meet.reminder?.minutesBefore ?? 15
       };
 
       setMeetingHistory(prev => [finalMeet, ...prev]);

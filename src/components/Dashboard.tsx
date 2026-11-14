@@ -15,6 +15,14 @@ interface Meeting {
   passcode?: string | null;
   link_expires_at?: string | null;
   link_expiry_mode?: string | null;
+  // Phase 1 — all optional: the columns only exist once
+  // giinmeet_phase1.sql runs, so every reader must tolerate absence.
+  reminder_enabled?: boolean;
+  reminder_minutes_before?: number;
+  series_id?: string | null;
+  recurrence_rule?: string | null;
+  recurrence_count?: number | null;
+  personal_room_slug?: string | null;
 }
 
 interface DashboardProps {
@@ -22,7 +30,7 @@ interface DashboardProps {
   onNavigate: (view: string) => void;
   onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean, passcode?: string | null) => void;
   meetingHistory: Meeting[];
-  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null } }) => Promise<Meeting | null>;
+  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number } }) => Promise<Meeting | null>;
   onCancelMeeting?: (meetingId: string, title: string) => void;
   userName: string;
   userDomain?: string;
@@ -166,6 +174,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // its own join link and waiting room.
   const [scheduleRecurrence, setScheduleRecurrence] = useState<'none' | 'weekly' | 'monthly'>('none');
   const [scheduleRecurrenceCount, setScheduleRecurrenceCount] = useState(4);
+  // Phase 1 — meeting reminder: emailed to the host before the meeting.
+  // Default on, 15 minutes before (the reminder itself only sends once
+  // SMTP is configured — see src/utils/mailer.ts).
+  const [scheduleReminderEnabled, setScheduleReminderEnabled] = useState(true);
+  const [scheduleReminderMinutes, setScheduleReminderMinutes] = useState(15);
   const [seriesCreated, setSeriesCreated] = useState(0);
   // Invite by contact / email from the dashboard (copy link + mailto;
   // no mail provider is configured, so nothing is ever "sent" silently).
@@ -252,7 +265,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         duration: templateDuration,
         requireWaitingRoom,
         passcode,
-        linkExpiry: { mode: scheduleLinkExpiry, expiresAt: computeLinkExpiry(scheduleLinkExpiry, t.toISOString()) }
+        linkExpiry: { mode: scheduleLinkExpiry, expiresAt: computeLinkExpiry(scheduleLinkExpiry, t.toISOString()) },
+        reminder: { enabled: scheduleReminderEnabled, minutesBefore: scheduleReminderMinutes }
       });
       if (saved) {
         created++;
@@ -536,6 +550,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {meeting.status !== 'Completed' && (
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.25rem 0 0', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                         <span>{linkExpiryLabel(meeting)}</span>
+                        {(() => {
+                          // Phase 1 — reminder, from the row when present, else
+                          // the localStorage fallback kept at creation time.
+                          let rem: { enabled: boolean; minutesBefore: number } | null = null;
+                          if (meeting.reminder_enabled !== undefined) {
+                            rem = { enabled: meeting.reminder_enabled, minutesBefore: meeting.reminder_minutes_before ?? 15 };
+                          } else {
+                            try {
+                              const raw = localStorage.getItem(`giin_reminder_${meeting.id}`);
+                              rem = raw ? JSON.parse(raw) : null;
+                            } catch (e) { rem = null; }
+                          }
+                          if (!rem || !rem.enabled) return null;
+                          return <span>🔔 Reminder {rem.minutesBefore} min before</span>;
+                        })()}
                         <select
                           value={linkExpiryMode(meeting)}
                           onChange={(e) => handleLinkExpiryChange(meeting, e.target.value)}
@@ -890,6 +919,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     Creates {scheduleRecurrenceCount} separate meetings ({scheduleRecurrence}), each with its own join link. They share one passcode.
                   </span>
                 )}
+              </div>
+
+              {/* Phase 1 — meeting reminder (emailed to the host). */}
+              <div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', color: 'var(--text-main)' }}>
+                  <input
+                    type="checkbox"
+                    checked={scheduleReminderEnabled}
+                    onChange={(e) => setScheduleReminderEnabled(e.target.checked)}
+                  />
+                  Email me a reminder before the meeting
+                </label>
+                {scheduleReminderEnabled && (
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.5rem' }}>
+                    <select
+                      className="premium-input"
+                      value={scheduleReminderMinutes}
+                      onChange={(e) => setScheduleReminderMinutes(parseInt(e.target.value, 10) || 15)}
+                      style={{ height: '44px', flex: 1 }}
+                    >
+                      <option value={5}>5 minutes before</option>
+                      <option value={15}>15 minutes before</option>
+                      <option value={30}>30 minutes before</option>
+                      <option value={60}>1 hour before</option>
+                    </select>
+                  </div>
+                )}
+                <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                  The reminder goes to your email. Sending starts once email is configured for the app (SMTP settings) — until then the reminder is saved and queued.
+                </span>
               </div>
 
               <div>

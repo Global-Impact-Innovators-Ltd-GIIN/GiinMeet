@@ -145,6 +145,34 @@ export async function probeLinkExpirySupport(): Promise<boolean> {
   return linkExpirySupportedCache;
 }
 
+// Phase 1 — same probe for the reminder columns (giinmeet_phase1.sql):
+// reminder_enabled / reminder_minutes_before / reminder_sent_at.
+let reminderSupportedCache: boolean | null = null;
+export async function probeReminderSupport(): Promise<boolean> {
+  if (reminderSupportedCache !== null) return reminderSupportedCache;
+  try {
+    const { error } = await supabase.from('meetings').select('reminder_sent_at').limit(1);
+    reminderSupportedCache = !error;
+  } catch (e) {
+    reminderSupportedCache = false;
+  }
+  return reminderSupportedCache;
+}
+
+// Phase 1 — same probe for the recurring-series columns
+// (series_id / recurrence_rule / recurrence_count).
+let seriesSupportedCache: boolean | null = null;
+export async function probeSeriesSupport(): Promise<boolean> {
+  if (seriesSupportedCache !== null) return seriesSupportedCache;
+  try {
+    const { error } = await supabase.from('meetings').select('series_id').limit(1);
+    seriesSupportedCache = !error;
+  } catch (e) {
+    seriesSupportedCache = false;
+  }
+  return seriesSupportedCache;
+}
+
 export const MEETING_PUBLIC_COLUMNS =
   'id,user_id,title,time,duration,status,host,notes,action_items_count,created_at,admin_id,require_waiting_room';
 
@@ -514,7 +542,7 @@ export const giinApi = {
   // best-effort here (it is retried when the meeting is joined); if it
   // fails, a clear warning is logged and the video call will surface the
   // missing room instead of silently dropping to a peer-to-peer call.
-  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null }) => {
+  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null; reminder_enabled?: boolean; reminder_minutes_before?: number }) => {
     // Generate UUID on the client side to avoid race conditions and mismatches
     const meetingId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -550,6 +578,23 @@ export const giinApi = {
         payload.link_expires_at = linkAt || null;
       } else {
         try { localStorage.setItem(`giin_link_expiry_${meetingId}`, JSON.stringify({ mode: linkMode, expiresAt: linkAt || null })); } catch (e) {}
+      }
+    }
+
+    // Phase 1 — meeting reminder (same probe pattern as link expiry):
+    // the reminder settings ride in the spread, so strip them and re-add
+    // only when the columns exist. Until giinmeet_phase1.sql runs, the
+    // choice is kept in localStorage so the dashboard can still show it.
+    delete payload.reminder_enabled;
+    delete payload.reminder_minutes_before;
+    const remEnabled = (meeting as any).reminder_enabled as boolean | undefined;
+    const remMinutes = (meeting as any).reminder_minutes_before as number | undefined;
+    if (remEnabled !== undefined || remMinutes !== undefined) {
+      if (await probeReminderSupport()) {
+        payload.reminder_enabled = remEnabled ?? true;
+        payload.reminder_minutes_before = remMinutes ?? 15;
+      } else {
+        try { localStorage.setItem(`giin_reminder_${meetingId}`, JSON.stringify({ enabled: remEnabled ?? true, minutesBefore: remMinutes ?? 15 })); } catch (e) {}
       }
     }
 
