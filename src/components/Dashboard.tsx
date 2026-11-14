@@ -1341,6 +1341,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         }}>
           <div className="glass-panel" style={{
             width: '500px',
+            maxWidth: 'calc(100vw - 32px)',
+            maxHeight: 'calc(100dvh - 32px)',
+            overflowY: 'auto',
             backgroundColor: 'var(--bg-card)',
             padding: '2rem',
             animation: 'pop-in var(--transition-normal)',
