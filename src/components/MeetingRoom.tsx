@@ -6215,7 +6215,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        background: 'linear-gradient(to bottom, #0A0F1D, #04060B)',
+                        background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)',
                         position: 'absolute',
                         top: 0,
                         left: 0,
@@ -6227,7 +6227,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           width: '120px',
                           height: '120px',
                           borderRadius: '50%',
-                          backgroundColor: p.avatarBg,
+                          backgroundColor: 'rgba(255,255,255,0.12)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -6238,9 +6238,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                           border: '4px solid rgba(255, 255, 255, 0.1)',
                           animation: 'pulse-ring 2.5s infinite'
                         }}>
-                          {p.avatar}
+                          <User size={56} color="white" />
                         </div>
-                        <h4 style={{ marginTop: '1.5rem', fontSize: '1.25rem', fontWeight: 600 }}>{p.name}</h4>
+                        <h4 style={{ marginTop: '1.5rem', fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-accent)' }}>{p.name}</h4>
                         <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
                           {tile.connecting ? 'Connecting secure tunnel...' : 'Camera Off'}
                         </span>
@@ -6263,7 +6263,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       backdropFilter: 'blur(8px)',
                       zIndex: 10
                     }}>
-                      <span style={{ fontWeight: 600 }}>{p.name}{tileRoleSuffix(p.role)}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>{p.name}{tileRoleSuffix(p.role)}</span>
                       {pState.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />}
                       {/* Latency badge removed to run in the background */}
                     </div>
@@ -6370,13 +6370,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '0.75rem',
-                  backgroundColor: '#090D14'
+                  background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)'
                 }}>
                   <div style={{
                     width: '44px',
                     height: '44px',
                     borderRadius: '50%',
-                    backgroundColor: 'var(--color-primary)',
+                    backgroundColor: 'rgba(255,255,255,0.12)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -6385,7 +6385,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     color: 'white',
                     border: '1px solid rgba(255, 255, 255, 0.1)'
                   }}>
-                    {getParticipantInitials(currentUser?.name)}
+                    <User size={20} color="white" />
                   </div>
                   <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Camera Off</span>
                 </div>
@@ -6475,13 +6475,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '1rem',
-                    backgroundColor: '#090D14'
+                    background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)'
                   }}>
                     <div style={{
                       width: '80px',
                       height: '80px',
                       borderRadius: '50%',
-                      backgroundColor: 'var(--color-primary)',
+                      backgroundColor: 'rgba(255,255,255,0.12)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -6490,8 +6490,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                       color: 'white',
                       border: '2px solid rgba(255, 255, 255, 0.1)'
                     }}>
-                      {getParticipantInitials(currentUser?.name)}
+                      <User size={36} color="white" />
                     </div>
+                    <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-accent)' }}>{currentUser?.name || 'You'}</span>
                     <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 500 }}>Webcam Off</span>
                   </div>
                 )}
@@ -6622,13 +6623,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '1rem',
-                    backgroundColor: '#090D14'
+                    background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)'
                   }}>
                     <div style={{
                       width: '64px',
                       height: '64px',
                       borderRadius: '50%',
-                      backgroundColor: 'var(--color-primary)',
+                      backgroundColor: 'rgba(255,255,255,0.12)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -6637,8 +6638,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                       color: 'white',
                       border: '2px solid rgba(255,255,255,0.1)'
                     }}>
-                      {getParticipantInitials(currentUser?.name)}
+                      <User size={28} color="white" />
                     </div>
+                    <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-accent)' }}>You</span>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{localCameraRecovering ? 'Camera reconnecting…' : 'Camera Off'}</span>
                   </div>
                 )}
@@ -6701,7 +6703,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 }}>
                   {/* Only Host / Co-host get a role shown on a video card;
                       everyone else is just their name. */}
-                  <span style={{ fontWeight: 600 }}>You{isAdmin ? ' (Host)' : isCoHost ? ' (Co-host)' : ''}</span>
+                  <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>You{isAdmin ? ' (Host)' : isCoHost ? ' (Co-host)' : ''}</span>
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                   <span
                     style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)' }}
@@ -6880,13 +6882,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: '1rem',
-                      backgroundColor: '#090D14'
+                      background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)'
                     }}>
                       <div style={{
                         width: '64px',
                         height: '64px',
                         borderRadius: '50%',
-                        backgroundColor: p.avatarBg || 'var(--color-primary)',
+                        backgroundColor: 'rgba(255,255,255,0.12)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -6895,8 +6897,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                         color: 'white',
                         border: '2px solid rgba(255,255,255,0.1)'
                       }}>
-                        {p.avatar || getParticipantInitials(p.name)}
+                        <User size={30} color="white" />
                       </div>
+                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-accent)' }}>{p.name}</span>
                       <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                         {tile.connecting ? 'Connecting...' : 'Camera Off'}
                       </span>
@@ -6983,7 +6986,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     backdropFilter: 'blur(4px)',
                     zIndex: 10
                   }}>
-                    <span style={{ fontWeight: 600 }}>{p.name}{tileRoleSuffix(p.role)}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>{p.name}{tileRoleSuffix(p.role)}</span>
                     {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                     <span
                       style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: pState.isReconnecting ? 'var(--color-accent)' : hasConnection ? (typeof pState.latency === 'number' ? (pState.latency < 150 ? '#10B981' : pState.latency < 400 ? 'var(--color-accent)' : '#EF4444') : '#10B981') : '#64748B' }}
