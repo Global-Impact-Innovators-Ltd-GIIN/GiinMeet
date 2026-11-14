@@ -5745,6 +5745,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       display: 'flex',
       flexDirection: 'column',
       height: isFullscreen ? '100dvh' : '100%',
+      minHeight: 0,
       backgroundColor: '#07090E', // Dark screen for immersive meeting
       color: 'white',
       borderRadius: isFullscreen ? '0' : 'var(--radius-lg)',
@@ -5973,7 +5974,7 @@ Media encrypted in transit (DTLS-SRTP).`;
       )}
 
       {/* Main workspace (Grid & Panels) */}
-      <div style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
         
         {/* Floating Subtitles Overlay */}
         {activeCaption && (
@@ -7129,6 +7130,8 @@ Media encrypted in transit (DTLS-SRTP).`;
             return (
               <div className={`meeting-grid${layoutMode === 'speaker' ? ' speaker-mode' : ''}`} style={{
                 flex: 1,
+                minHeight: 0,
+                minWidth: 0,
                 display: 'flex',
                 flexDirection: 'column',
                 padding: window.innerWidth < 768 ? '0.75rem' : '1.5rem',
@@ -7142,14 +7145,15 @@ Media encrypted in transit (DTLS-SRTP).`;
                     — plain align/justify centering on a scrollable flex
                     container hides the top rows above the scroll origin. */}
                 <div style={{
-                  margin: 'auto',
+                  margin: '0 auto',
                   flexShrink: 0,
                   width: '100%',
                   display: 'flex',
                   flexWrap: 'wrap',
                   gap: window.innerWidth < 768 ? '0.75rem' : '1.25rem',
                   justifyContent: 'center',
-                  alignContent: 'center'
+                  alignContent: 'flex-start',
+                  alignItems: 'flex-start'
                 }}>
                   {localVideoCard}
                   {remoteVideoCards}
