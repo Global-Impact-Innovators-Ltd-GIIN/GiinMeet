@@ -5,7 +5,7 @@ import {
   Clock, Pin, LayoutGrid, LayoutList,
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
   MoreHorizontal, BarChart3, Volume2, VolumeX, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
-  LogOut, UserCheck, X, Hand, Paperclip
+  LogOut, UserCheck, User, Keyboard, X, Hand, Paperclip
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -368,6 +368,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
   const [isChatLocked, setIsChatLocked] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [shortcutsExpanded, setShortcutsExpanded] = useState(false);
 
   // Floating Emoji Reactions State
   const [activeReactions, setActiveReactions] = useState<{ id: string; senderKey: string; emoji: string; offset: number }[]>([]);
@@ -9816,7 +9817,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   flexDirection: 'column',
                   gap: '0.35rem',
                   zIndex: 15000,
-                  maxHeight: window.innerWidth < 768 ? 'calc(100dvh - 170px)' : 'none',
+                  maxHeight: window.innerWidth < 768 ? 'calc(100dvh - 170px)' : 'calc(100dvh - 140px)',
                   overflowY: 'auto',
                   overscrollBehavior: 'contain',
                   boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
@@ -10018,22 +10019,35 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </button>
                   )}
 
-                  {/* Keyboard Shortcuts */}
-                  <div style={{ borderTop: '1px solid #1E293B', marginTop: '0.25rem', paddingTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', padding: '0 0.85rem' }}>KEYBOARD SHORTCUTS</span>
-                    {[
-                      { key: 'M', action: 'Mute / unmute mic' },
-                      { key: 'V', action: 'Camera on / off' },
-                      { key: 'S', action: 'Share / stop sharing screen' },
-                      { key: 'H', action: 'Raise / lower hand' },
-                      { key: 'C', action: 'Open / close chat' }
-                    ].map(s => (
-                      <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.15rem 0.85rem', fontSize: '0.8rem', color: 'white' }}>
-                        <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid #1E293B', borderRadius: '4px', padding: '1px 6px', fontSize: '0.7rem', fontFamily: 'monospace', minWidth: '22px', textAlign: 'center' }}>{s.key}</kbd>
-                        <span>{s.action}</span>
+                  {/* Keyboard Shortcuts — its own collapsible element, so the
+                      menu stays short and nothing is cut off; tap to expand. */}
+                  <div style={{ borderTop: '1px solid #1E293B', marginTop: '0.25rem', paddingTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', flexShrink: 0 }}>
+                    <button
+                      onClick={() => setShortcutsExpanded(!shortcutsExpanded)}
+                      aria-expanded={shortcutsExpanded}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'none', border: 'none', padding: '0.6rem 0.85rem', width: '100%', minHeight: '44px', borderRadius: '6px', color: 'white', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left' }}
+                    >
+                      <Keyboard size={16} style={{ flexShrink: 0 }} />
+                      <span style={{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Keyboard Shortcuts</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', flexShrink: 0 }}>{shortcutsExpanded ? '▲' : '▼'}</span>
+                    </button>
+                    {shortcutsExpanded && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                        {[
+                          { key: 'M', action: 'Mute / unmute mic' },
+                          { key: 'V', action: 'Camera on / off' },
+                          { key: 'S', action: 'Share / stop sharing screen' },
+                          { key: 'H', action: 'Raise / lower hand' },
+                          { key: 'C', action: 'Open / close chat' }
+                        ].map(s => (
+                          <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.15rem 0.85rem', fontSize: '0.8rem', color: 'white' }}>
+                            <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid #1E293B', borderRadius: '4px', padding: '1px 6px', fontSize: '0.7rem', fontFamily: 'monospace', minWidth: '22px', textAlign: 'center' }}>{s.key}</kbd>
+                            <span>{s.action}</span>
+                          </div>
+                        ))}
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.15rem 0.85rem' }}>Shortcuts are ignored while typing. Leaving the meeting is click-only, by design.</span>
                       </div>
-                    ))}
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.15rem 0.85rem' }}>Shortcuts are ignored while typing. Leaving the meeting is click-only, by design.</span>
+                    )}
                   </div>
 
                 </div>
