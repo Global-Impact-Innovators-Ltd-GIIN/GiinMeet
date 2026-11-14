@@ -754,12 +754,14 @@ export const Settings: React.FC<SettingsProps> = ({
       display: 'grid',
       gridTemplateColumns: '280px 1fr',
       gap: '2rem',
-      height: 'calc(100vh - 120px)',
+      height: 'calc(100dvh - 70px - 5rem)',
+      maxHeight: '100%',
+      minHeight: 0,
       animation: 'slide-in var(--transition-normal)'
     }} className="grid-2">
       
       {/* Categories Sidebar */}
-      <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', height: 'fit-content' }}>
+      <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', height: 'fit-content', minHeight: 0, maxHeight: '100%', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1.25rem', paddingLeft: '0.25rem' }}>
           <Activity size={20} color="var(--color-primary)" />
           <h2 style={{ fontSize: '1.3rem', fontFamily: 'var(--font-heading)' }}>Settings Hub</h2>
@@ -823,7 +825,7 @@ export const Settings: React.FC<SettingsProps> = ({
       </div>
 
       {/* Main Settings Display Area */}
-      <div className="glass-panel" style={{ padding: '2rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div className="glass-panel" style={{ padding: '2rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem', minHeight: 0 }}>
         
         {/* Category Panel: Profile Details */}
         {activeCategory === 'profile' && (

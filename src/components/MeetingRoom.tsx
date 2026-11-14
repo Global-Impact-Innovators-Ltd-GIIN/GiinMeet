@@ -7567,6 +7567,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
+            minHeight: 0,
             flexDirection: 'column',
             animation: 'slide-in 0.2s ease',
             zIndex: 5
@@ -7581,7 +7582,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               {/* Lock Meeting Toggle */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
