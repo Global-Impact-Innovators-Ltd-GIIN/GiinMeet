@@ -5881,24 +5881,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <Users size={14} color="var(--color-accent)" />
             {participants.length + 1}
           </span>
-          {/* Video engine badge: LiveKit (server) or P2P (direct fallback) */}
-          <span
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.35rem',
-              padding: '0.2rem 0.55rem',
-              borderRadius: '10px',
-              backgroundColor: engineType === 'LIVEKIT' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(250, 189, 2, 0.12)',
-              border: `1px solid ${engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)'}`,
-              color: engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)',
-              fontSize: '0.7rem',
-              fontWeight: 700
-            }}
-            title={engineType === 'LIVEKIT' ? 'Video is running through the LiveKit server' : 'LiveKit is unavailable — video is running direct peer-to-peer'}
-          >
-            {engineType === 'LIVEKIT' ? 'LiveKit' : 'P2P'}
-          </span>
           <button 
             onClick={() => onMinimizeToggle?.(true)}
             className="premium-btn premium-btn-secondary"
