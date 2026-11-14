@@ -714,6 +714,28 @@ export const giinApi = {
     return data;
   },
 
+  // Phase 1 — attendance auto-report: store the local attendance record
+  // server-side and queue the report email to the host. The route is
+  // host-verified (same check as endMeeting). Never throws — the caller
+  // (MeetingRoom end-for-all) is fire-and-forget, so a report failure
+  // must never look like an end failure. Returns the route's answer so
+  // the caller can log it.
+  sendAttendanceReport: async (meetingId: string, rows: { key: string; name: string; joinedAt: number; leftAt: number | null }[]) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/meetings/attendance-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, accessToken: session.access_token, rows }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
   // Transfer the host role, server-verified (Fix Round 6 / Phase 6).
   // POST /api/meetings/transfer-host checks the caller is the current
   // host and the new host is a signed-in participant in the meeting.

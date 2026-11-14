@@ -4564,6 +4564,26 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (e) { /* broadcast is best-effort: server state + polling cover it */ }
   };
 
+  // Phase 1 — attendance auto-report: after the meeting ends for everyone,
+  // send the local attendance record (localStorage, per meeting) to the
+  // host's email via the server route (host-verified, stored + queued).
+  // Fire-and-forget: the end never waits for it and never fails because
+  // of it. Until SMTP is configured the email waits in the outbox and
+  // the report stays viewable in the dashboard.
+  const sendAttendanceReport = async () => {
+    try {
+      const raw = localStorage.getItem(`giin_attendance_${meetingId}`);
+      if (!raw) return;
+      const map = JSON.parse(raw) as Record<string, { name: string; joinedAt: number; leftAt: number | null }>;
+      const rows = Object.entries(map).map(([key, v]) => ({ key, name: v.name, joinedAt: v.joinedAt, leftAt: v.leftAt }));
+      if (rows.length === 0) return;
+      const result = await giinApi.sendAttendanceReport(meetingId, rows);
+      if (result && (result as any).ok === false) {
+        console.warn('[GiinMeet] Attendance report was not queued:', (result as any).reason || (result as any).message || 'unknown');
+      }
+    } catch (e) { /* the report is best-effort; the meeting is already ended */ }
+  };
+
   const handleEndForAll = async () => {
     if (endingInProgress || endedRef.current) return;
     setEndingInProgress(true);
@@ -4576,6 +4596,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setLeaveOption(null);
       setSelectedNewAdminId('');
       enterEndedState('you-ended', (result as any)?.livekitWarning);
+      // Phase 1 — attendance auto-report (fire-and-forget).
+      void sendAttendanceReport();
     } catch (err: any) {
       console.error('[GiinMeet] End for everyone failed:', err);
       setEndError(err?.message || 'Could not end the meeting. Nobody was removed — please try again.');
