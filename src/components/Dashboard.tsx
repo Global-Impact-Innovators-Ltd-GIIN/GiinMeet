@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2 } from 'lucide-react';
-import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry } from '../supabaseClient';
+import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, supabase } from '../supabaseClient';
 
 interface Meeting {
   id: string;
@@ -252,6 +252,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [inviteContacts, setInviteContacts] = useState<any[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteNote, setInviteNote] = useState('');
+  // Phase 2 (#2) — WhatsApp + SMS invites from the same modal.
+  const [invitePhone, setInvitePhone] = useState('');
+  const [smsConfigured, setSmsConfigured] = useState<boolean | null>(null);
+  const [smsNote, setSmsNote] = useState('');
+  const [smsSending, setSmsSending] = useState(false);
   // Attendance (recorded in this browser during the meeting).
   const [attendanceMeetingId, setAttendanceMeetingId] = useState<string | null>(null);
 
@@ -369,10 +374,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setInviteMeeting(meeting);
     setInviteEmail('');
     setInviteNote('');
+    setInvitePhone('');
+    setSmsNote('');
+    setSmsSending(false);
     if (userDomain) {
       const contacts = await giinApi.getContacts(userDomain);
       setInviteContacts(contacts || []);
     }
+    // Phase 2 (#2) — is SMS wired up? The server answers from env vars
+    // only (no secrets cross the wire); the SMS button stays off until
+    // a Twilio account is connected.
+    try {
+      const res = await fetch('/api/invites/sms');
+      const data = await res.json().catch(() => ({}));
+      setSmsConfigured(data.configured === true);
+    } catch (e) { setSmsConfigured(null); }
   };
 
   const handleJoinSubmit = (e: React.FormEvent) => {
@@ -1248,6 +1264,84 @@ export const Dashboard: React.FC<DashboardProps> = ({
             >
               <Copy size={14} /> Copy Invite Link
             </button>
+            {/* Phase 2 (#2) — WhatsApp + SMS invites. WhatsApp is a wa.me
+                share link and works now with no provider. SMS goes through
+                Twilio on the server; until Suku connects a Twilio account
+                the SMS button stays off and says so — nothing is ever
+                pretended sent. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Invite by WhatsApp or SMS</span>
+              <input
+                type="tel"
+                className="premium-input"
+                placeholder="Phone with country code, e.g. +250788123456"
+                value={invitePhone}
+                onChange={(e) => setInvitePhone(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  className="premium-btn premium-btn-secondary"
+                  style={{ flex: 1, justifyContent: 'center' }}
+                  onClick={async () => {
+                    const full = await withHostPasscode(inviteMeeting);
+                    const link = buildJoinLink(full.id, full.passcode);
+                    window.open(buildWhatsAppInviteUrl(full, link, invitePhone), '_blank', 'noopener,noreferrer');
+                    setInviteNote('WhatsApp opened with the invitation ready to send.');
+                  }}
+                >
+                  WhatsApp Invite
+                </button>
+                <button
+                  className="premium-btn premium-btn-secondary"
+                  style={{ flex: 1, justifyContent: 'center' }}
+                  disabled={smsConfigured !== true || smsSending}
+                  title={smsConfigured === false ? 'SMS needs a Twilio account — see docs/phase2-setup.md' : undefined}
+                  onClick={async () => {
+                    const phone = invitePhone.trim();
+                    if (!/^\+?[1-9]\d{6,14}$/.test(phone.replace(/[\s\-()]/g, ''))) {
+                      setSmsNote('Enter a phone number with country code, e.g. +250788123456.');
+                      return;
+                    }
+                    setSmsSending(true);
+                    setSmsNote('');
+                    try {
+                      const { data: { session } } = await supabase.auth.getSession();
+                      const full = await withHostPasscode(inviteMeeting);
+                      const res = await fetch('/api/invites/sms', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          meetingId: full.id,
+                          phone,
+                          accessToken: session?.access_token,
+                          link: buildJoinLink(full.id, full.passcode),
+                          title: full.title,
+                          time: full.time,
+                        }),
+                      });
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok) {
+                        setSmsNote(data.message || 'Could not send the SMS invite.');
+                      } else {
+                        setSmsNote(`SMS invite sent to ${phone}.`);
+                      }
+                    } catch (e: any) {
+                      setSmsNote(e?.message || 'Could not send the SMS invite.');
+                    } finally {
+                      setSmsSending(false);
+                    }
+                  }}
+                >
+                  {smsSending ? 'Sending…' : 'Send SMS Invite'}
+                </button>
+              </div>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                {smsConfigured === false
+                  ? 'SMS is not connected yet — it needs a Twilio account (see docs/phase2-setup.md). WhatsApp works now, no account needed.'
+                  : 'WhatsApp opens with the invitation ready to send. SMS sends a text straight to the number above.'}
+              </span>
+              {smsNote && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>{smsNote}</span>}
+            </div>
             {inviteNote && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>{inviteNote}</span>}
             {inviteMeeting.status === 'Scheduled' && (
               <button

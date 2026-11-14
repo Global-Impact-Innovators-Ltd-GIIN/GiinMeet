@@ -160,7 +160,7 @@ export const getWebRTCScreenshareConstraints = () => {
   };
 };
 
-import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink, isMeetingHostForUser } from '../supabaseClient';
+import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink, buildWhatsAppInviteUrl, isMeetingHostForUser } from '../supabaseClient';
 
 // Helper functions defined outside the component to satisfy purity rules
 const generateRandomId = () => {
@@ -5857,6 +5857,19 @@ Media encrypted in transit (DTLS-SRTP).`;
             >
               {copiedInfo === 'details' ? <Check size={12} /> : <Copy size={12} />}
               <span>{copiedInfo === 'details' ? 'Invitation Details Copied' : 'Copy Invitation Email'}</span>
+            </button>
+            {/* Phase 2 (#2) — WhatsApp invite: a wa.me share link, no
+                provider needed. Opens WhatsApp with the invitation ready
+                to send; the host picks the contact there. */}
+            <button
+              onClick={() => {
+                const link = buildJoinLink(meetingId, passcode);
+                window.open(buildWhatsAppInviteUrl({ id: meetingId, title: meetingTitle, passcode }, link), '_blank', 'noopener,noreferrer');
+              }}
+              className="premium-btn premium-btn-secondary"
+              style={{ width: '100%', justifyContent: 'center', gap: '6px', padding: '0.5rem', fontSize: '0.75rem' }}
+            >
+              <span>Share Invite on WhatsApp</span>
             </button>
           </div>
         </div>

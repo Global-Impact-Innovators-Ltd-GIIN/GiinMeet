@@ -211,6 +211,34 @@ export const downloadICS = (meeting: { id: string; title: string; time: string; 
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
+
+// Phase 2 (#2) — WhatsApp / SMS invites. The invite words are built
+// once here so the copy button, the mailto: invite, the WhatsApp share
+// and the SMS invite all send the same text; only the channel differs.
+export const buildInviteText = (meeting: { id: string; title: string; time?: string | null; passcode?: string | null }, link: string): string => {
+  const timeStr = meeting.time ? new Date(meeting.time).toLocaleString() : '';
+  return [
+    'Please join my GIIN Meet video meeting:',
+    `Topic: ${meeting.title}`,
+    ...(timeStr ? [`Time: ${timeStr}`] : []),
+    `Join link: ${link}`,
+    `Meeting ID: ${meeting.id}`,
+    `Passcode: ${meeting.passcode || 'none - open link'}`,
+    '',
+    'Media encrypted in transit (DTLS-SRTP).',
+  ].join('\n');
+};
+
+// WhatsApp invite: a wa.me / api.whatsapp.com share link — no provider,
+// no account, no cost. With a phone number it opens a chat with that
+// person; without one it opens WhatsApp's share sheet so the host picks
+// the contact there. The number is digits only (country code + number);
+// anything else is dropped rather than guessed at.
+export const buildWhatsAppInviteUrl = (meeting: { id: string; title: string; time?: string | null; passcode?: string | null }, link: string, phone?: string | null): string => {
+  const text = encodeURIComponent(buildInviteText(meeting, link));
+  const digits = (phone || '').replace(/\D/g, '');
+  return digits ? `https://wa.me/${digits}?text=${text}` : `https://api.whatsapp.com/send?text=${text}`;
+};
 // The CURRENT host is meetings.admin_id (it moves on transfer). The
 // creator (user_id) only counts when admin_id was never set (old rows).
 // (Fix Round 6 / Phase 6: the old OR meant a transferred-away host
