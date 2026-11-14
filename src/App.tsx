@@ -1049,7 +1049,7 @@ function App() {
   }, []);
 
   // Fetch meetings from Supabase database when user updates
-  // Load meetings on startup with auto-seeding and localStorage fallback
+  // Load meetings on startup from Supabase, with localStorage fallback
   useEffect(() => {
     if (user && user.id) {
       const loadMeetings = async () => {
@@ -2503,36 +2503,6 @@ function App() {
             </div>
           )}
 
-          <button 
-            onClick={async () => {
-              try {
-                await supabase.auth.signOut();
-              } catch (err) {
-                console.warn('Signout issue:', err);
-              }
-              localStorage.clear();
-              window.location.reload();
-            }}
-            className="sidebar-reset-btn"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
-              gap: isSidebarCollapsed ? '0' : '0.75rem',
-              padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
-              background: 'none',
-              border: 'none',
-              color: 'rgba(255,255,255,0.5)',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-              width: '100%',
-              textAlign: 'left'
-            }}
-            title="Reset Demo Data"
-          >
-            <LogOut size={16} />
-            {!isSidebarCollapsed && <span>Reset Demo Data</span>}
-          </button>
         </div>
       </aside>
       )}
