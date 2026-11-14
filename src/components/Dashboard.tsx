@@ -413,7 +413,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       flexDirection: 'column'
     }}>
       {/* Welcome Banner — animated in code: laptop opens, a meeting plays on
-          its screen, it closes, then the GIIN logo displays — After Effects
+          its screen, it closes, then the GiinMeet lockup displays — After Effects
           style, looping every 10s. Text stays exactly as it was (static,
           white, name gold). No video file: the video budget is exhausted,
           so this motion is pure CSS built live in the banner. */}
@@ -425,6 +425,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="bl-orb bl-orb-gold" />
           <div className="bl-orb bl-orb-white" />
           <div className="bl-orb bl-orb-blue" />
+          <div className="bl-streak bl-streak-a" />
+          <div className="bl-streak bl-streak-b" />
+          <span className="bl-bokeh bl-bokeh-a" />
+          <span className="bl-bokeh bl-bokeh-b" />
+          <span className="bl-bokeh bl-bokeh-c" />
           <div className="bl-scene">
             <div className="bl-laptop">
               <div className="bl-screen">
@@ -437,14 +442,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               <div className="bl-base" />
             </div>
+            <div className="bl-share">
+              <div className="bl-share-head">Real-Time Screen Share</div>
+              <div className="bl-share-body">
+                <div className="bl-bars"><i /><i /><i /><i /><i /></div>
+                <div className="bl-donut" />
+              </div>
+            </div>
+            <div className="bl-controls"><span className="bl-ctl" /><span className="bl-ctl" /><span className="bl-ctl" /><span className="bl-ctl bl-ctl-end" /></div>
             <div className="bl-logo">
               <div className="bl-logo-panel">
                 <img src="/logo.png" alt="" />
+                <div className="bl-logo-name">GiinMeet</div>
+                <div className="bl-logo-tag">Connect. Collaborate. Virtualize.</div>
               </div>
             </div>
           </div>
         </div>
-        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(2,6,23,0.88) 0%, rgba(2,6,23,0.55) 55%, rgba(2,6,23,0.25) 100%)' }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(2,6,23,0.60) 0%, rgba(2,6,23,0.38) 55%, rgba(2,6,23,0.15) 100%)' }} />
         <div style={{ position: 'relative', zIndex: 2, padding: '1.75rem 2rem' }}>
           <h1 className="welcome-heading" style={{ color: 'white' }}>
             Welcome back, <span style={{ color: 'var(--color-accent)' }}>{userName}</span>

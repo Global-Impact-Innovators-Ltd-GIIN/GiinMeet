@@ -1498,10 +1498,43 @@ h1, h2, h3, h4, h5, h6 {
 /* Logo finale — real GIIN logo on a glowing light panel (dark-blue mark on dark navy would vanish) */
 .bl-logo { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); opacity: 0; animation: bl-logo-finale 10s linear infinite; z-index: 1; }
 @keyframes bl-logo-finale { 0%, 72% { opacity: 0; transform: translate(-50%, -50%) scale(0.82); } 80%, 92% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 98%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.02); } }
-.bl-logo-panel { position: relative; overflow: hidden; background: linear-gradient(135deg, #ffffff 0%, #fdf6d8 100%); border-radius: 14px; padding: 12px 22px; box-shadow: 0 0 45px rgba(250,189,2,0.85), 0 0 90px rgba(250,189,2,0.4); }
-.bl-logo-panel img { display: block; height: 58px; width: auto; }
+.bl-logo-panel { position: relative; overflow: hidden; background: linear-gradient(135deg, rgba(2,6,23,0.78) 0%, rgba(10,42,107,0.78) 100%); border: 1px solid rgba(250,189,2,0.55); border-radius: 16px; padding: 14px 24px; box-shadow: 0 0 45px rgba(250,189,2,0.85), 0 0 90px rgba(250,189,2,0.4); text-align: center; }
+.bl-logo-panel img { display: block; height: 96px; width: auto; margin: 0 auto; }
 .bl-logo-panel::after { content: ''; position: absolute; top: -20%; bottom: -20%; left: -70%; width: 45%; background: linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.85) 50%, rgba(255,255,255,0) 100%); transform: skewX(-18deg); animation: bl-shimmer 10s linear infinite; }
 @keyframes bl-shimmer { 0%, 79% { left: -70%; } 90%, 100% { left: 130%; } }
+
+/* Gold light streaks sweeping across the banner, like the promo video */
+.bl-streak { position: absolute; height: 3px; width: 340px; border-radius: 999px; background: linear-gradient(90deg, rgba(250,189,2,0) 0%, rgba(250,189,2,0.95) 50%, rgba(250,189,2,0) 100%); filter: blur(1px); transform: rotate(-14deg); pointer-events: none; animation: bl-streak-sweep 10s linear infinite; }
+.bl-streak-a { top: 24%; }
+.bl-streak-b { top: 66%; width: 260px; opacity: 0.55; animation-delay: -5s; }
+@keyframes bl-streak-sweep { 0% { left: -380px; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
+
+/* Soft bokeh dots drifting, like the promo video */
+.bl-bokeh { position: absolute; border-radius: 50%; pointer-events: none; }
+.bl-bokeh-a { width: 26px; height: 26px; top: 18%; right: 12%; background: radial-gradient(circle, rgba(250,189,2,0.8) 0%, rgba(250,189,2,0) 70%); filter: blur(4px); animation: bl-bokeh-float 7s ease-in-out infinite alternate; }
+.bl-bokeh-b { width: 16px; height: 16px; top: 62%; right: 34%; background: radial-gradient(circle, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0) 70%); filter: blur(3px); animation: bl-bokeh-float 9s ease-in-out infinite alternate; }
+.bl-bokeh-c { width: 34px; height: 34px; bottom: 8%; right: 6%; background: radial-gradient(circle, rgba(43,108,255,0.7) 0%, rgba(43,108,255,0) 70%); filter: blur(5px); animation: bl-bokeh-float 11s ease-in-out infinite alternate; }
+@keyframes bl-bokeh-float { from { transform: translate(0, 0); } to { transform: translate(-18px, -14px); } }
+
+/* Screen-share panel (picture-in-picture) + control bar, shown while the meeting plays */
+.bl-share { position: absolute; top: -8px; right: -6px; width: 122px; background: rgba(6,18,51,0.94); border: 1px solid rgba(255,255,255,0.25); border-radius: 10px; padding: 7px 8px; opacity: 0; animation: bl-share-in 10s linear infinite; z-index: 2; }
+.bl-share-head { font-size: 8.5px; font-weight: 700; color: #fff; letter-spacing: 0.02em; margin-bottom: 6px; }
+.bl-share-body { display: flex; align-items: center; gap: 8px; }
+.bl-bars { display: flex; align-items: flex-end; gap: 3px; height: 26px; }
+.bl-bars i { display: block; width: 6px; border-radius: 2px; background: linear-gradient(180deg, #FABD02, #2b6cff); }
+.bl-bars i:nth-child(1) { height: 10px; } .bl-bars i:nth-child(2) { height: 18px; } .bl-bars i:nth-child(3) { height: 13px; } .bl-bars i:nth-child(4) { height: 22px; } .bl-bars i:nth-child(5) { height: 9px; }
+.bl-donut { width: 26px; height: 26px; border-radius: 50%; background: conic-gradient(#FABD02 0 35%, #2b6cff 35% 68%, #94a3b8 68% 100%); position: relative; flex: none; }
+.bl-donut::after { content: ''; position: absolute; inset: 7px; border-radius: 50%; background: #061233; }
+@keyframes bl-share-in { 0%, 30% { opacity: 0; transform: translateY(6px); } 38%, 56% { opacity: 1; transform: translateY(0); } 66%, 100% { opacity: 0; transform: translateY(6px); } }
+
+.bl-controls { position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; background: rgba(2,6,23,0.88); border: 1px solid rgba(255,255,255,0.2); border-radius: 999px; padding: 5px 9px; opacity: 0; animation: bl-controls-in 10s linear infinite; z-index: 2; }
+.bl-ctl { width: 10px; height: 10px; border-radius: 50%; background: #475569; }
+.bl-ctl-end { background: #ef4444; }
+@keyframes bl-controls-in { 0%, 34% { opacity: 0; } 40%, 58% { opacity: 1; } 66%, 100% { opacity: 0; } }
+
+/* Logo lockup finale — new mark + GiinMeet in gold + tagline, on dark like the promo video */
+.bl-logo-name { margin-top: 8px; font-family: var(--font-heading); font-weight: 800; font-size: 1.35rem; letter-spacing: 0.02em; color: #FABD02; }
+.bl-logo-tag { margin-top: 2px; font-size: 0.75rem; color: rgba(255,255,255,0.9); letter-spacing: 0.02em; white-space: nowrap; }
 
 @media (max-width: 640px) {
   .bl-scene { width: 170px; height: 114px; right: 0.75rem; transform: translateY(-50%) scale(0.74); transform-origin: right center; }
