@@ -546,7 +546,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         <div style={{ textAlign: 'center' }}>
           <img 
             src={logoUrl} 
-            alt="GIIN MEET Logo" 
+            alt="GiinMeet Logo" 
             style={{
               width: '112px',
               height: '112px',
@@ -557,10 +557,10 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
             }} 
           />
           <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>
-            Welcome to GIIN MEET
+            Welcome to GiinMeet
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
-            Next-Generation Corporate Virtualization Hub
+            Connect, Collaborate, Virtualize
           </p>
         </div>
 

@@ -188,8 +188,14 @@ export const Settings: React.FC<SettingsProps> = ({
   const [meetingWatermark, setMeetingWatermark] = useState(() => localStorage.getItem('giin_watermark') || 'branded');
   const [layoutStyle, setLayoutStyle] = useState(() => localStorage.getItem('giin_layout') || 'left-docked');
 
-  const [brandNameState, setBrandNameState] = useState(() => localStorage.getItem('giin_brand_name') || 'GIIN MEET');
-  const [brandSloganState, setBrandSloganState] = useState(() => localStorage.getItem('giin_brand_slogan') || 'VIRTUALIZATION HUB');
+  const [brandNameState, setBrandNameState] = useState(() => {
+    const v = localStorage.getItem('giin_brand_name');
+    return !v || v === 'GIIN MEET' ? 'GiinMeet' : v;
+  });
+  const [brandSloganState, setBrandSloganState] = useState(() => {
+    const v = localStorage.getItem('giin_brand_slogan');
+    return !v || v === 'VIRTUALIZATION HUB' ? 'Connect, Collaborate, Virtualize' : v;
+  });
   const [fontHeading, setFontHeading] = useState(() => localStorage.getItem('giin_font_heading') || 'Outfit');
   const [fontBody, setFontBody] = useState(() => localStorage.getItem('giin_font_body') || 'Inter');
   const [borderRadiusVal, setBorderRadiusVal] = useState(() => localStorage.getItem('giin_border_radius') || '8');

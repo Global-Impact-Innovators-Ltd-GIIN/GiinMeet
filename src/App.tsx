@@ -238,8 +238,14 @@ function App() {
   const [isP2PCall, setIsP2PCall] = useState<boolean>(false);
 
   // Dynamic branding text
-  const [brandName, setBrandName] = useState(() => localStorage.getItem('giin_brand_name') || 'GIIN MEET');
-  const [brandSlogan, setBrandSlogan] = useState(() => localStorage.getItem('giin_brand_slogan') || 'VIRTUALIZATION HUB');
+  const [brandName, setBrandName] = useState(() => {
+    const v = localStorage.getItem('giin_brand_name');
+    return !v || v === 'GIIN MEET' ? 'GiinMeet' : v;
+  });
+  const [brandSlogan, setBrandSlogan] = useState(() => {
+    const v = localStorage.getItem('giin_brand_slogan');
+    return !v || v === 'VIRTUALIZATION HUB' ? 'Connect, Collaborate, Virtualize' : v;
+  });
 
   // Transparent logo loading state
   const [logoUrl, setLogoUrl] = useState(() => localStorage.getItem('giin_custom_logo') || '/logo.png');
@@ -1221,8 +1227,10 @@ function App() {
 
     // 6. Listen for branding details change
     const handleBrandingChange = () => {
-      setBrandName(localStorage.getItem('giin_brand_name') || 'GIIN MEET');
-      setBrandSlogan(localStorage.getItem('giin_brand_slogan') || 'VIRTUALIZATION HUB');
+      const savedName = localStorage.getItem('giin_brand_name');
+      const savedSlogan = localStorage.getItem('giin_brand_slogan');
+      setBrandName(!savedName || savedName === 'GIIN MEET' ? 'GiinMeet' : savedName);
+      setBrandSlogan(!savedSlogan || savedSlogan === 'VIRTUALIZATION HUB' ? 'Connect, Collaborate, Virtualize' : savedSlogan);
     };
     window.addEventListener('giin_branding_changed', handleBrandingChange);
     handleBrandingChange();
@@ -1255,13 +1263,13 @@ function App() {
       interval = setInterval(() => {
         document.title = showAlert 
           ? `💬 (${totalUnreadMessages}) New Message!` 
-          : 'GIIN MEET | Premium Video';
+          : 'GiinMeet';
         showAlert = !showAlert;
       }, 1500);
     } else {
       document.title = totalUnreadMessages > 0 
-        ? `💬 (${totalUnreadMessages}) GIIN MEET | Chat` 
-        : 'GIIN MEET | Premium Video Conferencing & Virtualization';
+        ? `💬 (${totalUnreadMessages}) GiinMeet | Chat` 
+        : 'GiinMeet';
     }
     return () => {
       if (interval) clearInterval(interval);
@@ -2177,19 +2185,20 @@ function App() {
             }}
             style={{
               display: 'flex',
-              flexDirection: isSidebarCollapsed ? 'column' : 'row',
+              flexDirection: 'column',
               alignItems: 'center',
-              gap: isSidebarCollapsed ? '0.5rem' : '0.75rem',
+              gap: '0.5rem',
               marginBottom: '3rem',
               paddingLeft: isSidebarCollapsed ? '0' : '0.5rem',
               cursor: 'pointer',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              textAlign: 'center'
             }}
             title="Go to Dashboard"
           >
             <img 
               src={logoUrl} 
-              alt="GIIN MEET Logo" 
+              alt="GiinMeet Logo" 
               style={{
                 width: isSidebarCollapsed ? '48px' : '84px',
                 height: isSidebarCollapsed ? '48px' : '84px',
@@ -2200,10 +2209,12 @@ function App() {
             {!isSidebarCollapsed && (
               <div>
                 <span style={{ 
+                  display: 'block',
                   fontFamily: 'var(--font-heading)', 
                   fontWeight: 800, 
                   fontSize: '1.25rem', 
                   letterSpacing: '0.05em',
+                  whiteSpace: 'nowrap',
                   color: 'white'
                 }}>
                   {brandName}
@@ -2211,7 +2222,8 @@ function App() {
                 <span style={{
                   display: 'block',
                   fontSize: '0.65rem',
-                  letterSpacing: '0.1em',
+                  letterSpacing: '0.05em',
+                  whiteSpace: 'nowrap',
                   color: 'var(--color-secondary)'
                 }}>
                   {brandSlogan}
@@ -2544,7 +2556,7 @@ function App() {
               >
                 <img 
                   src={logoUrl} 
-                  alt="GIIN MEET Logo" 
+                  alt="GiinMeet Logo" 
                   style={{
                     width: '56px',
                     height: '56px',

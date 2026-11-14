@@ -2,7 +2,7 @@ import React from 'react';
 import '../src/index.css';
 
 export const metadata = {
-  title: 'GIIN Meet - Virtualization & Collaboration Hub',
+  title: 'GiinMeet',
   description: 'Enterprise-grade, high-resilience video conferencing engine.',
   icons: { icon: '/favicon.ico', apple: '/logo.png' },
 };
