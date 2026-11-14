@@ -1585,6 +1585,18 @@ function App() {
     }
   };
 
+  // Leave-call screen Rejoin: the room is still mounted showing the
+  // leave screen, so startCall with the same id would be a no-op (it
+  // early-returns when the meeting is already active). Unmount the room
+  // first, then go through the normal #/join flow — the hash router
+  // sends the host straight back in and everyone else through the
+  // pre-join check / waiting room as usual.
+  const handleRejoinMeeting = (meetingId: string) => {
+    setActiveMeetingId(null);
+    setPreJoinDone(false);
+    window.location.hash = `#/join?id=${meetingId}`;
+  };
+
   // Round 9 (9B): live-sync the dashboard history when any meeting row
   // changes — another tab ended it, the host admitted someone, the last
   // person left and the leave route completed it. Realtime only fires
@@ -2073,6 +2085,7 @@ function App() {
           meetingId={activeMeetingId}
           meetingTitle={activeCallTitle || 'GIIN MEET Video Room'}
           onEndMeeting={handleEndMeeting}
+          onRejoinMeeting={handleRejoinMeeting}
           onSaveWorkspaceData={handleSaveWorkspaceData}
           currentUser={guestUser}
           initialVideoState={preJoinVideoOn}
@@ -2893,6 +2906,7 @@ function App() {
               meetingId={activeMeetingId}
               meetingTitle={activeCallTitle || 'GIIN MEET Video Room'}
               onEndMeeting={handleEndMeeting}
+          onRejoinMeeting={handleRejoinMeeting}
               onSaveWorkspaceData={handleSaveWorkspaceData}
               currentUser={user}
               initialVideoState={activeCallVideoState}

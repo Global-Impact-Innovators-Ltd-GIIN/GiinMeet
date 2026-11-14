@@ -175,6 +175,7 @@ interface MeetingRoomProps {
   meetingId: string;
   meetingTitle: string;
   onEndMeeting: (skipServerEnd?: boolean) => void;
+  onRejoinMeeting?: (meetingId: string) => void;
   onSaveWorkspaceData?: (notes: string, actionItemsCount: number) => void;
   currentUser: { id: string; name: string; email: string } | null;
   initialVideoState?: boolean;
@@ -189,6 +190,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   meetingId, 
   meetingTitle, 
   onEndMeeting, 
+  onRejoinMeeting,
   onSaveWorkspaceData, 
   currentUser,
   initialVideoState = true,
@@ -483,14 +485,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // fire, but the meeting only ends once. Audio capture/publish code is
   // untouched — this only disconnects the room and closes peer links;
   // track stopping happens on unmount as before.
-  const enterEndedState = useCallback((reason: 'host-ended' | 'you-ended' | 'removed', detail?: string) => {
-    if (endedRef.current) return;
-    endedRef.current = true;
-    // Round 9 (9A): capture the meeting length and headcount now — the
-    // participant list is torn down with the room, so it cannot be read
-    // later when the ended screen renders.
-    const endedDurationSeconds = elapsedSecondsRef.current;
-    const endedAttendeeCount = participantsRef.current.length + 1;
+  // Shared media teardown: LiveKit disconnect + every P2P link closed.
+  // Used both by the ended screen and the leave-call screen, so a
+  // leaver is neither seen nor heard while deciding what to do next.
+  const disconnectMedia = useCallback(() => {
     try {
       if (livekitRoomRef.current) livekitRoomRef.current.disconnect();
     } catch (e) { /* already gone */ }
@@ -501,8 +499,38 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       });
     } catch (e) { /* already gone */ }
     pcsRef.current = {};
-    setEndedState({ reason, detail, durationSeconds: endedDurationSeconds, attendeeCount: endedAttendeeCount });
   }, []);
+
+  const enterEndedState = useCallback((reason: 'host-ended' | 'you-ended' | 'removed', detail?: string) => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    // Round 9 (9A): capture the meeting length and headcount now — the
+    // participant list is torn down with the room, so it cannot be read
+    // later when the ended screen renders.
+    const endedDurationSeconds = elapsedSecondsRef.current;
+    const endedAttendeeCount = participantsRef.current.length + 1;
+    disconnectMedia();
+    setEndedState({ reason, detail, durationSeconds: endedDurationSeconds, attendeeCount: endedAttendeeCount });
+  }, [disconnectMedia]);
+
+  // Leave-call screen: leaving a call shows this screen instead of
+  // jumping straight to the dashboard — Rejoin, Go to dashboard, or a
+  // 10-second countdown that goes to the dashboard on its own.
+  const [leftCall, setLeftCall] = useState<{ title: string; durationSeconds: number } | null>(null);
+  const [leftCallCountdown, setLeftCallCountdown] = useState(10);
+  const onEndMeetingRef = useRef(onEndMeeting);
+  useEffect(() => { onEndMeetingRef.current = onEndMeeting; });
+  const leaveToLeaveScreen = useCallback(() => {
+    disconnectMedia();
+    setLeftCall({ title: meetingTitle, durationSeconds: elapsedSecondsRef.current });
+    setLeftCallCountdown(10);
+  }, [disconnectMedia, meetingTitle]);
+  useEffect(() => {
+    if (!leftCall) return;
+    if (leftCallCountdown <= 0) { onEndMeetingRef.current(); return; }
+    const t = setTimeout(() => setLeftCallCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [leftCall, leftCallCountdown]);
 
   // Our server-derived role for this meeting (HOST / COHOST / GUEST).
   // Co-hosts get admit + mute powers; the token route is the authority.
@@ -4582,7 +4610,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (isMinimized) onMinimizeToggle?.(false);
       setShowLeaveModal(true);
     } else {
-      onEndMeeting();
+      leaveToLeaveScreen();
     }
   };
 
@@ -4681,7 +4709,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setShowLeaveModal(false);
       setLeaveOption(null);
       setSelectedNewAdminId('');
-      onEndMeeting();
+      leaveToLeaveScreen();
     } catch (err: any) {
       console.error('[GiinMeet] Failed to transfer host role:', err);
       setEndError(err?.message || 'Could not transfer the host role. You are still the host — please try again.');
@@ -5501,6 +5529,51 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             Back to dashboard
           </button>
         )}
+      </div>
+    );
+  }
+
+  // Leave-call screen (see leaveToLeaveScreen): Rejoin, Go to dashboard,
+  // or the countdown takes the user to the dashboard on its own.
+  if (leftCall) {
+    return (
+      <div style={{
+        width: '100%',
+        height: '100dvh',
+        backgroundColor: '#07090E',
+        color: 'white',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '1rem',
+        padding: '2rem',
+        textAlign: 'center'
+      }}>
+        <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'rgba(250, 189, 2, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <PhoneOff size={28} color="var(--color-accent)" />
+        </div>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>You left the meeting</h2>
+        <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px', lineHeight: 1.5 }}>
+          {leftCall.title} · Meeting lasted {formatElapsedTime(leftCall.durationSeconds)}
+        </p>
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <button
+            onClick={() => { const r = onRejoinMeeting; setLeftCall(null); if (r) r(meetingId); else onEndMeeting(); }}
+            className="premium-btn premium-btn-primary"
+            style={{ height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
+          >
+            Rejoin meeting
+          </button>
+          <button
+            onClick={() => onEndMeeting()}
+            className="premium-btn premium-btn-secondary"
+            style={{ height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
+          >
+            Go to dashboard
+          </button>
+        </div>
+        <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Returning to the dashboard in {leftCallCountdown}s…</p>
       </div>
     );
   }
