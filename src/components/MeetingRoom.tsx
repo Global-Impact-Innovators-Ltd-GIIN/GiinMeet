@@ -80,6 +80,16 @@ export const displayRoleLabel = (role?: string | null): string => {
   return 'Participant';
 };
 
+// Tile name suffix: only Host (and Co-host, who can moderate) get a role
+// shown on their video card. Everyone else is just their name — labelling
+// every tile 'Participant' adds nothing.
+export const tileRoleSuffix = (role?: string | null): string => {
+  const r = (role || '').toLowerCase().replace(/[-_\s]/g, '');
+  if (r === 'host' || r === 'admin') return ' (Host)';
+  if (r === 'cohost') return ' (Co-host)';
+  return '';
+};
+
 // Hand-raise reasons arrive as the menu label ('🙋 Question') or the bare
 // word ('Question'). Map either form to its sound key; anything else
 // (including "Just Raise Hand") gets the neutral default.
@@ -6253,7 +6263,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       backdropFilter: 'blur(8px)',
                       zIndex: 10
                     }}>
-                      <span style={{ fontWeight: 600 }}>{p.name} ({displayRoleLabel(p.role)})</span>
+                      <span style={{ fontWeight: 600 }}>{p.name}{tileRoleSuffix(p.role)}</span>
                       {pState.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />}
                       {/* Latency badge removed to run in the background */}
                     </div>
@@ -6689,9 +6699,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                   backdropFilter: 'blur(4px)',
                   zIndex: 10
                 }}>
-                  {/* The label is the real role, never a hardcoded one:
-                      a guest's own tile says Guest, the host's says Host. */}
-                  <span style={{ fontWeight: 600 }}>You ({isAdmin ? 'Host' : isCoHost ? 'Co-host' : 'Guest'})</span>
+                  {/* Only Host / Co-host get a role shown on a video card;
+                      everyone else is just their name. */}
+                  <span style={{ fontWeight: 600 }}>You{isAdmin ? ' (Host)' : isCoHost ? ' (Co-host)' : ''}</span>
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                   <span
                     style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)' }}
@@ -6973,7 +6983,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     backdropFilter: 'blur(4px)',
                     zIndex: 10
                   }}>
-                    <span style={{ fontWeight: 600 }}>{p.name} ({displayRoleLabel(p.role)})</span>
+                    <span style={{ fontWeight: 600 }}>{p.name}{tileRoleSuffix(p.role)}</span>
                     {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                     <span
                       style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: pState.isReconnecting ? 'var(--color-accent)' : hasConnection ? (typeof pState.latency === 'number' ? (pState.latency < 150 ? '#10B981' : pState.latency < 400 ? 'var(--color-accent)' : '#EF4444') : '#10B981') : '#64748B' }}
