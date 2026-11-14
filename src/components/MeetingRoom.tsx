@@ -6417,13 +6417,13 @@ Media encrypted in transit (DTLS-SRTP).`;
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'center',
+            justifyContent: 'flex-start',
             padding: '2rem',
             background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E',
             overflowY: 'auto'
           }}>
             {/* Centered: Your webcam tile */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', maxWidth: '800px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', maxWidth: '800px', margin: 'auto' }}>
               <div style={{
                 position: 'relative',
                 borderRadius: 'var(--radius-lg)',
@@ -6432,7 +6432,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                 aspectRatio: '16/9',
                 border: isSpeaking && !isMuted ? '3px solid var(--color-accent)' : '2px solid #1E293B',
                 boxShadow: 'var(--shadow-premium)',
-                transition: 'all 0.25s ease'
+                transition: 'all 0.25s ease',
+                /* Fit the tile to the visible height as well as the width:
+                   a 16/9 tile wider than (viewport - chrome) * 16/9 would
+                   run off the bottom of the meeting area. */
+                alignSelf: 'center',
+                width: '100%',
+                maxWidth: 'calc((100dvh - 280px) * 16 / 9)'
               }}>
                 {isVideoOn && stream && localCameraLive ? (
                   <>

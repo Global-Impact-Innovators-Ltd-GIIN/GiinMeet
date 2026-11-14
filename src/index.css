@@ -1299,7 +1299,10 @@ h1, h2, h3, h4, h5, h6 {
 }
 .meeting-grid.speaker-mode .meeting-card.spotlight {
   flex: 1 1 100%;
-  max-width: none;
+  /* Cap the spotlight by the visible height as well as the width, so a
+     single wide tile can never grow taller than the meeting area
+     (top bar + toolbar + grid padding + filmstrip ≈ 400px). */
+  max-width: min(100%, calc((100dvh - 400px) * 16 / 9));
 }
 .meeting-grid.speaker-mode .meeting-card:not(.spotlight) {
   flex: 0 0 170px;
