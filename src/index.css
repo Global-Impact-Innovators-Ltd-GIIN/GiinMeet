@@ -369,6 +369,10 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Utility Layout Classes */
+/* Chat Center: thread list hover + active accent */
+.conversation-item { transition: background-color 0.15s ease, box-shadow 0.15s ease; }
+.conversation-item:hover { background-color: rgba(var(--color-primary-rgb), 0.06); }
+.conversation-item.active { box-shadow: inset 3px 0 0 var(--color-accent); }
 .glass-panel {
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));

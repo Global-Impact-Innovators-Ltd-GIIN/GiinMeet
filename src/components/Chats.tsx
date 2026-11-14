@@ -1768,6 +1768,10 @@ export const Chats: React.FC<ChatsProps> = ({
         </div>
 
         {/* Chat Thread List */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem 0.35rem' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-muted)' }}>RECENT</span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{threads.length} {threads.length === 1 ? 'chat' : 'chats'}</span>
+          </div>
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {filteredThreads.map(t => {
             const lastMsg = t.messages[t.messages.length - 1];
@@ -1884,7 +1888,8 @@ export const Chats: React.FC<ChatsProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              backgroundColor: 'rgba(var(--color-primary-rgb), 0.02)'
+              backgroundColor: 'rgba(var(--color-primary-rgb), 0.02)',
+              boxShadow: '0 1px 8px rgba(0,0,0,0.04)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <button
@@ -2807,6 +2812,9 @@ export const Chats: React.FC<ChatsProps> = ({
             <div>
               <h3 style={{ fontSize: '1.25rem', color: 'var(--text-main)', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>No Active Chat</h3>
               <p style={{ fontSize: '0.85rem', maxWidth: '300px', margin: '0 auto' }}>Select a contact from the Contacts tab to start a secure encrypted direct message.</p>
+              <div style={{ marginTop: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--color-accent)', backgroundColor: 'rgba(250,189,2,0.1)', border: '1px solid rgba(250,189,2,0.35)', padding: '0.3rem 0.7rem', borderRadius: '9999px' }}>
+                End-to-end encrypted
+              </div>
             </div>
           </div>
         )}
