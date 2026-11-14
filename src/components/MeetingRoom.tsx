@@ -715,6 +715,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // nothing must never look dead again.
   const [screenShareStarting, setScreenShareStarting] = useState(false);
   const [screenShareError, setScreenShareError] = useState<string | null>(null);
+  // A share can end without the user stopping it: on iPhones the OS ends
+  // the capture track when the broadcast is interrupted (app switch,
+  // incoming call, screen lock, Control Centre). The track's onended
+  // handler must tell that apart from a deliberate stop, or the share
+  // silently vanishes. Set true before any deliberate stop.
+  const screenShareStoppedByUserRef = useRef(false);
   const [isMuteOnEntryEnabled, setIsMuteOnEntryEnabled] = useState(false);
 
   const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
@@ -3898,9 +3904,29 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // id so receivers can recognise the track even if it arrives first).
       broadcastMediaState({ isScreenSharing: true });
 
+      // A fresh capture: any later `ended` event is unexpected until the
+      // user stops the share from our own button.
+      screenShareStoppedByUserRef.current = false;
+
       screenTrack.onended = () => {
+        if (screenShareStoppedByUserRef.current) {
+          // Deliberate stop (our Stop button, or the room unmounting).
+          stopScreenShare();
+          setIsScreenSharing(false);
+          return;
+        }
+        // Unexpected end: iOS / the browser ended the capture (app switch,
+        // call, screen lock, Control Centre). The track is dead and cannot
+        // be restarted, and re-acquiring needs a real user tap
+        // (getDisplayMedia without one is rejected) — so tear the dead
+        // track down but do NOT silently drop the share: show a notice
+        // with a one-tap restart instead.
+        screenShareStoppedByUserRef.current = true; // silence the re-entrant onended from stopScreenShare()
         stopScreenShare();
         setIsScreenSharing(false);
+        const msg = 'Your screen share ended by itself — your phone stopped the capture (switching apps, a call, or the screen locking can do this). Tap Try again to share again.';
+        setScreenShareError(msg);
+        triggerToast(msg);
       };
 
       setIsScreenSharing(true);
@@ -3910,6 +3936,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       return true;
     } catch (err: any) {
       console.warn('[Screen Share] Permission denied or failed.', err);
+      if (screenStreamRef.current) {
+        screenShareStoppedByUserRef.current = true;
+        stopScreenShare();
+      }
       screenVideoRef.current = null;
       setScreenShareStarting(false);
       setIsScreenSharing(false);
@@ -3948,6 +3978,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setIsColleagueSharing(false);
       }
     } else {
+      screenShareStoppedByUserRef.current = true;
       stopScreenShare();
       setIsScreenSharing(false);
     }
@@ -3955,6 +3986,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   useEffect(() => {
     return () => {
+      screenShareStoppedByUserRef.current = true;
       stopScreenShare();
     };
   }, []);
@@ -5474,7 +5506,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         </div>
       )}
       {/* Upper Status Bar */}
-      <div style={{
+      <div className="meeting-topbar" style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -5483,15 +5515,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         backgroundColor: 'rgba(11, 15, 25, 0.9)',
         zIndex: 10
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div className="meeting-topbar-title-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
           <span className="badge badge-premium" style={{ color: '#000', backgroundColor: 'var(--color-accent)', border: 'none' }}>
             LIVE
           </span>
-          <h3 style={{ fontSize: '1.1rem', color: 'white', fontFamily: 'var(--font-heading)' }}>
+          <h3 className="meeting-topbar-title" style={{ fontSize: '1.1rem', color: 'white', fontFamily: 'var(--font-heading)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
             {meetingTitle}
           </h3>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem' }}>
+        <div className="meeting-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem' }}>
           {/* Participant count */}
           <span
             style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'white', fontWeight: 600 }}
@@ -5533,7 +5565,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             title="Minimize to Floating Window"
           >
             <Minimize2 size={14} />
-            <span>Minimize</span>
+            <span className="hide-mobile-text">Minimize</span>
           </button>
 
           {!isP2PCall && (
@@ -5551,7 +5583,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               }}
             >
               <Users size={14} />
-              <span>Invite & Info</span>
+              <span className="hide-mobile-text">Invite & Info</span>
             </button>
           )}
           {/* Security details hidden to run silently in the background */}
@@ -5581,7 +5613,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'white' }}>Boardroom Invite Info</h4>
               <button 
                 onClick={() => setShowMeetingInfo(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.25rem' }}
+                className="panel-close-btn" aria-label="Close invite info"
               >
                 &times;
               </button>
@@ -6808,6 +6840,16 @@ Media encrypted in transit (DTLS-SRTP).`;
           })()
         )}
 
+        {/* Mobile backdrop: tap outside an open side panel to close it,
+            so the small close X is not the only way back. */}
+        {activePanel !== 'none' && window.innerWidth < 768 && (
+          <div
+            aria-hidden="true"
+            onClick={() => setActivePanel('none')}
+            style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(2, 6, 23, 0.5)', zIndex: 55 }}
+          />
+        )}
+
         {/* Collapsible Panels */}
         {activePanel === 'chat' && (
           <div className="meeting-side-panel" style={{
@@ -6823,7 +6865,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Meeting Chat</h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+                className="panel-close-btn" aria-label="Close panel"
               >
                 &times;
               </button>
@@ -6858,7 +6900,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             </div>
 
             {/* Chat Input */}
-            <form onSubmit={sendChatMessage} style={{ padding: '0.75rem', borderTop: '1px solid #1E293B', display: 'flex', gap: '0.5rem' }}>
+            <form onSubmit={sendChatMessage} className="meeting-chat-form" style={{ padding: '0.75rem', borderTop: '1px solid #1E293B', display: 'flex', gap: '0.5rem' }}>
               <label
                 title="Share a file (up to 25 MB; signed-in users only)"
                 style={{
@@ -6932,7 +6974,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Participants ({participants.length + 1})</h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+                className="panel-close-btn" aria-label="Close panel"
               >
                 &times;
               </button>
@@ -7214,7 +7256,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Host Controls</h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+                className="panel-close-btn" aria-label="Close panel"
               >
                 &times;
               </button>
@@ -7761,7 +7803,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontSize: '1.2rem' }}
+                className="panel-close-btn" aria-label="Close panel"
               >
                 &times;
               </button>
@@ -7894,7 +7936,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontSize: '1.2rem' }}
+                className="panel-close-btn" aria-label="Close panel"
               >
                 &times;
               </button>
@@ -8078,7 +8120,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>React Soundboard</h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+                className="panel-close-btn" aria-label="Close panel"
               >
                 &times;
               </button>
@@ -8145,7 +8187,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Meeting Credentials</h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+                className="panel-close-btn" aria-label="Close panel"
               >
                 &times;
               </button>
@@ -8473,8 +8515,8 @@ Media encrypted in transit (DTLS-SRTP).`;
       {screenShareError && (
         <div role="alert" style={{ margin: '0 1rem', padding: '0.6rem 0.9rem', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.45)', borderRadius: '8px', color: '#FCA5A5', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ flex: 1, minWidth: '200px' }}>{screenShareError}</span>
-          <button type="button" onClick={() => { setScreenShareError(null); void handleToggleScreenShare(); }} style={{ padding: '0.4rem 0.9rem', borderRadius: '6px', border: 'none', backgroundColor: '#EF4444', color: 'white', fontWeight: 700, cursor: 'pointer' }}>Try again</button>
-          <button type="button" onClick={() => setScreenShareError(null)} style={{ background: 'none', border: 'none', color: '#FCA5A5', cursor: 'pointer', fontSize: '1.1rem' }} aria-label="Dismiss">&times;</button>
+          <button type="button" onClick={() => { setScreenShareError(null); void handleToggleScreenShare(); }} style={{ padding: '0.4rem 0.9rem', minHeight: '44px', borderRadius: '6px', border: 'none', backgroundColor: '#EF4444', color: 'white', fontWeight: 700, cursor: 'pointer' }}>Try again</button>
+          <button type="button" onClick={() => setScreenShareError(null)} className="panel-close-btn" aria-label="Dismiss">&times;</button>
         </div>
       )}
 
@@ -9009,12 +9051,20 @@ Media encrypted in transit (DTLS-SRTP).`;
                 <Hand size={18} />
               </button>
               
-              {showHandRaiseMenu && (
+              {/* Tap outside the sheet to close it (mobile) */}
+            {showHandRaiseMenu && window.innerWidth < 768 && (
+              <div
+                aria-hidden="true"
+                onClick={() => setShowHandRaiseMenu(false)}
+                style={{ position: 'fixed', inset: 0, zIndex: 9999 }}
+              />
+            )}
+            {showHandRaiseMenu && (
                 <div 
                   className="hand-raise-menu-container"
                   style={{
                     position: window.innerWidth < 768 ? 'fixed' : 'absolute',
-                    bottom: window.innerWidth < 768 ? '0' : '55px',
+                    bottom: window.innerWidth < 768 ? 'calc(65px + env(safe-area-inset-bottom))' : '55px',
                     left: window.innerWidth < 768 ? '0' : '50%',
                     right: window.innerWidth < 768 ? '0' : 'auto',
                     transform: window.innerWidth < 768 ? 'none' : 'translateX(-50%)',
@@ -9023,9 +9073,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                     border: window.innerWidth < 768 ? 'none' : '1px solid #1E293B',
                     borderTop: window.innerWidth < 768 ? '1px solid #1E293B' : '1px solid #1E293B',
                     borderRadius: window.innerWidth < 768 ? '20px 20px 0 0' : '12px',
-                    padding: window.innerWidth < 768 ? '1rem 1rem 1.25rem' : '1.5rem',
-                    maxHeight: 'calc(100dvh - 80px)',
+                    padding: window.innerWidth < 768 ? '1rem 1rem calc(1.25rem + env(safe-area-inset-bottom))' : '1.5rem',
+                    maxHeight: window.innerWidth < 768 ? 'calc(100dvh - 170px)' : 'calc(100dvh - 80px)',
                     overflowY: 'auto',
+                    overscrollBehavior: 'contain',
                     zIndex: 10000,
                     boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
                     backdropFilter: 'blur(20px)',
@@ -9036,16 +9087,16 @@ Media encrypted in transit (DTLS-SRTP).`;
                   }}
                 >
                   {window.innerWidth < 768 && (
-                    <div style={{ width: '40px', height: '4px', backgroundColor: '#475569', borderRadius: '2px', margin: '0 auto' }} />
+                    <div style={{ width: '40px', height: '4px', backgroundColor: '#475569', borderRadius: '2px', margin: '0 auto', flexShrink: 0 }} />
                   )}
                   
-                  <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
+                  <div className="flex-between" style={{ marginBottom: '0.25rem', flexShrink: 0 }}>
                     <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>
                       Raise Hand
                     </span>
                     <button 
                       onClick={() => setShowHandRaiseMenu(false)}
-                      style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontSize: '1.25rem' }}
+                      className="panel-close-btn" aria-label="Close raise hand menu"
                     >
                       &times;
                     </button>
@@ -9054,6 +9105,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                   <div style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                    gridAutoRows: '1fr',
+                    alignItems: 'stretch',
+                    flexShrink: 0,
                     gap: '0.75rem',
                     width: '100%'
                   }}>
@@ -9070,6 +9124,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                           display: 'flex',
                           flexDirection: 'column',
                           minWidth: 0,
+                          height: '100%',
+                          minHeight: '104px',
+                          flexShrink: 0,
                           alignItems: 'flex-start',
                           padding: '0.75rem',
                           borderRadius: '8px',
@@ -9077,6 +9134,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           backgroundColor: r.bg,
                           cursor: 'pointer',
                           textAlign: 'left',
+                          overflowWrap: 'break-word',
                           transition: 'all 0.15s ease'
                         }}
                         onMouseEnter={(e) => {
@@ -9088,19 +9146,21 @@ Media encrypted in transit (DTLS-SRTP).`;
                           e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)';
                         }}
                       >
-                        <span style={{ fontSize: '1.2rem', marginBottom: '0.25rem' }}>{r.label.split(' ')[0]}</span>
-                        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>{r.label.split(' ')[1]}</span>
-                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '2px' }}>{r.desc}</span>
+                        <span style={{ fontSize: '1.25rem', lineHeight: 1, height: '28px', display: 'flex', alignItems: 'center', marginBottom: '0.25rem', flexShrink: 0 }}>{r.label.split(' ')[0]}</span>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', lineHeight: 1.25, overflowWrap: 'break-word' }}>{r.label.split(' ')[1]}</span>
+                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '2px', lineHeight: 1.35, overflowWrap: 'break-word' }}>{r.desc}</span>
                       </button>
                     ))}
                   </div>
 
-                  <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: '0.25rem 0' }} />
+                  <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: '0.25rem 0', flexShrink: 0 }} />
 
                   <button
                     onClick={() => toggleHandRaise()}
                     style={{
                       width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
                       padding: '0.75rem',
                       borderRadius: '8px',
                       border: '1px dashed var(--color-accent)',
@@ -9212,7 +9272,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                         fontSize: '1.5rem',
                         cursor: 'pointer',
                         transition: 'transform 0.15s ease',
-                        padding: 0
+                        padding: 0,
+                        width: '44px',
+                        height: '44px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
                       }}
                       onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.25)'}
                       onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
@@ -9233,7 +9298,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 />
                 <div style={{
                   position: window.innerWidth < 768 ? 'fixed' : 'absolute',
-                  bottom: window.innerWidth < 768 ? '70px' : '55px',
+                  bottom: window.innerWidth < 768 ? 'calc(77px + env(safe-area-inset-bottom))' : '55px',
                   left: window.innerWidth < 768 ? '16px' : '50%',
                   right: window.innerWidth < 768 ? '16px' : 'auto',
                   transform: window.innerWidth < 768 ? 'none' : 'translateX(-50%)',
@@ -9247,9 +9312,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                   flexDirection: 'column',
                   gap: '0.35rem',
                   zIndex: 15000,
+                  maxHeight: window.innerWidth < 768 ? 'calc(100dvh - 170px)' : 'none',
+                  overflowY: 'auto',
+                  overscrollBehavior: 'contain',
                   boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
                   animation: 'pop-in 0.2s ease'
                 }}>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem' }}>MEETING</div>
                   {/* Meeting Info */}
                   <button 
                     onClick={() => {
@@ -9263,6 +9332,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                       backgroundColor: activePanel === 'info' ? 'rgba(255,255,255,0.1)' : 'transparent',
                       border: 'none',
                       padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
                       borderRadius: '6px',
                       color: 'white',
                       fontSize: '0.85rem',
@@ -9270,8 +9342,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                       textAlign: 'left'
                     }}
                   >
-                    <Info size={16} />
-                    <span>Meeting Info</span>
+                    <Info size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Meeting Info</span>
                   </button>
 
                   {/* Workspace / Notes */}
@@ -9287,6 +9359,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                       backgroundColor: activePanel === 'workspace' ? 'rgba(255,255,255,0.1)' : 'transparent',
                       border: 'none',
                       padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
                       borderRadius: '6px',
                       color: 'white',
                       fontSize: '0.85rem',
@@ -9294,10 +9369,11 @@ Media encrypted in transit (DTLS-SRTP).`;
                       textAlign: 'left'
                     }}
                   >
-                    <Edit2 size={16} />
-                    <span>Workspace Notes</span>
+                    <Edit2 size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Workspace Notes</span>
                   </button>
 
+                  <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem', borderTop: '1px solid #1E293B', marginTop: '0.35rem', paddingTop: '0.6rem' }}>ENGAGE</div>
                   {/* Interactive Polls */}
                   <button 
                     onClick={() => {
@@ -9311,6 +9387,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                       backgroundColor: activePanel === 'polls' ? 'rgba(255,255,255,0.1)' : 'transparent',
                       border: 'none',
                       padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
                       borderRadius: '6px',
                       color: 'white',
                       fontSize: '0.85rem',
@@ -9318,8 +9397,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                       textAlign: 'left'
                     }}
                   >
-                    <BarChart3 size={16} />
-                    <span>Interactive Polls</span>
+                    <BarChart3 size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Interactive Polls</span>
                   </button>
 
                   {/* Live Captions */}
@@ -9335,6 +9414,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                       backgroundColor: activePanel === 'transcript' ? 'rgba(255,255,255,0.1)' : 'transparent',
                       border: 'none',
                       padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
                       borderRadius: '6px',
                       color: 'white',
                       fontSize: '0.85rem',
@@ -9342,10 +9424,11 @@ Media encrypted in transit (DTLS-SRTP).`;
                       textAlign: 'left'
                     }}
                   >
-                    <Languages size={16} />
-                    <span>Live Captions</span>
+                    <Languages size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Live Captions</span>
                   </button>
 
+                  <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem', borderTop: '1px solid #1E293B', marginTop: '0.35rem', paddingTop: '0.6rem' }}>MEDIA</div>
                   {/* Camera Filters */}
                   <button 
                     onClick={() => {
@@ -9359,6 +9442,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                       backgroundColor: activePanel === 'filters' ? 'rgba(255,255,255,0.1)' : 'transparent',
                       border: 'none',
                       padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
                       borderRadius: '6px',
                       color: 'white',
                       fontSize: '0.85rem',
@@ -9366,8 +9452,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                       textAlign: 'left'
                     }}
                   >
-                    <Sliders size={16} />
-                    <span>AV Enhancements</span>
+                    <Sliders size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>AV Enhancements</span>
                   </button>
 
                   {/* React Soundboard */}
@@ -9383,6 +9469,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                       backgroundColor: activePanel === 'soundboard' ? 'rgba(255,255,255,0.1)' : 'transparent',
                       border: 'none',
                       padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
                       borderRadius: '6px',
                       color: 'white',
                       fontSize: '0.85rem',
@@ -9390,8 +9479,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                       textAlign: 'left'
                     }}
                   >
-                    <Volume2 size={16} />
-                    <span>Soundboard Reacts</span>
+                    <Volume2 size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Soundboard Reacts</span>
                   </button>
 
                   {/* Host Controls (if Admin) */}
@@ -9407,7 +9496,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                         gap: '0.75rem',
                         backgroundColor: activePanel === 'host-settings' ? 'rgba(255,255,255,0.1)' : 'transparent',
                         border: 'none',
+                        borderTop: '1px solid #1E293B',
+                        marginTop: '0.35rem',
                         padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
                         borderRadius: '6px',
                         color: 'white',
                         fontSize: '0.85rem',
@@ -9415,8 +9509,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                         textAlign: 'left'
                       }}
                     >
-                      <Settings size={16} />
-                      <span>Host Controls</span>
+                      <Settings size={16} style={{ flexShrink: 0 }} />
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Host Controls</span>
                     </button>
                   )}
 
@@ -9545,11 +9639,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                 position: 'absolute',
                 top: '1.25rem',
                 right: '1.25rem',
+                width: '44px',
+                height: '44px',
                 background: 'none',
                 border: 'none',
                 color: 'var(--text-muted)',
                 cursor: 'pointer',
-                padding: '0.25rem',
+                padding: 0,
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',

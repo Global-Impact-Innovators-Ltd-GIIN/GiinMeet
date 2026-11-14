@@ -656,10 +656,21 @@ h1, h2, h3, h4, h5, h6 {
     order: 1;
   }
 
-  .meeting-toolbar-center button {
-    width: 36px !important;
-    height: 36px !important;
+  /* Only the toolbar's own control buttons get the fixed size. This used
+     to be a descendant selector, so it also crushed every button inside
+     the pop-up menus/sheets that render inside this container (More menu
+     items, Raise Hand options) to 36x36px on phones. */
+  .meeting-toolbar-center > button,
+  .meeting-toolbar-center > div > button {
+    width: 44px !important;
+    height: 44px !important;
     flex-shrink: 0 !important;
+  }
+
+  /* Right-side toolbar buttons (Participants / Chat / Leave) also get a
+     proper 44px touch target on phones. */
+  .meeting-toolbar-right button {
+    height: 44px !important;
   }
 
   .meeting-toolbar-right {
@@ -720,10 +731,69 @@ h1, h2, h3, h4, h5, h6 {
     position: fixed !important;
     top: 0 !important;
     right: 0 !important;
-    bottom: 0 !important;
+    bottom: calc(65px + env(safe-area-inset-bottom)) !important;
     width: min(92vw, 340px) !important;
     z-index: 60 !important;
     box-shadow: -12px 0 30px rgba(0, 0, 0, 0.5) !important;
+  }
+}
+
+/* Mobile meeting UI fixes (2026-11-14): 44px panel close targets, and a
+   room header that truncates instead of clipping off-screen. */
+.panel-close-btn {
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: #94A3B8;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.panel-close-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+@media (max-width: 768px) {
+  /* Room header: keep everything on one row; the title truncates with an
+     ellipsis instead of wrapping and pushing Minimize / Invite off the
+     right edge of the phone screen. */
+  .meeting-topbar {
+    flex-wrap: wrap !important;
+    row-gap: 0.5rem;
+    padding: 0.75rem 1rem !important;
+  }
+  .meeting-topbar-title-wrap {
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    overflow: hidden;
+  }
+  .meeting-topbar-title {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  .meeting-topbar-actions {
+    gap: 0.5rem !important;
+    flex-shrink: 0;
+  }
+  .meeting-topbar-actions button {
+    min-height: 44px !important;
+  }
+  /* Chat input row: attach / send are proper 44px touch targets. */
+  .meeting-chat-form > button,
+  .meeting-chat-form > label {
+    width: 44px !important;
+    height: 44px !important;
   }
 }
 
