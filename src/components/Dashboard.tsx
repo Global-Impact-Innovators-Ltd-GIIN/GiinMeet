@@ -412,14 +412,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
       display: 'flex',
       flexDirection: 'column'
     }}>
-      {/* Welcome Banner */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 className="welcome-heading">
-          Welcome back, <span style={{ color: 'var(--color-secondary)' }}>{userName}</span>
-        </h1>
-        <p className="welcome-subtext">
-          Connect, collaborate, and virtualize with HD audio and video.
-        </p>
+      {/* Welcome Banner — animated backdrop: generated still with slow
+          cinematic CSS motion (a video replaces the <img> layer later;
+          the account video budget is exhausted for now). The welcome
+          text scrolls very slowly in yellow on top. */}
+      <div className="welcome-banner" style={{ position: 'relative', overflow: 'hidden', borderRadius: '16px', marginBottom: '1.5rem', minHeight: '190px', display: 'flex', alignItems: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.35)' }}>
+        <img src="/welcome-banner-bg.webp" alt="" aria-hidden="true" className="welcome-banner-bg" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(2,6,23,0.85) 0%, rgba(2,6,23,0.5) 55%, rgba(2,6,23,0.3) 100%)' }} />
+        <span className="welcome-particle" style={{ left: '12%', top: '24%', width: '10px', height: '10px', animationDelay: '0s' }} />
+        <span className="welcome-particle" style={{ left: '32%', top: '62%', width: '7px', height: '7px', animationDelay: '2.2s' }} />
+        <span className="welcome-particle" style={{ left: '58%', top: '30%', width: '12px', height: '12px', animationDelay: '4.1s' }} />
+        <span className="welcome-particle" style={{ left: '76%', top: '58%', width: '8px', height: '8px', animationDelay: '1.4s' }} />
+        <span className="welcome-particle" style={{ left: '88%', top: '22%', width: '6px', height: '6px', animationDelay: '5.6s' }} />
+        <div style={{ position: 'relative', zIndex: 2, overflow: 'hidden', width: '100%', padding: '1.75rem 0' }}>
+          <div className="welcome-marquee" style={{ display: 'inline-flex', whiteSpace: 'nowrap', willChange: 'transform', alignItems: 'baseline' }}>
+            <span style={{ fontSize: '2.1rem', fontWeight: 800, fontFamily: 'var(--font-heading)', lineHeight: 1.2, color: 'var(--color-accent)', textShadow: '0 2px 18px rgba(0,0,0,0.65)' }}>Welcome back, {userName}&nbsp;&nbsp;<span style={{ color: 'white', fontWeight: 600, fontSize: '1.15rem' }}>— Connect, collaborate, and virtualize with HD audio and video.</span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
+            <span aria-hidden="true" style={{ fontSize: '2.1rem', fontWeight: 800, fontFamily: 'var(--font-heading)', lineHeight: 1.2, color: 'var(--color-accent)', textShadow: '0 2px 18px rgba(0,0,0,0.65)' }}>Welcome back, {userName}&nbsp;&nbsp;<span style={{ color: 'white', fontWeight: 600, fontSize: '1.15rem' }}>— Connect, collaborate, and virtualize with HD audio and video.</span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
+          </div>
+        </div>
       </div>
 
       {/* Phase 1 — Your personal room: one permanent link. */}
