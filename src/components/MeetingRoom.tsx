@@ -5932,6 +5932,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               }}
             >
               <Users size={14} />
+              <Info size={14} />
               <span className="hide-mobile-text">Invite & Info</span>
             </button>
           )}

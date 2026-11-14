@@ -427,6 +427,21 @@ h1, h2, h3, h4, h5, h6 {
   border-color: var(--color-secondary);
 }
 
+/* Meeting-room top bar: the header is always dark, but .premium-btn-secondary
+   inherits the theme text colour — in the light theme that is dark navy on a
+   dark bar, so Minimize / Invite & Info showed as faint empty outlines.
+   Force light-on-dark colours here so the header buttons stay legible in
+   every theme. */
+.meeting-topbar .premium-btn-secondary {
+  color: #F1F5F9;
+  border-color: rgba(255, 255, 255, 0.35);
+  background-color: rgba(255, 255, 255, 0.06);
+}
+.meeting-topbar .premium-btn-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
 .premium-btn-danger {
   background-color: #EF4444;
   color: white;
