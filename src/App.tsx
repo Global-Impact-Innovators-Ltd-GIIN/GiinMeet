@@ -1151,7 +1151,7 @@ function App() {
   const [targetContactId, setTargetContactId] = useState<string | null>(null);
 
   // Notifications State
-  const [notifications, setNotifications] = useState<{ id: string; text: string; time: string; read: boolean }[]>([]);
+  const [notifications, setNotifications] = useState<{ id: string; text: string; time: string; read: boolean; meetingId?: string; meetingTitle?: string; targetView?: string }[]>([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
 
@@ -1859,7 +1859,9 @@ function App() {
         id: Math.random().toString(36).substr(2, 9),
         text: `Scheduled new meeting: "${finalMeet.title}"`,
         time: 'Just now',
-        read: false
+        read: false,
+        meetingId: finalMeet.id,
+        meetingTitle: finalMeet.title,
       };
       setNotifications(prev => [newNotif, ...prev]);
 
@@ -1888,7 +1890,8 @@ function App() {
       id: Math.random().toString(36).substr(2, 9),
       text: `Connected to ${authenticatedUser.workspaceName} directory!`,
       time: 'Just now',
-      read: false
+      read: false,
+        targetView: 'dashboard',
     };
     setNotifications(prev => [newNotif, ...prev]);
     
@@ -1905,7 +1908,8 @@ function App() {
       id: Math.random().toString(36).substr(2, 9),
       text: `Synced collaborative notes: Saved ${actionItemsCount} action tasks.`,
       time: 'Just now',
-      read: false
+      read: false,
+        targetView: 'dashboard',
     };
     setNotifications(prev => [newNotif, ...prev]);
 
@@ -1976,6 +1980,20 @@ function App() {
 
   const markAllNotificationsRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  // Bell notification tap: open what the notification is about. A meeting
+  // notification starts/opens that meeting through the same path as the
+  // dashboard Start Call button; anything else goes to its view (dashboard
+  // by default). Always closes the dropdown and marks the item read.
+  const handleNotificationClick = (n: { id: string; meetingId?: string; meetingTitle?: string; targetView?: string }) => {
+    setShowNotifDropdown(false);
+    setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+    if (n.meetingId) {
+      handleStartCall(n.meetingTitle, undefined, true, n.meetingId);
+    } else {
+      setCurrentView((n.targetView as any) || 'dashboard');
+    }
   };
 
   const clearNotifications = () => {
@@ -2666,13 +2684,20 @@ function App() {
                     <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)' }} />
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '200px', overflowY: 'auto' }}>
                       {notifications.map((n) => (
-                        <div key={n.id} style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8rem' }}>
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => handleNotificationClick(n)}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.06)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                          style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8rem', width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '0.5rem', borderRadius: '8px', cursor: 'pointer' }}
+                        >
                           <div style={{ marginTop: '0.15rem' }}><CheckCircle2 size={12} color="#10B981" /></div>
                           <div>
-                            <p style={{ color: 'var(--text-main)' }}>{n.text}</p>
+                            <p style={{ color: 'var(--text-main)', margin: 0 }}>{n.text}</p>
                             <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{n.time}</span>
                           </div>
-                        </div>
+                        </button>
                       ))}
                       {notifications.length === 0 && (
                         <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
