@@ -2191,11 +2191,10 @@ function App() {
               src={logoUrl} 
               alt="GIIN MEET Logo" 
               style={{
-                width: isSidebarCollapsed ? '36px' : '48px',
-                height: isSidebarCollapsed ? '36px' : '48px',
+                width: isSidebarCollapsed ? '48px' : '84px',
+                height: isSidebarCollapsed ? '48px' : '84px',
                 objectFit: 'contain',
                 borderRadius: '8px',
-                filter: 'brightness(0) invert(1)'
               }} 
             />
             {!isSidebarCollapsed && (
@@ -2547,10 +2546,9 @@ function App() {
                   src={logoUrl} 
                   alt="GIIN MEET Logo" 
                   style={{
-                    width: '32px',
-                    height: '32px',
-                    objectFit: 'contain',
-                    filter: isDarkMode ? 'brightness(0) invert(1)' : 'none'
+                    width: '56px',
+                    height: '56px',
+                    objectFit: 'contain'
                   }} 
                 />
                 <span className="mobile-hidden" style={{

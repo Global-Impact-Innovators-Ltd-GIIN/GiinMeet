@@ -548,13 +548,12 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
             src={logoUrl} 
             alt="GIIN MEET Logo" 
             style={{
-              width: '64px',
-              height: '64px',
+              width: '112px',
+              height: '112px',
               objectFit: 'contain',
               borderRadius: '8px',
               margin: '0 auto 0.75rem',
               display: 'block',
-              filter: 'brightness(0) invert(1)'
             }} 
           />
           <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>

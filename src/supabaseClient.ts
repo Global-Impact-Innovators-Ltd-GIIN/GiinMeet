@@ -1596,7 +1596,8 @@ export const giinApi = {
   }
 };
 
-// Helper to remove white background from the logo and return a transparent base64 URL
+// Helper to remove a white background from an opaque logo and return a transparent base64 URL.
+// Images that already carry real transparency (like the new GIIN logo PNG) are returned untouched.
 export const getTransparentLogo = (src: string): Promise<string> => {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') {
@@ -1617,6 +1618,14 @@ export const getTransparentLogo = (src: string): Promise<string> => {
       ctx.drawImage(img, 0, 0);
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
+      // If the image already has real transparency, leave it exactly as it is:
+      // stripping near-white would punch holes in the new logo's silver highlights.
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] < 255) {
+          resolve(src);
+          return;
+        }
+      }
       for (let i = 0; i < data.length; i += 4) {
         const r = data[i];
         const g = data[i+1];
