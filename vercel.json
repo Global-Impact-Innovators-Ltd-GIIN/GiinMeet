@@ -1,1 +1,1 @@
-{"crons":[{"path":"/api/cron/due-emails","schedule":"*/5 * * * *"}],"framework":"nextjs"}
+{"framework":"nextjs"}
