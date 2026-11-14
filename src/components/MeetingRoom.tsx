@@ -5,7 +5,7 @@ import {
   Clock, Pin, LayoutGrid, LayoutList,
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
   MoreHorizontal, BarChart3, Volume2, VolumeX, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
-  LogOut, UserCheck, User, Keyboard, X, Hand, Paperclip
+  LogOut, UserCheck, User, Keyboard, X, Hand, Paperclip, ListChecks, Plus, Trash2, GripVertical
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -414,6 +414,57 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (highlightQaTimeoutRef.current) clearTimeout(highlightQaTimeoutRef.current);
     highlightQaTimeoutRef.current = setTimeout(() => setHighlightedQaId(null), 30000);
   };
+  // Meeting agenda (replaces the in-room whiteboard tab): the host sets
+  // the agenda in the side panel; every participant receives it as a
+  // draggable sticky note. It travels on the signalling channel, so a
+  // participant who joins mid-meeting asks for it and the host answers.
+  const [agendaItems, setAgendaItems] = useState<{ id: string; text: string }[]>([]);
+  const agendaItemsRef = useRef<{ id: string; text: string }[]>([]);
+  useEffect(() => { agendaItemsRef.current = agendaItems; }, [agendaItems]);
+  const isAdminRef = useRef(isAdmin);
+  useEffect(() => { isAdminRef.current = isAdmin; }, [isAdmin]);
+  const [agendaNoteVisible, setAgendaNoteVisible] = useState(false);
+  const [agendaNotePos, setAgendaNotePos] = useState<{ x: number; y: number } | null>(null);
+  const agendaDragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const [agendaInput, setAgendaInput] = useState('');
+  const [isAgendaTabActive, setIsAgendaTabActive] = useState(false);
+  const publishAgenda = (items: { id: string; text: string }[]) => {
+    setAgendaItems(items);
+    if (items.length > 0) setAgendaNoteVisible(true);
+    if (sigChannelRef.current) {
+      sigChannelRef.current.send({ type: 'broadcast', event: 'agenda-update', payload: { items } });
+    }
+  };
+  const handleAddAgendaItem = () => {
+    const text = agendaInput.trim();
+    if (!text) return;
+    publishAgenda([...agendaItemsRef.current, { id: generateRandomId(), text }]);
+    setAgendaInput('');
+  };
+  const handleRemoveAgendaItem = (id: string) => {
+    publishAgenda(agendaItemsRef.current.filter(item => item.id !== id));
+  };
+  // Drag the agenda sticky note by its header (pointer events: mouse + touch).
+  const onAgendaNotePointerDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    const pos = agendaNotePos ?? { x: Math.max(16, window.innerWidth - 340), y: 76 };
+    agendaDragRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
+    const move = (ev: PointerEvent) => {
+      const w = 320, h = 220;
+      setAgendaNotePos({
+        x: Math.min(Math.max(8, ev.clientX - (agendaDragRef.current?.dx ?? 0)), window.innerWidth - w),
+        y: Math.min(Math.max(8, ev.clientY - (agendaDragRef.current?.dy ?? 0)), window.innerHeight - h)
+      });
+    };
+    const up = () => {
+      agendaDragRef.current = null;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   const [isQAActive, setIsQAActive] = useState(false);
 
   // Handraise / Speaker Queue States
@@ -852,8 +903,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const pcCandidatesRef = useRef<{ [peerKey: string]: any[] }>({});
   const [remoteStreams, setRemoteStreams] = useState<{ [peerKey: string]: MediaStream }>({});
   
-  const [stickyNotes, setStickyNotes] = useState<{ id: string; x: number; y: number; text: string; color: string }[]>([]);
-  const [whiteboardTool, setWhiteboardTool] = useState<'pen' | 'line' | 'rect' | 'circle' | 'sticky'>('pen');
   
   const [aiSummary, setAiSummary] = useState<string>('');
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
@@ -1896,14 +1945,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [activePeerKeys, setActivePeerKeys] = useState<string[]>([]);
 
   // Collaborative Whiteboard States
-  const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
-  const [whiteboardColor, setWhiteboardColor] = useState('#10B981');
-  const [whiteboardWidth, setWhiteboardWidth] = useState(3);
-  const whiteboardCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const whiteboardCtxRef = useRef<CanvasRenderingContext2D | null>(null);
-  const isDrawingRef = useRef(false);
-  const lastPosRef = useRef({ x: 0, y: 0 });
-  const whiteboardStrokesRef = useRef<{x0: number, y0: number, x1: number, y1: number, color: string, width: number}[]>([]);
 
   // Breakout Rooms States
   // Relocated states to top block
@@ -2305,243 +2346,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Collaborative Whiteboard Drawing Functions
-  const redrawWhiteboard = () => {
-    const canvas = whiteboardCanvasRef.current;
-    const ctx = whiteboardCtxRef.current;
-    if (!canvas || !ctx) return;
-    
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#0F172A';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    whiteboardStrokesRef.current.forEach(stroke => {
-      ctx.beginPath();
-      ctx.strokeStyle = stroke.color;
-      ctx.lineWidth = stroke.width;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      
-      // Calculate responsive coordinates scaled by current canvas dimensions
-      const x0 = stroke.x0 * canvas.width;
-      const y0 = stroke.y0 * canvas.height;
-      const x1 = stroke.x1 * canvas.width;
-      const y1 = stroke.y1 * canvas.height;
-      
-      const type = (stroke as any).type || 'pen';
-      if (type === 'pen' || type === 'line') {
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-        ctx.stroke();
-      } else if (type === 'rect') {
-        ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-      } else if (type === 'circle') {
-        const radius = Math.sqrt(Math.pow(x1 - x0, 2) + Math.pow(y1 - y0, 2));
-        ctx.arc(x0, y0, radius, 0, 2 * Math.PI);
-        ctx.stroke();
-      }
-    });
-  };
-
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = whiteboardCanvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    let clientX = 0;
-    let clientY = 0;
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    }
-    
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    
-    const x = (clientX - rect.left) * scaleX;
-    const y = (clientY - rect.top) * scaleY;
-
-    if (whiteboardTool === 'sticky') {
-      const pctX = ((clientX - rect.left) / rect.width) * 100;
-      const pctY = ((clientY - rect.top) / rect.height) * 100;
-      const newNote = {
-        id: generateRandomId(),
-        x: pctX,
-        y: pctY,
-        text: 'Type here...',
-        color: whiteboardColor
-      };
-      setStickyNotes(prev => [...prev, newNote]);
-      if (sigChannelRef.current) {
-        sigChannelRef.current.send({
-          type: 'broadcast',
-          event: 'sticky-add',
-          payload: newNote
-        });
-      }
-      return;
-    }
-
-    isDrawingRef.current = true;
-    lastPosRef.current = { x, y };
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawingRef.current) return;
-    const canvas = whiteboardCanvasRef.current;
-    const ctx = whiteboardCtxRef.current;
-    if (!canvas || !ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    let clientX = 0;
-    let clientY = 0;
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    }
-    
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    
-    const x = (clientX - rect.left) * scaleX;
-    const y = (clientY - rect.top) * scaleY;
-
-    if (whiteboardTool === 'pen') {
-      ctx.beginPath();
-      ctx.strokeStyle = whiteboardColor;
-      ctx.lineWidth = whiteboardWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y);
-      ctx.lineTo(x, y);
-      ctx.stroke();
-
-      const stroke = {
-        type: 'pen',
-        x0: lastPosRef.current.x / canvas.width,
-        y0: lastPosRef.current.y / canvas.height,
-        x1: x / canvas.width,
-        y1: y / canvas.height,
-        color: whiteboardColor,
-        width: whiteboardWidth
-      };
-      whiteboardStrokesRef.current.push(stroke);
-
-      if (sigChannelRef.current) {
-        sigChannelRef.current.send({
-          type: 'broadcast',
-          event: 'draw-whiteboard',
-          payload: stroke
-        });
-      }
-
-      lastPosRef.current = { x, y };
-    } else {
-      redrawWhiteboard();
-      ctx.beginPath();
-      ctx.strokeStyle = whiteboardColor;
-      ctx.lineWidth = whiteboardWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      if (whiteboardTool === 'line') {
-        ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-      } else if (whiteboardTool === 'rect') {
-        ctx.strokeRect(lastPosRef.current.x, lastPosRef.current.y, x - lastPosRef.current.x, y - lastPosRef.current.y);
-      } else if (whiteboardTool === 'circle') {
-        const radius = Math.sqrt(Math.pow(x - lastPosRef.current.x, 2) + Math.pow(y - lastPosRef.current.y, 2));
-        ctx.arc(lastPosRef.current.x, lastPosRef.current.y, radius, 0, 2 * Math.PI);
-        ctx.stroke();
-      }
-    }
-  };
-
-  const stopDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawingRef.current) return;
-    isDrawingRef.current = false;
-
-    if (whiteboardTool !== 'pen') {
-      const canvas = whiteboardCanvasRef.current;
-      if (!canvas) return;
-
-      const rect = canvas.getBoundingClientRect();
-      let clientX = 0;
-      let clientY = 0;
-      if ('touches' in e) {
-        if (e.changedTouches.length > 0) {
-          clientX = e.changedTouches[0].clientX;
-          clientY = e.changedTouches[0].clientY;
-        } else {
-          return;
-        }
-      } else {
-        clientX = e.clientX;
-        clientY = e.clientY;
-      }
-
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      const x = (clientX - rect.left) * scaleX;
-      const y = (clientY - rect.top) * scaleY;
-
-      const stroke = {
-        type: whiteboardTool,
-        x0: lastPosRef.current.x / canvas.width,
-        y0: lastPosRef.current.y / canvas.height,
-        x1: x / canvas.width,
-        y1: y / canvas.height,
-        color: whiteboardColor,
-        width: whiteboardWidth
-      };
-
-      whiteboardStrokesRef.current.push(stroke);
-      redrawWhiteboard();
-
-      if (sigChannelRef.current) {
-        sigChannelRef.current.send({
-          type: 'broadcast',
-          event: 'draw-whiteboard',
-          payload: stroke
-        });
-      }
-    }
-  };
-
-  const clearWhiteboard = (broadcast = true) => {
-    whiteboardStrokesRef.current = [];
-    setStickyNotes([]);
-    const canvas = whiteboardCanvasRef.current;
-    const ctx = whiteboardCtxRef.current;
-    if (canvas && ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#0F172A';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-    if (broadcast && sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'clear-whiteboard',
-        payload: {}
-      });
-    }
-  };
-
-  const downloadWhiteboard = () => {
-    const canvas = whiteboardCanvasRef.current;
-    if (!canvas) return;
-    const url = canvas.toDataURL('image/png');
-    const link = document.createElement('a');
-    link.download = `whiteboard-${meetingId}.png`;
-    link.href = url;
-    link.click();
-  };
-
   // AI summary is not available: no transcription or summarisation service is
   // wired up yet. The panel says so instead of showing a pre-written summary
   // that was never about this meeting. Set immediately — there is nothing
@@ -2699,20 +2503,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setBreakoutTimeRemaining(null);
   };
 
-  // Whiteboard Canvas Context Initializer
-  useEffect(() => {
-    if (isWhiteboardActive && whiteboardCanvasRef.current) {
-      const canvas = whiteboardCanvasRef.current;
-      canvas.width = 800;
-      canvas.height = 500;
-      
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        whiteboardCtxRef.current = ctx;
-        redrawWhiteboard();
-      }
-    }
-  }, [isWhiteboardActive]);
 
   // Web Audio speaking volume analyzer (registry version — Fix Round 6).
   // One analyser per peer, deduped by stream: a re-subscribe or a
@@ -3756,25 +3546,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const data = payload.payload;
         setQaQuestions(prev => prev.map(q => q.id === data.questionId ? { ...q, answered: !!data.answered } : q));
       })
-      .on('broadcast', { event: 'draw-whiteboard' }, (payload: any) => {
-        const data = payload.payload;
-        whiteboardStrokesRef.current.push(data);
-        redrawWhiteboard();
+      .on('broadcast', { event: 'agenda-update' }, (payload: any) => {
+        const items = Array.isArray(payload.payload?.items) ? payload.payload.items : [];
+        setAgendaItems(items);
+        if (items.length > 0) setAgendaNoteVisible(true);
       })
-      .on('broadcast', { event: 'clear-whiteboard' }, () => {
-        clearWhiteboard(false);
-      })
-      .on('broadcast', { event: 'sticky-add' }, (payload: any) => {
-        const data = payload.payload;
-        setStickyNotes(prev => [...prev.filter(n => n.id !== data.id), data]);
-      })
-      .on('broadcast', { event: 'sticky-update' }, (payload: any) => {
-        const data = payload.payload;
-        setStickyNotes(prev => prev.map(n => n.id === data.id ? { ...n, text: data.text } : n));
-      })
-      .on('broadcast', { event: 'sticky-delete' }, (payload: any) => {
-        const data = payload.payload;
-        setStickyNotes(prev => prev.filter(n => n.id !== data.id));
+      .on('broadcast', { event: 'agenda-request' }, () => {
+        // Only the host answers a joiner's request for the agenda.
+        if (isAdminRef.current && agendaItemsRef.current.length > 0 && sigChannelRef.current) {
+          sigChannelRef.current.send({ type: 'broadcast', event: 'agenda-update', payload: { items: agendaItemsRef.current } });
+        }
       })
       .on('broadcast', { event: 'start-breakout' }, (payload: any) => {
         const data = payload.payload;
@@ -3866,6 +3647,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               screenTrackId: isScreenSharingRef.current ? (screenStreamRef.current?.getVideoTracks()[0]?.id ?? null) : null
             }
           });
+
+          // A participant who joins mid-meeting asks the host for the
+          // current agenda, so it appears as a sticky note on arrival.
+          if (!isAdminRef.current) {
+            setTimeout(() => {
+              if (sigChannelRef.current) {
+                sigChannelRef.current.send({ type: 'broadcast', event: 'agenda-request', payload: { senderKey: myKey } });
+              }
+            }, 1500);
+          }
 
           // Start calling tone loop until a peer joins (only for P2P calls)
           if (isP2PCall) {
@@ -6151,6 +5942,33 @@ Media encrypted in transit (DTLS-SRTP).`;
               <span key={qaBanner.id} className="qa-banner-scroll-text" style={{ display: 'inline-block', whiteSpace: 'nowrap', fontSize: '0.9rem', fontWeight: 600, color: 'white', animationDuration: `${Math.min(10, Math.max(5, Math.ceil(qaBanner.text.length / 12)))}s` }}>{qaBanner.text}</span>
             </span>
             <button onClick={(e) => { e.stopPropagation(); setQaBanner(null); setHighlightedQaId(null); }} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '1.3rem', cursor: 'pointer', flexShrink: 0, padding: '0.35rem 0.5rem', minWidth: '36px', minHeight: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>&times;</button>
+          </div>
+        )}
+
+        {/* Meeting agenda sticky note: appears for everyone when the host
+            sets or updates the agenda, and for joiners on arrival. Drag
+            it anywhere by its header; the X closes it. Reopen it from the
+            Agenda button in the toolbar. */}
+        {agendaNoteVisible && agendaItems.length > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${(agendaNotePos ?? { x: Math.max(16, window.innerWidth - 340), y: 76 }).x}px`,
+              top: `${(agendaNotePos ?? { x: Math.max(16, window.innerWidth - 340), y: 76 }).y}px`,
+              width: '300px', maxWidth: 'calc(100vw - 2rem)',
+              backgroundColor: '#FABD02', color: '#0B0F19',
+              borderRadius: '10px', boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
+              zIndex: 102, overflow: 'hidden', animation: 'pop-in 0.25s ease'
+            }}
+          >
+            <div onPointerDown={onAgendaNotePointerDown} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 0.8rem', backgroundColor: 'rgba(0,0,0,0.08)', cursor: 'grab', touchAction: 'none', userSelect: 'none' }}>
+              <GripVertical size={14} />
+              <span style={{ flex: 1, fontSize: '0.8rem', fontWeight: 800 }}>📋 Meeting Agenda</span>
+              <button onClick={() => setAgendaNoteVisible(false)} aria-label="Close agenda" style={{ background: 'none', border: 'none', color: '#0B0F19', fontSize: '1.2rem', cursor: 'pointer', lineHeight: 1, padding: '0.1rem 0.3rem' }}>&times;</button>
+            </div>
+            <ol style={{ margin: 0, padding: '0.75rem 0.9rem 0.9rem 1.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600, lineHeight: 1.45 }}>
+              {agendaItems.map(item => (<li key={item.id}>{item.text}</li>))}
+            </ol>
           </div>
         )}
 
@@ -8810,13 +8628,13 @@ Media encrypted in transit (DTLS-SRTP).`;
             {/* Tab Selector */}
             <div style={{ display: 'flex', borderBottom: '1px solid #1E293B' }}>
               <button 
-                onClick={() => setIsWhiteboardActive(false)}
+                onClick={() => setIsAgendaTabActive(false)}
                 style={{
                   flex: 1,
                   padding: '1rem',
-                  background: !isWhiteboardActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  background: !isAgendaTabActive ? 'rgba(255,255,255,0.05)' : 'none',
                   border: 'none',
-                  color: !isWhiteboardActive ? 'var(--color-accent)' : 'white',
+                  color: !isAgendaTabActive ? 'var(--color-accent)' : 'white',
                   cursor: 'pointer',
                   fontWeight: 600,
                   fontSize: '0.85rem'
@@ -8825,24 +8643,24 @@ Media encrypted in transit (DTLS-SRTP).`;
                 📝 Notes
               </button>
               <button 
-                onClick={() => setIsWhiteboardActive(true)}
+                onClick={() => setIsAgendaTabActive(true)}
                 style={{
                   flex: 1,
                   padding: '1rem',
-                  background: isWhiteboardActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  background: isAgendaTabActive ? 'rgba(255,255,255,0.05)' : 'none',
                   border: 'none',
-                  color: isWhiteboardActive ? 'var(--color-accent)' : 'white',
+                  color: isAgendaTabActive ? 'var(--color-accent)' : 'white',
                   cursor: 'pointer',
                   fontWeight: 600,
                   fontSize: '0.85rem'
                 }}
               >
-                🎨 Whiteboard
+                📋 Agenda
               </button>
             </div>
 
             {/* Content */}
-            {!isWhiteboardActive ? (
+            {!isAgendaTabActive ? (
               <WorkspacePanel 
                 meetingId={meetingId}
                 workspaceUsers={participants.map(p => ({ name: p.name, role: p.role }))}
@@ -8858,177 +8676,33 @@ Media encrypted in transit (DTLS-SRTP).`;
                 onClose={() => setActivePanel('none')}
               />
             ) : (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '1rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'white' }}>COLLABORATIVE CANVAS</span>
-                  <button 
-                    onClick={() => clearWhiteboard(true)}
-                    className="premium-btn premium-btn-secondary"
-                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', height: '26px' }}
-                  >
-                    Clear
-                  </button>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '0.75rem', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <ListChecks size={16} color="var(--color-accent)" />
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>MEETING AGENDA</span>
                 </div>
-
-                {/* Whiteboard Tool Picker */}
-                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', borderBottom: '1px dashed var(--border-color)', paddingBottom: '0.5rem' }}>
-                  {[
-                    { id: 'pen', label: '✏️ Pen' },
-                    { id: 'line', label: '📏 Line' },
-                    { id: 'rect', label: '⬛ Rect' },
-                    { id: 'circle', label: '⭕ Circle' },
-                    { id: 'sticky', label: '📌 Note' }
-                  ].map(tool => (
-                    <button
-                      key={tool.id}
-                      type="button"
-                      onClick={() => setWhiteboardTool(tool.id as any)}
-                      style={{
-                        padding: '0.25rem 0.45rem',
-                        fontSize: '0.7rem',
-                        borderRadius: '4px',
-                        border: '1px solid var(--border-color)',
-                        backgroundColor: whiteboardTool === tool.id ? 'var(--color-primary)' : 'rgba(255,255,255,0.05)',
-                        color: 'white',
-                        cursor: 'pointer',
-                        fontWeight: 600
-                      }}
-                    >
-                      {tool.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div style={{
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  overflow: 'hidden',
-                  backgroundColor: '#0F172A',
-                  position: 'relative',
-                  aspectRatio: '8/5'
-                }}>
-                  <canvas 
-                    ref={whiteboardCanvasRef}
-                    onMouseDown={startDrawing}
-                    onMouseMove={draw}
-                    onMouseUp={stopDrawing}
-                    onMouseLeave={stopDrawing}
-                    onTouchStart={startDrawing}
-                    onTouchMove={draw}
-                    onTouchEnd={stopDrawing}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      display: 'block',
-                      cursor: 'crosshair'
-                    }}
-                  />
-
-                  {/* Render sticky notes */}
-                  {stickyNotes.map(note => (
-                    <div
-                      key={note.id}
-                      style={{
-                        position: 'absolute',
-                        left: `${note.x}%`,
-                        top: `${note.y}%`,
-                        backgroundColor: note.color,
-                        padding: '0.35rem',
-                        borderRadius: '4px',
-                        border: '1px solid rgba(0,0,0,0.2)',
-                        boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
-                        transform: 'translate(-50%, -50%)',
-                        zIndex: 10,
-                        width: '85px',
-                        minHeight: '45px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '2px'
-                      }}
-                    >
-                      <textarea
-                        value={note.text}
-                        onChange={(e) => {
-                          const text = e.target.value;
-                          setStickyNotes(prev => prev.map(n => n.id === note.id ? { ...n, text } : n));
-                          if (sigChannelRef.current) {
-                            sigChannelRef.current.send({
-                              type: 'broadcast',
-                              event: 'sticky-update',
-                              payload: { id: note.id, text }
-                            });
-                          }
-                        }}
-                        style={{
-                          width: '100%',
-                          height: '25px',
-                          background: 'none',
-                          border: 'none',
-                          resize: 'none',
-                          outline: 'none',
-                          fontSize: '0.65rem',
-                          color: '#000000',
-                          fontWeight: 600,
-                          lineHeight: 1.1,
-                          padding: 0
-                        }}
-                      />
-                      <button
-                        onClick={() => {
-                          setStickyNotes(prev => prev.filter(n => n.id !== note.id));
-                          if (sigChannelRef.current) {
-                            sigChannelRef.current.send({
-                              type: 'broadcast',
-                              event: 'sticky-delete',
-                              payload: { id: note.id }
-                            });
-                          }
-                        }}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: '#EF4444',
-                          fontSize: '0.55rem',
-                          cursor: 'pointer',
-                          marginLeft: 'auto',
-                          padding: 0,
-                          fontWeight: 'bold'
-                        }}
-                      >
-                        Delete
-                      </button>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
+                  {isAdmin ? 'Set the agenda for this meeting. Everyone who joins sees it as a sticky note they can move or close.' : 'Set by the host. It appears as a sticky note when you join.'}
+                </p>
+                {isAdmin && (
+                  <form onSubmit={(e) => { e.preventDefault(); handleAddAgendaItem(); }} style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input value={agendaInput} onChange={(e) => setAgendaInput(e.target.value)} placeholder="Add an agenda item..." className="premium-input" style={{ flex: 1, padding: '0.5rem 0.65rem', fontSize: '0.8rem', minWidth: 0 }} />
+                    <button type="submit" className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Plus size={14} /> Add</button>
+                  </form>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {agendaItems.length === 0 ? (
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem 0' }}>{isAdmin ? 'No agenda yet — add the first item above.' : 'No agenda has been set yet.'}</p>
+                  ) : agendaItems.map((item, idx) => (
+                    <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.6rem 0.75rem', border: '1px solid #1E293B', borderRadius: '8px', backgroundColor: 'rgba(250, 189, 2, 0.06)' }}>
+                      <span style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', color: '#0B0F19', fontSize: '0.7rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{idx + 1}</span>
+                      <span style={{ flex: 1, fontSize: '0.85rem', color: 'white', lineHeight: 1.4 }}>{item.text}</span>
+                      {isAdmin && (
+                        <button type="button" onClick={() => handleRemoveAgendaItem(item.id)} aria-label="Remove agenda item" style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: '0.1rem', flexShrink: 0 }}><Trash2 size={14} /></button>
+                      )}
                     </div>
                   ))}
                 </div>
-
-                {/* Drawing Controls */}
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Color:</span>
-                  <input 
-                    type="color" 
-                    value={whiteboardColor}
-                    onChange={(e) => setWhiteboardColor(e.target.value)}
-                    style={{ border: 'none', width: '28px', height: '28px', borderRadius: '4px', cursor: 'pointer', background: 'none' }}
-                  />
-                  
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>Size:</span>
-                  <input 
-                    type="range" 
-                    min="1" 
-                    max="10" 
-                    value={whiteboardWidth}
-                    onChange={(e) => setWhiteboardWidth(parseInt(e.target.value))}
-                    style={{ width: '80px', cursor: 'pointer' }}
-                  />
-                </div>
-
-                <button 
-                  onClick={downloadWhiteboard}
-                  className="premium-btn premium-btn-primary"
-                  style={{ width: '100%', justifyContent: 'center', marginTop: 'auto', fontSize: '0.8rem', height: '36px' }}
-                >
-                  Download Sketch (PNG)
-                </button>
               </div>
             )}
           </div>
@@ -10086,6 +9760,29 @@ Media encrypted in transit (DTLS-SRTP).`;
 
           {/* Right Side Options & Leave */}
           <div className="meeting-toolbar-right" style={{ gap: '0.5rem' }}>
+            {agendaItems.length > 0 && (
+              <button
+                onClick={() => setAgendaNoteVisible(prev => !prev)}
+                title={agendaNoteVisible ? 'Hide the meeting agenda note' : 'Show the meeting agenda note'}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  backgroundColor: agendaNoteVisible ? 'rgba(250, 189, 2, 0.2)' : 'transparent',
+                  border: '1px solid #1E293B',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: 'var(--radius-sm)',
+                  color: agendaNoteVisible ? 'var(--color-accent)' : 'white',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  height: '36px'
+                }}
+              >
+                <ListChecks size={16} />
+                <span className="hide-mobile-text">Agenda</span>
+              </button>
+            )}
+
             <button 
               onClick={() => setActivePanel(activePanel === 'participants' ? 'none' : 'participants')}
               style={{
