@@ -9330,9 +9330,8 @@ Media encrypted in transit (DTLS-SRTP).`;
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: </span>
             <span style={{ color: 'white', fontWeight: 600, fontSize: '0.85rem' }}>{meetingId.slice(0, 8)}</span>
             {connectionQuality !== 'unknown' && (
-              <span title={`Connection quality: ${connectionQuality}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 700, color: connectionQuality === 'excellent' ? '#10B981' : connectionQuality === 'good' ? '#84CC16' : connectionQuality === 'poor' ? '#F59E0B' : '#EF4444' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: connectionQuality === 'excellent' ? '#10B981' : connectionQuality === 'good' ? '#84CC16' : connectionQuality === 'poor' ? '#F59E0B' : '#EF4444' }} />
-                {connectionQuality === 'excellent' ? 'Excellent' : connectionQuality === 'good' ? 'Good' : connectionQuality === 'poor' ? 'Poor' : 'Lost'}
+              <span title={`Connection quality: ${connectionQuality}`} aria-label={`Connection quality: ${connectionQuality}`} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: connectionQuality === 'excellent' ? '#10B981' : connectionQuality === 'good' ? '#84CC16' : connectionQuality === 'poor' ? '#F59E0B' : '#EF4444' }} />
               </span>
             )}
             {/* Fix Round 8 (Evidence 1): the room retries the video
