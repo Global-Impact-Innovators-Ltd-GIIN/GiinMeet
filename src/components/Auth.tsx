@@ -272,6 +272,9 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
     if (/network|fetch failed|Failed to fetch|network request failed/i.test(msg)) {
       return 'Could not reach the server. Check your connection and try again.';
     }
+    if (/invalid login credentials|invalid.*credentials|wrong password|incorrect password/i.test(msg)) {
+      return 'That email or password is not right. Check them and try again.';
+    }
     return fallback;
   };
 
@@ -326,6 +329,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputEmail = e.target.value;
     setEmail(inputEmail);
+    setValidationError('');
 
     if (inputEmail.includes('@')) {
       const domain = inputEmail.split('@')[1];
@@ -552,7 +556,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
       }
     } catch (err: any) {
       console.error(err);
-      setValidationError(err?.message || 'Sign-in failed. Please check your email and password and try again.');
+      setValidationError(friendlyAuthError(err, 'Sign-in failed. Please check your email and password and try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -1018,7 +1022,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                   className="premium-input" 
                   placeholder="••••••••"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); setValidationError(''); }}
                   style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
                   required
                 />
@@ -1036,6 +1040,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
               )}
             </div>
 
+            {validationError && <div style={{ color: '#EF4444', fontSize: '0.8rem', fontWeight: 600 }}>{validationError}</div>}
             <button 
               type="submit" 
               disabled={isLoading}
