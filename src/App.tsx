@@ -151,7 +151,15 @@ function App() {
   // Password recovery: Supabase fires PASSWORD_RECOVERY when the user
   // opens the reset link from their email. While this is set, the Auth
   // screen shows the new-password form instead of the dashboard.
-  const [passwordRecovery, setPasswordRecovery] = useState(() => window.location.hash.includes('type=recovery'));
+  // type=recovery: a valid reset link. error_code=otp_expired /
+  // error=access_denied: an expired or already-used reset link — the Auth
+  // screen shows the "link expired" card with a way to request a new one
+  // instead of silently landing on sign-in (or the dashboard, if already
+  // signed in).
+  const [passwordRecovery, setPasswordRecovery] = useState(() => {
+    const hash = window.location.hash;
+    return hash.includes('type=recovery') || hash.includes('error_code=otp_expired') || hash.includes('error=access_denied');
+  });
   // Pre-join check state (defect #1): every link joiner runs the device /
   // network check before the passcode gate and the waiting room. The host
   // never sees it (hash router bypass). Reset whenever a new join starts.
