@@ -238,10 +238,21 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
   const friendlyAuthError = (err: any, fallback: string) => {
     const msg = String(err?.message || '');
     if (/rate limit|too many|once every/i.test(msg)) {
-      return 'Too many reset requests — please wait a few minutes and try again.';
+      return 'Too many requests — please wait a few minutes and try again.';
     }
     if (/session missing|no session|Auth session/i.test(msg)) {
       return 'This reset link is no longer valid. Request a new link below.';
+    }
+    // OTP: a code that expired or is wrong (Supabase: "Token has expired
+    // or is invalid"). Must come before the reset-link check below.
+    if (/token has expired|code.*expired|expired.*code|invalid.*(token|code|otp)|otp.*invalid/i.test(msg)) {
+      return 'That code has expired or is wrong. Request a new code and try again.';
+    }
+    if (/phone.*provider|provider.*not|not configured|not enabled/i.test(msg)) {
+      return "Phone sign-in isn't set up for this project yet — try signing in with email instead.";
+    }
+    if (/invalid phone|phone.*invalid|not a valid phone/i.test(msg)) {
+      return "That phone number doesn't look right. Check it and try again.";
     }
     if (/expired|invalid.*link|link.*invalid|otp_expired/i.test(msg)) {
       return 'This reset link has expired or was already used. Request a new one below.';
@@ -259,7 +270,9 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
   
   // Phone OTP states
   const [phone, setPhone] = useState('');
-  const [countryCode, setCountryCode] = useState('+1');
+  // Rwanda-first default: GiinMeet's users are in Rwanda. The US +1
+  // default forced every Rwandan user to change the country code first.
+  const [countryCode, setCountryCode] = useState('+250');
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState<string[]>(['', '', '', '', '', '']);
   const [resendTimer, setResendTimer] = useState(60);
@@ -323,6 +336,11 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
     }
   };
 
+  // Full E.164 number for Supabase. Rwandan numbers are typed with a
+  // leading 0 (0788...) but E.164 must not have it (+250788..., never
+  // +2500788...) — strip it here so the code actually arrives.
+  const fullPhoneNumber = () => `${countryCode} ${phone.trim().replace(/^0+/, '')}`;
+
   // Dispatch SMS verification code through real Supabase phone auth. The code
   // is sent by Supabase/Twilio as configured in the dashboard — it is never
   // generated here and never shown on screen.
@@ -333,7 +351,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
 
     try {
       const workspaceArg = customWorkspaceName.trim() || 'Personal Workspace';
-      await giinApi.signInWithPhone(`${countryCode} ${phone}`, workspaceArg);
+      await giinApi.signInWithPhone(fullPhoneNumber(), workspaceArg);
 
       setOtpSent(true);
       setResendTimer(60);
@@ -344,7 +362,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
       }, 100);
     } catch (err: any) {
       console.error('Error sending verification code:', err);
-      setValidationError(err?.message || 'Failed to send the verification code. Phone sign-in may not be set up yet — try signing in with email instead.');
+      setValidationError(friendlyAuthError(err, 'Failed to send the verification code. Phone sign-in may not be set up yet — try signing in with email instead.'));
     } finally {
       setIsLoading(false);
     }
@@ -371,7 +389,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
 
     try {
       const workspaceArg = customWorkspaceName.trim() || 'Personal Workspace';
-      const { data } = await giinApi.verifyOTP(`${countryCode} ${phone}`, enteredCode, name || undefined, workspaceArg);
+      const { data } = await giinApi.verifyOTP(fullPhoneNumber(), enteredCode, name || undefined, workspaceArg);
       
       if (data.user) {
         onAuthSuccess({
@@ -386,7 +404,15 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
       }
     } catch (err: any) {
       console.error('Error verifying OTP:', err);
-      setValidationError(err?.message || 'OTP verification failed. Please try again.');
+      const msg = String(err?.message || '');
+      if (/expired|invalid/i.test(msg)) {
+        // The code is dead — let the user request a fresh one immediately
+        // instead of waiting out the resend countdown, and clear the
+        // stale code from the boxes.
+        setResendTimer(0);
+        setOtpCode(['', '', '', '', '', '']);
+      }
+      setValidationError(friendlyAuthError(err, 'OTP verification failed. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -544,6 +570,20 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         otpRefs.current[index - 1]?.focus();
       }
     }
+  };
+
+  // Paste a full 6-digit code from the SMS: distribute the digits across
+  // the boxes instead of dropping all but the first digit.
+  const handleOtpPaste = (startIndex: number, e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData('text').replace(/\D/g, '');
+    if (!text) return;
+    e.preventDefault();
+    const next = [...otpCode];
+    for (let i = 0; i < text.length && startIndex + i < 6; i++) {
+      next[startIndex + i] = text[i];
+    }
+    setOtpCode(next);
+    otpRefs.current[Math.min(startIndex + text.length, 5)]?.focus();
   };
 
   return (
@@ -995,7 +1035,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                       <input 
                         type="tel" 
                         className="premium-input" 
-                        placeholder="(555) 019-2834"
+                        placeholder="788 123 456"
                         value={phone}
                         onChange={e => setPhone(e.target.value)}
                         style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
@@ -1048,6 +1088,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                       value={otpCode[idx]}
                       onChange={e => handleOtpChange(idx, e.target.value)}
                       onKeyDown={e => handleOtpKeyDown(idx, e)}
+                      onPaste={e => handleOtpPaste(idx, e)}
                       style={{
                         width: '44px',
                         height: '48px',
@@ -1088,16 +1129,17 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                     <button
                       type="button"
                       onClick={handleResendCode}
+                      disabled={isLoading}
                       style={{
                         background: 'none',
                         border: 'none',
                         color: 'var(--color-accent)',
-                        cursor: 'pointer',
+                        cursor: isLoading ? 'wait' : 'pointer',
                         fontWeight: 700,
                         padding: 0
                       }}
                     >
-                      Resend Verification SMS
+                      {isLoading ? 'Sending…' : 'Resend Verification SMS'}
                     </button>
                   )}
                 </div>
