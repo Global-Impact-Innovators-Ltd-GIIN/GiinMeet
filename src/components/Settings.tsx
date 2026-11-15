@@ -6,81 +6,7 @@ import {
   Image as ImageIcon, Trash2, Cpu, Type, Palette
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-
-const applyFont = (fontFamilyHeading: string, fontFamilyBody: string) => {
-  document.documentElement.style.setProperty('--font-heading', fontFamilyHeading);
-  document.documentElement.style.setProperty('--font-sans', fontFamilyBody);
-  const fontId = 'google-font-' + fontFamilyHeading.replace(/\s+/g, '-').toLowerCase();
-  if (!document.getElementById(fontId)) {
-    const link = document.createElement('link');
-    link.id = fontId;
-    link.rel = 'stylesheet';
-    link.href = `https://fonts.googleapis.com/css2?family=${fontFamilyHeading.replace(/\s+/g, '+')}:wght@400;500;600;700&family=${fontFamilyBody.replace(/\s+/g, '+')}:wght@400;500;600;700&display=swap`;
-    document.head.appendChild(link);
-  }
-};
-
-const applyBorderRadius = (radius: number) => {
-  document.documentElement.style.setProperty('--radius-sm', `${radius * 0.5}px`);
-  document.documentElement.style.setProperty('--radius-md', `${radius}px`);
-  document.documentElement.style.setProperty('--radius-lg', `${radius * 2}px`);
-  document.documentElement.style.setProperty('--radius-xl', `${radius * 3}px`);
-};
-
-const applyUiStyle = (style: string, isDark: boolean) => {
-  document.documentElement.setAttribute('data-ui-style', style);
-  // Remove temporary inline properties to avoid clashing with the stylesheet rule sets
-  document.documentElement.style.removeProperty('--bg-app');
-  document.documentElement.style.removeProperty('--bg-sidebar');
-  document.documentElement.style.removeProperty('--bg-card');
-  document.documentElement.style.removeProperty('--border-color');
-  document.documentElement.style.removeProperty('--radius-md');
-  document.documentElement.style.removeProperty('--radius-lg');
-  document.documentElement.style.removeProperty('--glass-bg');
-  document.documentElement.style.removeProperty('--glass-border');
-  document.documentElement.style.removeProperty('--glass-blur');
-  document.documentElement.style.removeProperty('--shadow-premium');
-  document.documentElement.style.removeProperty('--shadow-sm');
-  document.documentElement.style.removeProperty('--shadow-md');
-
-  if (style === 'neumorphism') {
-    const shadowDark = isDark ? '#070a10' : '#b8c2d0';
-    const shadowLight = isDark ? '#1d273c' : '#ffffff';
-    document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
-    document.documentElement.style.setProperty('--glass-border', 'none');
-    document.documentElement.style.setProperty('--glass-blur', '0px');
-    document.documentElement.style.setProperty('--shadow-premium', `8px 8px 16px ${shadowDark}, -8px -8px 16px ${shadowLight}`);
-    document.documentElement.style.setProperty('--shadow-sm', `3px 3px 6px ${shadowDark}, -3px -3px 6px ${shadowLight}`);
-    document.documentElement.style.setProperty('--shadow-md', `6px 6px 12px ${shadowDark}, -6px -6px 12px ${shadowLight}`);
-    document.documentElement.style.setProperty('--shadow-inset', `inset 4px 4px 8px ${shadowDark}, inset -4px -4px 8px ${shadowLight}`);
-  } else if (style === 'cyberpunk-glow') {
-    document.documentElement.style.setProperty('--glass-bg', isDark ? '#080c16' : '#f0f4ff');
-    document.documentElement.style.setProperty('--glass-border', '2px solid var(--color-primary)');
-    document.documentElement.style.setProperty('--glass-blur', '0px');
-    document.documentElement.style.setProperty('--shadow-premium', '0 0 15px rgba(var(--color-primary-rgb), 0.35)');
-    document.documentElement.style.setProperty('--shadow-sm', '0 0 5px rgba(var(--color-primary-rgb), 0.2)');
-    document.documentElement.style.setProperty('--shadow-md', '0 0 8px rgba(var(--color-primary-rgb), 0.3)');
-  } else if (style === 'flat-minimal') {
-    document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
-    document.documentElement.style.setProperty('--glass-border', '1px solid var(--border-color)');
-    document.documentElement.style.setProperty('--glass-blur', '0px');
-    document.documentElement.style.setProperty('--shadow-premium', 'none');
-    document.documentElement.style.setProperty('--shadow-sm', 'none');
-    document.documentElement.style.setProperty('--shadow-md', 'none');
-  } else if (style === 'glassmorphism') {
-    if (isDark) {
-      document.documentElement.style.setProperty('--glass-bg', 'rgba(18, 24, 38, 0.75)');
-      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.06)');
-      document.documentElement.style.setProperty('--glass-blur', '16px');
-      document.documentElement.style.setProperty('--shadow-premium', '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4)');
-    } else {
-      document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.7)');
-      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.4)');
-      document.documentElement.style.setProperty('--glass-blur', '12px');
-      document.documentElement.style.setProperty('--shadow-premium', '0 20px 25px -5px rgba(0, 32, 91, 0.08), 0 10px 10px -5px rgba(0, 32, 91, 0.04)');
-    }
-  }
-};
+import { applyAccentColor, applyBorderRadius, applyFont, applyGlassOpacity, applyUiStyle } from '../utils/theme';
 
 interface SettingsProps {
   isDarkMode: boolean;
@@ -534,41 +460,23 @@ export const Settings: React.FC<SettingsProps> = ({
     triggerToast('Brand logo reset to default.');
   };
 
-  // Theme accent applier
-  const applyAccentColor = (primary: string, hover: string) => {
+  // Theme accent applier — state + persistence here, variable application
+  // in the shared util (sets the primary AND accent families, so the
+  // colour re-themes the whole platform).
+  const handleAccentColor = (primary: string, hover: string) => {
     setAccentColor(primary);
     localStorage.setItem('giin_accent_color', primary);
     localStorage.setItem('giin_accent_hover', hover);
-
-    document.documentElement.style.setProperty('--color-primary', primary);
-    document.documentElement.style.setProperty('--color-primary-hover', hover);
-    const hex = primary.replace('#', '');
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
-    if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
-      document.documentElement.style.setProperty('--color-primary-rgb', `${r}, ${g}, ${b}`);
-    }
+    applyAccentColor(primary, hover);
     triggerToast('Brand accent color updated globally!');
   };
 
   const selectGlassOpacity = (level: string) => {
     setGlassOpacity(level);
     localStorage.setItem('giin_glass_opacity', level);
-
-    if (level === 'none') {
-      document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
-      document.documentElement.style.setProperty('--glass-border', 'var(--border-color)');
-      document.documentElement.style.setProperty('--glass-blur', '0px');
-    } else if (level === 'ultra-clear') {
-      document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.15)');
-      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.04)');
-      document.documentElement.style.setProperty('--glass-blur', '8px');
-    } else { // frosted
-      document.documentElement.style.removeProperty('--glass-bg');
-      document.documentElement.style.removeProperty('--glass-border');
-      document.documentElement.style.removeProperty('--glass-blur');
-    }
+    // Shared levels: none = solid, frosted = 12px blur, ultra-clear =
+    // 24px blur on a mostly see-through panel (distinct, in that order).
+    applyGlassOpacity(level, isDarkMode);
     triggerToast('Glassmorphism aesthetics opacity updated!');
   };
 
@@ -577,6 +485,12 @@ export const Settings: React.FC<SettingsProps> = ({
     setLayoutStyle(layout);
     localStorage.setItem('giin_watermark', watermark);
     localStorage.setItem('giin_layout', layout);
+    // Live-apply: App listens for the layout event and re-renders the
+    // navigation; MeetingRoom listens for the watermark event and
+    // re-renders the video-feed watermark. Without these, both settings
+    // only took effect after a full reload (and the layout never did).
+    window.dispatchEvent(new Event('giin_layout_changed'));
+    window.dispatchEvent(new Event('giin_watermark_changed'));
     triggerToast('Advanced branding configuration saved!');
   };
 
@@ -617,6 +531,9 @@ export const Settings: React.FC<SettingsProps> = ({
     setWatermarkScale(scale);
     localStorage.setItem('giin_watermark_opacity', opacity);
     localStorage.setItem('giin_watermark_scale', scale);
+    // Live-apply: MeetingRoom listens for this and re-renders the
+    // video-feed watermark at the new size/opacity immediately.
+    window.dispatchEvent(new Event('giin_watermark_changed'));
     triggerToast('Watermark geometry saved!');
   };
 
@@ -1110,7 +1027,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     <button
                       key={color.name}
                       type="button"
-                      onClick={() => applyAccentColor(color.primary, color.hover)}
+                      onClick={() => handleAccentColor(color.primary, color.hover)}
                       style={{
                         width: '32px',
                         height: '32px',
@@ -1134,13 +1051,13 @@ export const Settings: React.FC<SettingsProps> = ({
                     <input 
                       type="color" 
                       value={accentColor} 
-                      onChange={(e) => applyAccentColor(e.target.value, e.target.value)} 
+                      onChange={(e) => handleAccentColor(e.target.value, e.target.value)} 
                       style={{ border: 'none', width: '32px', height: '32px', borderRadius: '4px', cursor: 'pointer', padding: 0, backgroundColor: 'transparent' }} 
                     />
                     <input 
                       type="text" 
                       value={accentColor} 
-                      onChange={(e) => applyAccentColor(e.target.value, e.target.value)} 
+                      onChange={(e) => handleAccentColor(e.target.value, e.target.value)} 
                       className="premium-input" 
                       style={{ width: '100px', padding: '0.25rem 0.5rem', fontSize: '0.8rem', textAlign: 'center' }} 
                     />

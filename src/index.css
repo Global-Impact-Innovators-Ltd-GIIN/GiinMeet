@@ -8,6 +8,10 @@
   --color-secondary-rgb: 112, 130, 190;
   --color-accent: #FABD02;       /* Sol de Minas */
   --color-accent-rgb: 250, 189, 2;
+  /* Hover shade of the accent, and the text colour that reads on it
+     (black on light accents, white on dark ones — set by applyAccentColor). */
+  --color-accent-hover: #e5ad02;
+  --color-on-accent: #000;
   
   --bg-app: #F5F6F9;             /* Nuvem Background */
   --bg-sidebar: #00205B;         /* Sidebar remains dark for contrast */
@@ -172,7 +176,7 @@
 /* Minimalism Theme */
 [data-ui-style="minimalism"] {
   --bg-app: #ffffff;
-  --bg-sidebar: #fafafa;
+  --bg-sidebar: #ffffff;
   --bg-card: #ffffff;
   --border-color: #e5e5e5;
   --text-main: #111111;
@@ -198,41 +202,119 @@
 [data-ui-style="minimalism"] .premium-btn:hover {
   background: #404040 !important;
 }
+/* Minimalism sidebar text: the sidebar's text is hardcoded WHITE inline
+   in App.tsx, so on the forced-white sidebar background it was invisible
+   (the whole sidebar "disappeared"). Force dark sidebar text here; the
+   active nav pill keeps its blue background with white text. */
+[data-ui-style="minimalism"] .app-sidebar .sidebar-btn { color: #525252 !important; }
+[data-ui-style="minimalism"] .app-sidebar .sidebar-btn:hover { background: #f4f4f5 !important; color: #171717 !important; }
+[data-ui-style="minimalism"] .app-sidebar .sidebar-btn.active { background: var(--color-secondary) !important; color: #ffffff !important; }
+[data-ui-style="minimalism"] .app-sidebar .sidebar-btn.active span { color: #ffffff !important; }
+[data-ui-style="minimalism"] .app-sidebar span { color: #171717 !important; }
+[data-ui-style="minimalism"] .app-sidebar .sidebar-upgrade-card { background: #f4f4f5 !important; border-color: #e5e5e5 !important; }
+[data-ui-style="minimalism"] .app-sidebar .sidebar-upgrade-card .badge { color: #171717 !important; }
+[data-ui-style="minimalism"] .app-sidebar .sidebar-upgrade-card .badge-premium { color: #171717 !important; }
+/* Minimalism top navbar (header-only layout): same dark-on-white fix. */
+[data-ui-style="minimalism"] .top-navbar { background: #ffffff !important; color: #171717 !important; }
+[data-ui-style="minimalism"] .top-navbar-btn { color: #525252 !important; }
+[data-ui-style="minimalism"] .top-navbar-btn:hover { color: #171717 !important; background: #f4f4f5 !important; }
+[data-ui-style="minimalism"] .top-navbar-btn.active { background: #171717 !important; color: #ffffff !important; }
 
-/* Maximalism Theme */
+/* Maximalism Theme — bold and loud, but READABLE: a deep violet base
+   with vivid cyan/pink accents and white text. (The old palette — hot
+   pink app background, mint sidebar, yellow cards, black text — clashed
+   everywhere and made panels unreadable.) */
 [data-ui-style="maximalism"] {
-  --bg-app: #ff0055;
-  --bg-sidebar: #00ffcc;
-  --bg-card: #ffff00;
-  --border-color: #000000;
-  --text-main: #000000;
-  --text-muted: #111111;
-  --color-primary: #0000ff;
-  --color-accent: #ff00ff;
+  --bg-app: #170f2e;
+  --bg-sidebar: #241b4d;
+  --bg-card: #1e1b4b;
+  --border-color: #7c3aed;
+  --text-main: #ffffff;
+  --text-muted: #c4b5fd;
+  --color-primary: #22d3ee;
+  --color-accent: #f472b6;
+  --color-primary-rgb: 34, 211, 238;
+  --color-accent-rgb: 244, 114, 182;
+  --glass-bg: rgba(30, 27, 75, 0.85);
+  --glass-border: rgba(244, 114, 182, 0.5);
+  --glass-blur: 8px;
+  --shadow-premium: 8px 8px 0 #0f0a24;
+  --shadow-sm: 4px 4px 0 #0f0a24;
+  --shadow-md: 6px 6px 0 #0f0a24;
 }
 [data-ui-style="maximalism"] .meeting-card, 
 [data-ui-style="maximalism"] .app-sidebar, 
 [data-ui-style="maximalism"] .main-content-panel {
-  border: 3px solid #000000 !important;
-  box-shadow: 8px 8px 0px #000000 !important;
-  border-radius: 0px !important;
-  background: #ffff00 !important;
-  color: #000000 !important;
+  border: 2px solid var(--color-accent) !important;
+  box-shadow: 8px 8px 0px #0f0a24 !important;
+  border-radius: 14px !important;
+  background: var(--bg-card) !important;
+  color: var(--text-main) !important;
 }
 [data-ui-style="maximalism"] .premium-btn {
-  background: #00ffcc !important;
-  border: 3px solid #000000 !important;
-  box-shadow: 4px 4px 0px #000000 !important;
-  border-radius: 0px !important;
-  color: #000000 !important;
-  font-weight: 900 !important;
+  background: var(--color-accent) !important;
+  border: 2px solid #ffffff !important;
+  box-shadow: 4px 4px 0px #0f0a24 !important;
+  border-radius: 10px !important;
+  color: #170f2e !important;
+  font-weight: 800 !important;
   text-transform: uppercase;
 }
 [data-ui-style="maximalism"] .premium-btn:hover {
-  background: #ff00ff !important;
+  background: var(--color-primary) !important;
   transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0px #000000 !important;
+  box-shadow: 2px 2px 0px #0f0a24 !important;
 }
+
+/* Top Navbar Menu — the header-only layout (Branding & Layout > Navbar
+   Scaffolding). The same navigation items as the left sidebar, rendered
+   as a horizontal bar under the app header. Scrolls horizontally on
+   narrow screens instead of hiding. */
+.top-navbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: 56px;
+  padding: 0 1rem;
+  background: var(--bg-sidebar);
+  color: white;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.top-navbar::-webkit-scrollbar { display: none; }
+.top-navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.top-navbar-brand img { width: 32px; height: 32px; object-fit: contain; }
+.top-navbar-brand span {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1rem;
+  white-space: nowrap;
+}
+.top-navbar-links { display: flex; align-items: center; gap: 0.25rem; }
+.top-navbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 400;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+.top-navbar-btn:hover { color: white; background: rgba(255, 255, 255, 0.08); }
+.top-navbar-btn.active { background: var(--color-secondary); color: white; font-weight: 600; }
 
 /* Global Reset & Base Styling */
 html, body {
@@ -254,6 +336,13 @@ body {
   transition: background-color var(--transition-normal), color var(--transition-normal);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Typography applies platform-wide: form controls do NOT inherit the body
+   font by default, so the chosen font is set on them explicitly. Without
+   this, a font change only showed on headings and the logo. */
+button, input, select, textarea {
+  font-family: var(--font-sans);
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -411,13 +500,13 @@ h1, h2, h3, h4, h5, h6 {
 
 .premium-btn-accent {
   background-color: var(--color-accent);
-  color: #000000;
+  color: var(--color-on-accent, #000000);
 }
 
 .premium-btn-accent:hover {
-  background-color: #e5ad02;
+  background-color: var(--color-accent-hover, #e5ad02);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(250, 189, 2, 0.35);
+  box-shadow: 0 4px 12px rgba(var(--color-accent-rgb), 0.35);
 }
 
 .premium-btn-secondary {
@@ -1304,6 +1393,9 @@ h1, h2, h3, h4, h5, h6 {
 .meeting-card.speaking {
   border-color: var(--color-accent) !important;
   box-shadow: 0 0 28px rgba(250, 189, 2, 0.55), 0 0 0 1px rgba(250, 189, 2, 0.35) !important;
+  /* The glow follows the chosen accent (color-mix; browsers without it
+     keep the gold fallback above). */
+  box-shadow: 0 0 28px color-mix(in srgb, var(--color-accent) 55%, transparent), 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent) !important;
 }
 
 @keyframes tile-in {

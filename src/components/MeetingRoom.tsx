@@ -181,6 +181,36 @@ const generateRandomOffset = () => {
   return Math.floor(Math.random() * 30 - 15);
 };
 
+// Timed agenda items store wall-clock times as 24h "HH:MM" strings
+// (from <input type="time">). Displayed in 12-hour form, e.g. "1:00 PM".
+const formatAgendaTime = (hhmm: string): string => {
+  const [h, m] = hhmm.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return hhmm;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+};
+
+const agendaTimeToDate = (hhmm: string): Date | null => {
+  const [h, m] = hhmm.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d;
+};
+
+// Live state of a timed agenda item, evaluated at render time.
+const agendaItemStatus = (item: { startTime?: string; endTime?: string }): 'upcoming' | 'live' | 'done' => {
+  if (!item.startTime || !item.endTime) return 'upcoming';
+  const start = agendaTimeToDate(item.startTime);
+  const end = agendaTimeToDate(item.endTime);
+  if (!start || !end) return 'upcoming';
+  const now = Date.now();
+  if (now >= end.getTime()) return 'done';
+  if (now >= start.getTime()) return 'live';
+  return 'upcoming';
+};
+
 interface MeetingRoomProps {
   meetingId: string;
   meetingTitle: string;
@@ -418,8 +448,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // the agenda in the side panel; every participant receives it as a
   // draggable sticky note. It travels on the signalling channel, so a
   // participant who joins mid-meeting asks for it and the host answers.
-  const [agendaItems, setAgendaItems] = useState<{ id: string; text: string }[]>([]);
-  const agendaItemsRef = useRef<{ id: string; text: string }[]>([]);
+  // Timed agenda items: { id, text, startTime?, endTime? } — times are
+  // optional 24h "HH:MM" strings set in the Agenda tab. Timed items
+  // trigger start/end alerts for the admin only (see the alert effect
+  // below); untimed items behave exactly as before.
+  const [agendaItems, setAgendaItems] = useState<{ id: string; text: string; startTime?: string; endTime?: string }[]>([]);
+  const agendaItemsRef = useRef<{ id: string; text: string; startTime?: string; endTime?: string }[]>([]);
   useEffect(() => { agendaItemsRef.current = agendaItems; }, [agendaItems]);
   const isAdminRef = useRef(isAdmin);
   useEffect(() => { isAdminRef.current = isAdmin; }, [isAdmin]);
@@ -427,8 +461,39 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [agendaNotePos, setAgendaNotePos] = useState<{ x: number; y: number } | null>(null);
   const agendaDragRef = useRef<{ dx: number; dy: number } | null>(null);
   const [agendaInput, setAgendaInput] = useState('');
+  const [newAgendaStart, setNewAgendaStart] = useState('');
+  const [newAgendaEnd, setNewAgendaEnd] = useState('');
   const [isAgendaTabActive, setIsAgendaTabActive] = useState(false);
-  const publishAgenda = (items: { id: string; text: string }[]) => {
+  // Timed-agenda end popup (admin only) — shown when a timed item ends.
+  const [agendaEndPopup, setAgendaEndPopup] = useState<{ id: string; text: string; endLabel: string } | null>(null);
+  const agendaAlertsFiredRef = useRef<Set<string>>(new Set());
+  const roomJoinedAtRef = useRef<number>(Date.now());
+  // Video-feed watermark (Branding & Layout) — reads the saved mode /
+  // opacity / scale and re-renders live when Settings changes them.
+  type WatermarkMode = 'branded' | 'watermark' | 'none';
+  const [watermarkMode, setWatermarkMode] = useState<WatermarkMode>(() =>
+    (localStorage.getItem('giin_watermark') as WatermarkMode) || 'branded'
+  );
+  const [watermarkOpacity, setWatermarkOpacity] = useState<number>(() =>
+    parseInt(localStorage.getItem('giin_watermark_opacity') || '80', 10)
+  );
+  const [watermarkScale, setWatermarkScale] = useState<number>(() =>
+    parseInt(localStorage.getItem('giin_watermark_scale') || '100', 10)
+  );
+  const [watermarkLogo, setWatermarkLogo] = useState<string>(() =>
+    localStorage.getItem('giin_custom_logo') || '/logo.png'
+  );
+  useEffect(() => {
+    const handleWatermarkChange = () => {
+      setWatermarkMode((localStorage.getItem('giin_watermark') as WatermarkMode) || 'branded');
+      setWatermarkOpacity(parseInt(localStorage.getItem('giin_watermark_opacity') || '80', 10));
+      setWatermarkScale(parseInt(localStorage.getItem('giin_watermark_scale') || '100', 10));
+      setWatermarkLogo(localStorage.getItem('giin_custom_logo') || '/logo.png');
+    };
+    window.addEventListener('giin_watermark_changed', handleWatermarkChange);
+    return () => window.removeEventListener('giin_watermark_changed', handleWatermarkChange);
+  }, []);
+  const publishAgenda = (items: { id: string; text: string; startTime?: string; endTime?: string }[]) => {
     setAgendaItems(items);
     if (items.length > 0) setAgendaNoteVisible(true);
     if (sigChannelRef.current) {
@@ -438,8 +503,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const handleAddAgendaItem = () => {
     const text = agendaInput.trim();
     if (!text) return;
-    publishAgenda([...agendaItemsRef.current, { id: generateRandomId(), text }]);
+    const start = newAgendaStart.trim();
+    const end = newAgendaEnd.trim();
+    if ((start && !end) || (!start && end)) {
+      triggerToast('Set both a start and an end time for a timed item, or leave both blank.');
+      return;
+    }
+    if (start && end && end <= start) {
+      triggerToast('The end time must be after the start time.');
+      return;
+    }
+    publishAgenda([...agendaItemsRef.current, { id: generateRandomId(), text, ...(start && end ? { startTime: start, endTime: end } : {}) }]);
     setAgendaInput('');
+    setNewAgendaStart('');
+    setNewAgendaEnd('');
   };
   const handleRemoveAgendaItem = (id: string) => {
     publishAgenda(agendaItemsRef.current.filter(item => item.id !== id));
@@ -955,6 +1032,43 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setToastMessage(null);
     }, 4000);
   };
+
+  // Timed-agenda start/end alerts — ADMIN ONLY. Every 20s the admin's
+  // client checks the timed agenda items: when an item STARTS it shows
+  // a small toast ("Now on: ..."); when an item ENDS it shows a toast
+  // AND the short end popup ("That part has ended"), so the admin
+  // knows to move to the next part. Nobody else sees either one — the
+  // check runs only when isAdmin, and the toast/popup are local state.
+  // Fired keys include the time, so editing an item's times re-arms
+  // it. An item that already ended BEFORE the admin joined this
+  // session gets no end alert (it ended before they were here).
+  useEffect(() => {
+    if (!isAdmin) return;
+    const checkAgendaAlerts = () => {
+      const now = Date.now();
+      for (const item of agendaItemsRef.current) {
+        if (!item.startTime || !item.endTime) continue;
+        const start = agendaTimeToDate(item.startTime);
+        const end = agendaTimeToDate(item.endTime);
+        if (!start || !end) continue;
+        const range = `${formatAgendaTime(item.startTime)} – ${formatAgendaTime(item.endTime)}`;
+        const startKey = `start:${item.id}:${item.startTime}`;
+        const endKey = `end:${item.id}:${item.endTime}`;
+        if (!agendaAlertsFiredRef.current.has(startKey) && now >= start.getTime() && now < end.getTime()) {
+          agendaAlertsFiredRef.current.add(startKey);
+          triggerToast(`▶ Now on: "${item.text}" (${range})`);
+        }
+        if (!agendaAlertsFiredRef.current.has(endKey) && now >= end.getTime() && end.getTime() >= roomJoinedAtRef.current) {
+          agendaAlertsFiredRef.current.add(endKey);
+          triggerToast(`✅ "${item.text}" has ended — time to move to the next part.`);
+          setAgendaEndPopup({ id: item.id, text: item.text, endLabel: formatAgendaTime(item.endTime) });
+        }
+      }
+    };
+    checkAgendaAlerts();
+    const timer = setInterval(checkAgendaAlerts, 20000);
+    return () => clearInterval(timer);
+  }, [isAdmin]);
 
 
   const participantsRef = useRef<Participant[]>([]);
@@ -6113,7 +6227,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <button onClick={() => setAgendaNoteVisible(false)} aria-label="Close agenda" style={{ background: 'none', border: 'none', color: '#0B0F19', fontSize: '1.2rem', cursor: 'pointer', lineHeight: 1, padding: '0.1rem 0.3rem' }}>&times;</button>
             </div>
             <ol style={{ margin: 0, padding: '0.75rem 0.9rem 0.9rem 1.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600, lineHeight: 1.45 }}>
-              {agendaItems.map(item => (<li key={item.id}>{item.text}</li>))}
+              {agendaItems.map(item => (<li key={item.id}>{item.startTime && item.endTime ? `${formatAgendaTime(item.startTime)} – ${formatAgendaTime(item.endTime)} · ` : ''}{item.text}</li>))}
             </ol>
           </div>
         )}
@@ -7066,7 +7180,11 @@ Media encrypted in transit (DTLS-SRTP).`;
                       })()
                     )}
 
-                    {/* Secure Fintech Watermark Overlay */}
+                    {/* Secure Fintech Watermark Overlay — wired to the
+                        Branding & Layout watermark settings: hidden when
+                        the mode is 'none'; size and opacity follow the
+                        watermark scale / opacity sliders. */}
+                    {watermarkMode !== 'none' && (
                     <div style={{
                       position: 'absolute',
                       top: 0,
@@ -7079,12 +7197,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                       alignItems: 'center',
                       justifyContent: 'center',
                       overflow: 'hidden',
-                      opacity: 0.08,
+                      opacity: 0.02 + (watermarkOpacity / 100) * 0.28,
                       userSelect: 'none'
                     }}>
                       <div style={{
                         transform: 'rotate(-25deg)',
-                        fontSize: '1.8rem',
+                        fontSize: `${(1.8 * watermarkScale) / 100}rem`,
                         fontWeight: 800,
                         color: 'white',
                         textAlign: 'center',
@@ -7095,6 +7213,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         {`CONFIDENTIAL • GIIN SECURE SYSTEM • ${currentUser?.email || 'GUEST'} • ${new Date().toLocaleDateString()}`}
                       </div>
                     </div>
+                    )}
                     
                     {isAnnotating && isScreenSharing && (
                       <ScreenAnnotation 
@@ -7187,10 +7306,32 @@ Media encrypted in transit (DTLS-SRTP).`;
                 minWidth: 0,
                 display: 'flex',
                 flexDirection: 'column',
+                position: 'relative',
                 padding: window.innerWidth < 768 ? '0.75rem' : '1.5rem',
                 overflowY: 'auto',
                 background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E'
               }}>
+                {/* Video-feed watermark (Branding & Layout): the GIIN logo
+                    over the video grid. Mode 'branded' = top-left,
+                    'watermark' = top-right, 'none' = hidden. Size and
+                    opacity follow the watermark sliders live. */}
+                {watermarkMode !== 'none' && (
+                  <img
+                    src={watermarkLogo}
+                    alt=""
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      top: 12,
+                      ...(watermarkMode === 'branded' ? { left: 12 } : { right: 12 }),
+                      width: `${Math.round(120 * (watermarkScale / 100))}px`,
+                      height: 'auto',
+                      opacity: watermarkOpacity / 100,
+                      zIndex: 60,
+                      pointerEvents: 'none',
+                    }}
+                  />
+                )}
                 {/* Portrait-phone tile auto-size: this inner wrapper carries
                     the wrap layout and margin:auto centres the tiles when
                     they fit, but collapses to the top (never clips the
@@ -8831,9 +8972,20 @@ Media encrypted in transit (DTLS-SRTP).`;
                   {isAdmin ? 'Set the agenda for this meeting. Everyone who joins sees it as a sticky note they can move or close.' : 'Set by the host. It appears as a sticky note when you join.'}
                 </p>
                 {isAdmin && (
-                  <form onSubmit={(e) => { e.preventDefault(); handleAddAgendaItem(); }} style={{ display: 'flex', gap: '0.5rem' }}>
-                    <input value={agendaInput} onChange={(e) => setAgendaInput(e.target.value)} placeholder="Add an agenda item..." className="premium-input" style={{ flex: 1, padding: '0.5rem 0.65rem', fontSize: '0.8rem', minWidth: 0 }} />
-                    <button type="submit" className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Plus size={14} /> Add</button>
+                  <form onSubmit={(e) => { e.preventDefault(); handleAddAgendaItem(); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input value={agendaInput} onChange={(e) => setAgendaInput(e.target.value)} placeholder="Add an agenda item..." className="premium-input" style={{ flex: 1, padding: '0.5rem 0.65rem', fontSize: '0.8rem', minWidth: 0 }} />
+                      <button type="submit" className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Plus size={14} /> Add</button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>Start
+                        <input type="time" value={newAgendaStart} onChange={(e) => setNewAgendaStart(e.target.value)} className="premium-input" style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem' }} />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>End
+                        <input type="time" value={newAgendaEnd} onChange={(e) => setNewAgendaEnd(e.target.value)} className="premium-input" style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem' }} />
+                      </label>
+                      <span>Optional — timed items alert only the admin at start and end.</span>
+                    </div>
                   </form>
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -8842,7 +8994,15 @@ Media encrypted in transit (DTLS-SRTP).`;
                   ) : agendaItems.map((item, idx) => (
                     <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.6rem 0.75rem', border: '1px solid #1E293B', borderRadius: '8px', backgroundColor: 'rgba(250, 189, 2, 0.06)' }}>
                       <span style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', color: '#0B0F19', fontSize: '0.7rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{idx + 1}</span>
-                      <span style={{ flex: 1, fontSize: '0.85rem', color: 'white', lineHeight: 1.4 }}>{item.text}</span>
+                      <span style={{ flex: 1, fontSize: '0.85rem', color: 'white', lineHeight: 1.4 }}>
+                        {item.startTime && item.endTime && (
+                          <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--color-accent)', fontWeight: 700 }}>
+                            {formatAgendaTime(item.startTime)} – {formatAgendaTime(item.endTime)}
+                            {agendaItemStatus(item) === 'live' ? '  •  LIVE NOW' : agendaItemStatus(item) === 'done' ? '  •  Done' : ''}
+                          </span>
+                        )}
+                        {item.text}
+                      </span>
                       {isAdmin && (
                         <button type="button" onClick={() => handleRemoveAgendaItem(item.id)} aria-label="Remove agenda item" style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: '0.1rem', flexShrink: 0 }}><Trash2 size={14} /></button>
                       )}
@@ -10407,6 +10567,40 @@ Media encrypted in transit (DTLS-SRTP).`;
               Retry video server
             </button>
           )}
+        </div>
+      )}
+
+      {/* Timed-agenda end popup — ADMIN ONLY. A short message that the
+          part has ended, so the admin knows to move to the next part.
+          Dismiss with the × or the Dismiss button. Nobody else sees it. */}
+      {isAdmin && agendaEndPopup && (
+        <div style={{
+          position: 'fixed',
+          bottom: '88px',
+          right: '24px',
+          maxWidth: '360px',
+          padding: '0.9rem 1rem',
+          backgroundColor: '#0B0F19',
+          border: '1px solid var(--color-accent)',
+          borderRadius: 'var(--radius-md)',
+          color: 'white',
+          fontSize: '0.9rem',
+          zIndex: 9999,
+          boxShadow: '0 10px 25px rgba(0,0,0,0.45)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+            <span style={{ fontSize: '1.1rem' }}>✅</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700 }}>That part has ended</div>
+              <div style={{ color: 'rgba(255,255,255,0.75)', marginTop: '0.2rem' }}>
+                "{agendaEndPopup.text}" ended at {agendaEndPopup.endLabel} — time to move to the next part.
+              </div>
+              <button onClick={() => setAgendaEndPopup(null)} style={{ marginTop: '0.6rem', padding: '0.35rem 0.9rem', borderRadius: 'var(--radius-md)', border: 'none', backgroundColor: 'var(--color-accent)', color: 'var(--color-on-accent, #000)', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}>
+                Dismiss
+              </button>
+            </div>
+            <button onClick={() => setAgendaEndPopup(null)} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1 }}>&times;</button>
+          </div>
         </div>
       )}
 

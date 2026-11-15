@@ -19,6 +19,7 @@ import { PreJoinCheck } from './components/PreJoinCheck';
 import { Superadmin } from './components/Superadmin';
 import { MeetingLobby } from './components/MeetingLobby';
 import { giinApi, supabase, getTransparentLogo, isMeetingHost, isMeetingHostForUser } from './supabaseClient';
+import { applyAccentColor, applyBorderRadius, applyFont, applyUiStyle } from './utils/theme';
 import { encryptMessage, decryptMessage } from './services/e2ee';
 
 
@@ -44,81 +45,6 @@ interface Meeting {
   recurrence_count?: number | null;
   personal_room_slug?: string | null;
 }
-
-const applyFont = (fontFamilyHeading: string, fontFamilyBody: string) => {
-  document.documentElement.style.setProperty('--font-heading', fontFamilyHeading);
-  document.documentElement.style.setProperty('--font-sans', fontFamilyBody);
-  const fontId = 'google-font-' + fontFamilyHeading.replace(/\s+/g, '-').toLowerCase();
-  if (!document.getElementById(fontId)) {
-    const link = document.createElement('link');
-    link.id = fontId;
-    link.rel = 'stylesheet';
-    link.href = `https://fonts.googleapis.com/css2?family=${fontFamilyHeading.replace(/\s+/g, '+')}:wght@400;500;600;700&family=${fontFamilyBody.replace(/\s+/g, '+')}:wght@400;500;600;700&display=swap`;
-    document.head.appendChild(link);
-  }
-};
-
-const applyBorderRadius = (radius: number) => {
-  document.documentElement.style.setProperty('--radius-sm', `${radius * 0.5}px`);
-  document.documentElement.style.setProperty('--radius-md', `${radius}px`);
-  document.documentElement.style.setProperty('--radius-lg', `${radius * 2}px`);
-  document.documentElement.style.setProperty('--radius-xl', `${radius * 3}px`);
-};
-
-const applyUiStyle = (style: string, isDark: boolean) => {
-  document.documentElement.setAttribute('data-ui-style', style);
-  // Remove temporary inline properties to avoid clashing with the stylesheet rule sets
-  document.documentElement.style.removeProperty('--bg-app');
-  document.documentElement.style.removeProperty('--bg-sidebar');
-  document.documentElement.style.removeProperty('--bg-card');
-  document.documentElement.style.removeProperty('--border-color');
-  document.documentElement.style.removeProperty('--radius-md');
-  document.documentElement.style.removeProperty('--radius-lg');
-  document.documentElement.style.removeProperty('--glass-bg');
-  document.documentElement.style.removeProperty('--glass-border');
-  document.documentElement.style.removeProperty('--glass-blur');
-  document.documentElement.style.removeProperty('--shadow-premium');
-  document.documentElement.style.removeProperty('--shadow-sm');
-  document.documentElement.style.removeProperty('--shadow-md');
-
-  if (style === 'neumorphism') {
-    const shadowDark = isDark ? '#070a10' : '#b8c2d0';
-    const shadowLight = isDark ? '#1d273c' : '#ffffff';
-    document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
-    document.documentElement.style.setProperty('--glass-border', 'none');
-    document.documentElement.style.setProperty('--glass-blur', '0px');
-    document.documentElement.style.setProperty('--shadow-premium', `8px 8px 16px ${shadowDark}, -8px -8px 16px ${shadowLight}`);
-    document.documentElement.style.setProperty('--shadow-sm', `3px 3px 6px ${shadowDark}, -3px -3px 6px ${shadowLight}`);
-    document.documentElement.style.setProperty('--shadow-md', `6px 6px 12px ${shadowDark}, -6px -6px 12px ${shadowLight}`);
-    document.documentElement.style.setProperty('--shadow-inset', `inset 4px 4px 8px ${shadowDark}, inset -4px -4px 8px ${shadowLight}`);
-  } else if (style === 'cyberpunk-glow') {
-    document.documentElement.style.setProperty('--glass-bg', isDark ? '#080c16' : '#f0f4ff');
-    document.documentElement.style.setProperty('--glass-border', '2px solid var(--color-primary)');
-    document.documentElement.style.setProperty('--glass-blur', '0px');
-    document.documentElement.style.setProperty('--shadow-premium', '0 0 15px rgba(var(--color-primary-rgb), 0.35)');
-    document.documentElement.style.setProperty('--shadow-sm', '0 0 5px rgba(var(--color-primary-rgb), 0.2)');
-    document.documentElement.style.setProperty('--shadow-md', '0 0 8px rgba(var(--color-primary-rgb), 0.3)');
-  } else if (style === 'flat-minimal') {
-    document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
-    document.documentElement.style.setProperty('--glass-border', '1px solid var(--border-color)');
-    document.documentElement.style.setProperty('--glass-blur', '0px');
-    document.documentElement.style.setProperty('--shadow-premium', 'none');
-    document.documentElement.style.setProperty('--shadow-sm', 'none');
-    document.documentElement.style.setProperty('--shadow-md', 'none');
-  } else if (style === 'glassmorphism') {
-    if (isDark) {
-      document.documentElement.style.setProperty('--glass-bg', 'rgba(18, 24, 38, 0.75)');
-      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.06)');
-      document.documentElement.style.setProperty('--glass-blur', '16px');
-      document.documentElement.style.setProperty('--shadow-premium', '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4)');
-    } else {
-      document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.7)');
-      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.4)');
-      document.documentElement.style.setProperty('--glass-blur', '12px');
-      document.documentElement.style.setProperty('--shadow-premium', '0 20px 25px -5px rgba(0, 32, 91, 0.08), 0 10px 10px -5px rgba(0, 32, 91, 0.04)');
-    }
-  }
-};
 
 function App() {
   // Authentication & Directory Discovery
@@ -208,6 +134,20 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     return localStorage.getItem('giin_sidebar_collapsed') === 'true';
   });
+
+  // Navbar scaffolding layout (Branding & Layout > Navbar Scaffolding):
+  // 'left-docked' renders the left sidebar, 'header-only' renders a
+  // horizontal top navbar instead. Re-renders live when Settings changes it.
+  const [layoutStyle, setLayoutStyle] = useState<string>(() =>
+    localStorage.getItem('giin_layout') || 'left-docked'
+  );
+  useEffect(() => {
+    const handleLayoutChange = () => {
+      setLayoutStyle(localStorage.getItem('giin_layout') || 'left-docked');
+    };
+    window.addEventListener('giin_layout_changed', handleLayoutChange);
+    return () => window.removeEventListener('giin_layout_changed', handleLayoutChange);
+  }, []);
 
 
   // Profile
@@ -1182,58 +1122,40 @@ function App() {
 
   // Effect to apply custom accent colors, glassmorphism, fonts, border-radii & UI styles dynamically
   useEffect(() => {
-    // 1. Accent color
+    // 1. Accent color — the shared applier sets the primary AND accent
+    // variable families, so the saved colour re-themes the whole platform
+    // (buttons, links, highlights, active states), not just a few spots.
     const savedAccent = localStorage.getItem('giin_accent_color');
     const savedHover = localStorage.getItem('giin_accent_hover');
     if (savedAccent && savedHover) {
-      document.documentElement.style.setProperty('--color-primary', savedAccent);
-      document.documentElement.style.setProperty('--color-primary-hover', savedHover);
-      const hex = savedAccent.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-      if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
-        document.documentElement.style.setProperty('--color-primary-rgb', `${r}, ${g}, ${b}`);
-      }
+      applyAccentColor(savedAccent, savedHover);
     } else {
       document.documentElement.style.removeProperty('--color-primary');
       document.documentElement.style.removeProperty('--color-primary-hover');
       document.documentElement.style.removeProperty('--color-primary-rgb');
+      document.documentElement.style.removeProperty('--color-accent');
+      document.documentElement.style.removeProperty('--color-accent-rgb');
+      document.documentElement.style.removeProperty('--color-accent-hover');
+      document.documentElement.style.removeProperty('--color-on-accent');
     }
 
-    // 2. Glassmorphism opacity (only applies if default glassmorphism is selected)
+    // 2. UI Style — the shared applier re-applies the SAVED glass level
+    // AFTER clearing inline glass vars. (The old effect applied the glass
+    // level BEFORE this call, which removed the vars and clobbered the
+    // saved blur on every reload.)
     const savedUiStyle = localStorage.getItem('giin_ui_style') || 'glassmorphism';
-    const savedGlass = localStorage.getItem('giin_glass_opacity');
-    
-    if (savedUiStyle === 'glassmorphism') {
-      if (savedGlass === 'none') {
-        document.documentElement.style.setProperty('--glass-bg', 'var(--bg-card)');
-        document.documentElement.style.setProperty('--glass-border', 'var(--border-color)');
-        document.documentElement.style.setProperty('--glass-blur', '0px');
-      } else if (savedGlass === 'ultra-clear') {
-        document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.15)');
-        document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.04)');
-        document.documentElement.style.setProperty('--glass-blur', '8px');
-      } else {
-        document.documentElement.style.removeProperty('--glass-bg');
-        document.documentElement.style.removeProperty('--glass-border');
-        document.documentElement.style.removeProperty('--glass-blur');
-      }
-    }
-
-    // 3. UI Style
     applyUiStyle(savedUiStyle, isDarkMode);
 
-    // 4. Typography / Font Families
+    // 3. Typography / Font Families
     const savedFontHeading = localStorage.getItem('giin_font_heading') || 'Outfit';
     const savedFontBody = localStorage.getItem('giin_font_body') || 'Inter';
     applyFont(savedFontHeading, savedFontBody);
 
-    // 5. Border Radius
+    // 4. Border Radius
     const savedRadius = localStorage.getItem('giin_border_radius') || '8';
     applyBorderRadius(parseInt(savedRadius, 10));
 
-    // 6. Listen for branding details change
+    // 5. Listen for branding details change
     const handleBrandingChange = () => {
       const savedName = localStorage.getItem('giin_brand_name');
       const savedSlogan = localStorage.getItem('giin_brand_slogan');
@@ -2136,8 +2058,9 @@ function App() {
       backgroundColor: 'var(--bg-app)'
     }}>
       
-      {/* Sidebar Navigation */}
-      {currentView !== 'meeting' && (
+      {/* Sidebar Navigation — only in the left-docked layout; the
+          header-only layout renders the top navbar below instead. */}
+      {currentView !== 'meeting' && layoutStyle === 'left-docked' && (
         <aside className="sidebar-desktop" style={{
         width: isSidebarCollapsed ? '72px' : '260px',
         backgroundColor: 'var(--bg-sidebar)',
@@ -2534,6 +2457,42 @@ function App() {
         overflow: 'hidden'
       }}>
         
+        {/* Top Navbar Menu — the header-only layout: the same navigation
+            items as the left sidebar, rendered as a horizontal bar. */}
+        {currentView !== 'meeting' && layoutStyle === 'header-only' && (
+          <nav className="top-navbar" aria-label="Main navigation">
+            <div className="top-navbar-brand">
+              <img src={logoUrl} alt="GiinMeet logo" />
+              <span>{brandName}</span>
+            </div>
+            <div className="top-navbar-links">
+              <button onClick={() => setCurrentView('dashboard')} className={`top-navbar-btn ${currentView === 'dashboard' ? 'active' : ''}`}>
+                <Home size={16} /> Dashboard
+              </button>
+              <button onClick={() => setCurrentView('chats')} className={`top-navbar-btn ${currentView === 'chats' ? 'active' : ''}`}>
+                <MessageSquare size={16} /> Chat Center
+              </button>
+              <button onClick={() => setCurrentView('contacts')} className={`top-navbar-btn ${currentView === 'contacts' ? 'active' : ''}`}>
+                <Users size={16} /> Contacts
+              </button>
+              <button onClick={() => setCurrentView('private')} className={`top-navbar-btn ${currentView === 'private' ? 'active' : ''}`}>
+                <Shield size={16} /> Private Vault
+              </button>
+              <button onClick={() => setCurrentView('help')} className={`top-navbar-btn ${currentView === 'help' ? 'active' : ''}`}>
+                <HelpCircle size={16} /> Help &amp; Support
+              </button>
+              {user?.is_superadmin && (
+                <button onClick={() => setCurrentView('superadmin')} className={`top-navbar-btn ${currentView === 'superadmin' ? 'active' : ''}`}>
+                  <Shield size={16} /> Superadmin Portal
+                </button>
+              )}
+              <button onClick={() => setCurrentView('settings')} className={`top-navbar-btn ${currentView === 'settings' ? 'active' : ''}`}>
+                <SettingsIcon size={16} /> Settings
+              </button>
+            </div>
+          </nav>
+        )}
+
         {/* Top Header Row */}
         {currentView !== 'meeting' && (
           <header style={{
