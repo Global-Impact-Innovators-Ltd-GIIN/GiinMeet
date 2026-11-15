@@ -699,15 +699,17 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
 
   return (
     <div style={{
-      width: '100vw',
-      height: '100vh',
+      width: '100%',
+      height: '100dvh',
+      minHeight: '100vh',
       display: 'flex',
-      alignItems: 'center',
       justifyContent: 'center',
       background: 'linear-gradient(135deg, var(--color-primary) 0%, #0B0F19 100%)',
-      padding: '1.5rem',
+      padding: 'clamp(0.75rem, 3vw, 1.5rem)',
       position: 'relative',
-      overflow: 'hidden'
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      boxSizing: 'border-box'
     }}>
       {/* Decorative background grid */}
       <div style={{
@@ -722,13 +724,15 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
       }} />
 
       <div className="glass-panel" style={{
-        width: '460px',
+        width: '100%',
+        maxWidth: '460px',
+        margin: 'auto',
         backgroundColor: 'rgba(18, 24, 38, 0.85)',
         border: '1px solid rgba(255, 255, 255, 0.08)',
-        padding: '2.5rem',
+        padding: 'clamp(1.25rem, 5vw, 2.5rem)',
         display: 'flex',
         flexDirection: 'column',
-        gap: '1.5rem',
+        gap: 'clamp(0.9rem, 3vw, 1.5rem)',
         color: 'white',
         zIndex: 10,
         boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
@@ -740,15 +744,15 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
             src={logoUrl} 
             alt="GiinMeet Logo" 
             style={{
-              width: '112px',
-              height: '112px',
+              width: 'clamp(72px, 18vw, 112px)',
+              height: 'clamp(72px, 18vw, 112px)',
               objectFit: 'contain',
               borderRadius: '8px',
               margin: '0 auto 0.75rem',
               display: 'block',
             }} 
           />
-          <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>
+          <h2 style={{ fontSize: 'clamp(1.3rem, 5vw, 1.6rem)', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>
             Welcome to {displayBrandName}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
@@ -969,7 +973,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                 <input 
                   type="email" 
                   className="premium-input" 
-                  placeholder="you@company.com or you@gmail.com"
+                  placeholder="you@company.com"
                   value={email}
                   onChange={handleEmailChange}
                   style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
@@ -1156,7 +1160,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                       onKeyDown={e => handleOtpKeyDown(idx, e)}
                       onPaste={e => handleOtpPaste(idx, e)}
                       style={{
-                        width: '44px',
+                        width: 'clamp(36px, 11vw, 44px)',
                         height: '48px',
                         backgroundColor: '#090D16',
                         border: '2px solid #1E293B',
@@ -1278,7 +1282,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                       value={countryCode}
                       onChange={e => setCountryCode(e.target.value)}
                       style={{
-                        width: '110px',
+                        width: 'clamp(88px, 28vw, 110px)',
                         backgroundColor: '#090D16',
                         border: '1px solid #1E293B',
                         borderRadius: '6px',
@@ -1354,7 +1358,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                       onKeyDown={e => handleOtpKeyDown(idx, e)}
                       onPaste={e => handleOtpPaste(idx, e)}
                       style={{
-                        width: '44px',
+                        width: 'clamp(36px, 11vw, 44px)',
                         height: '48px',
                         backgroundColor: '#090D16',
                         border: '2px solid #1E293B',
