@@ -75,6 +75,7 @@ export const displayRoleLabel = (role?: string | null): string => {
   const r = (role || '').toLowerCase().replace(/[-_\s]/g, '');
   if (r === 'host' || r === 'admin') return 'Host';
   if (r === 'cohost') return 'Co-host';
+  if (r === 'moderator') return 'Moderator';
   if (r === 'guest') return 'Guest';
   if (r === 'speaker') return 'Speaker';
   return 'Participant';
@@ -87,6 +88,7 @@ export const tileRoleSuffix = (role?: string | null): string => {
   const r = (role || '').toLowerCase().replace(/[-_\s]/g, '');
   if (r === 'host' || r === 'admin') return ' (Host)';
   if (r === 'cohost') return ' (Co-host)';
+  if (r === 'moderator') return ' (Moderator)';
   return '';
 };
 
@@ -686,22 +688,29 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     return () => clearTimeout(t);
   }, [leftCall, leftCallCountdown]);
 
-  // Our server-derived role for this meeting (HOST / COHOST / GUEST).
-  // Co-hosts get admit + mute powers; the token route is the authority.
-  const [livekitRole, setLivekitRole] = useState<'HOST' | 'COHOST' | 'GUEST'>('GUEST');
-  // Poll the co-host list: the host grants it from the participants panel
-  // and the token route confirms it on the next mint.
+  // Our server-derived role for this meeting (HOST / COHOST / MODERATOR
+  // / GUEST). Co-hosts get admit + mute / remove / breakout powers;
+  // moderators get mute / remove / breakout but cannot admit; the token
+  // route is the authority.
+  const [livekitRole, setLivekitRole] = useState<'HOST' | 'COHOST' | 'MODERATOR' | 'GUEST'>('GUEST');
+  // Poll the role-holder list: the host grants co-host / moderator from
+  // the participants panel and the token route confirms it on the next
+  // mint. Polling (not just the token) is what lights the role up on the
+  // holder's own device within seconds of the grant.
   useEffect(() => {
     let active = true;
     const loadCoHosts = async () => {
-      const rows = await giinApi.getCoHosts(meetingId);
+      const rows = await giinApi.getMeetingRoles(meetingId);
       if (!active) return;
-      const keys = new Set<string>();
+      const coKeys = new Set<string>();
+      const modKeys = new Set<string>();
       rows.forEach((r: any) => {
+        const keys = r.role === 'Moderator' ? modKeys : coKeys;
         if (r.user_id) keys.add(r.user_id);
         if (r.id) keys.add(r.id);
       });
-      setCoHostKeys(keys);
+      setCoHostKeys(coKeys);
+      setModeratorKeys(modKeys);
     };
     loadCoHosts();
     const interval = setInterval(loadCoHosts, 10000);
@@ -884,6 +893,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Host broadcast draft + the last broadcast banner every client shows.
   const [breakoutBroadcastDraft, setBreakoutBroadcastDraft] = useState('');
   const [breakoutBroadcast, setBreakoutBroadcast] = useState<{ message: string; from: string } | null>(null);
+  // Phase 3 (Feature 2): true while breakouts are active on THIS client.
+  // The end-breakout receiver uses it to ignore duplicate end broadcasts
+  // (every moderator's countdown timer fires the end at 0:00, so several
+  // identical end events can arrive within a second).
+  const breakoutActiveRef = useRef(false);
 
   // Meeting timer, layout and pinning, unread chat badge.
   const [meetingJoinedAt] = useState(() => Date.now());
@@ -972,18 +986,30 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [myParticipantRowId] = useState<string | null>(() => {
     try { return localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { return null; }
   });
-  // Co-host keys (user ids and participant row ids) granted by the host.
-  // Derived AFTER myKey/myParticipantRowId exist (TDZ: these consts are
-  // read during render, so they must sit below those declarations).
+  // Co-host / moderator keys (user ids and participant row ids) granted
+  // by the host. Derived AFTER myKey/myParticipantRowId exist (TDZ:
+  // these consts are read during render, so they must sit below those
+  // declarations).
   const [coHostKeys, setCoHostKeys] = useState<Set<string>>(new Set());
+  const [moderatorKeys, setModeratorKeys] = useState<Set<string>>(new Set());
   const isCoHost =
     livekitRole === 'COHOST' ||
     coHostKeys.has(myKey) ||
     (myParticipantRowId ? coHostKeys.has(myParticipantRowId) : false);
-  // Hosts and co-hosts can admit from the waiting room and mute people.
-  // Ending the meeting for everyone and transferring the host role stay
-  // host-only.
-  const canModerate = !!isAdmin || isCoHost;
+  const isModerator =
+    livekitRole === 'MODERATOR' ||
+    moderatorKeys.has(myKey) ||
+    (myParticipantRowId ? moderatorKeys.has(myParticipantRowId) : false);
+  // Phase 3 (Feature 2) — role split:
+  //   - canModerate (host, co-host, moderator): mute, remove, manage
+  //     breakout rooms, mark Q&A answered.
+  //   - canAdmit (host, co-host only): admit / decline from the waiting
+  //     room. A moderator cannot admit people — the admit route enforces
+  //     it server-side (it matches role 'CoHost' exactly).
+  //   - Ending the meeting, locking it, transferring the host role and
+  //     changing room settings stay host-only.
+  const canModerate = !!isAdmin || isCoHost || isModerator;
+  const canAdmit = !!isAdmin || isCoHost;
   const pcsRef = useRef<{ [peerKey: string]: RTCPeerConnection }>({});
   const initPeerConnectionRef = useRef<((peerKey: string, forceAudioOnly?: boolean) => void) | null>(null);
   const makingOfferRef = useRef<{ [peerKey: string]: boolean }>({});
@@ -1415,7 +1441,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (typeof serverMaxCapacity === 'number') setRoomCapacity(serverMaxCapacity);
         setLivekitToken(token);
         setExpiresAt(tokenExpiry);
-        if (serverRole === 'HOST' || serverRole === 'COHOST' || serverRole === 'GUEST') {
+        if (serverRole === 'HOST' || serverRole === 'COHOST' || serverRole === 'MODERATOR' || serverRole === 'GUEST') {
           setLivekitRole(serverRole);
         }
 
@@ -2535,12 +2561,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     });
   };
 
-  // Phase 2 (#13) — Q&A queue: the host (or co-host) marks a question
-  // answered; it leaves the open queue for the Answered section below
-  // and can be reopened. Same broadcast pattern as the polls: one
-  // event, every client applies it, no server round-trip.
+  // Phase 2 (#13) — Q&A queue: the host, a co-host or a moderator marks
+  // a question answered; it leaves the open queue for the Answered
+  // section below and can be reopened. Same broadcast pattern as the
+  // polls: one event, every client applies it, no server round-trip.
   const markQuestionAnswered = (questionId: string, answered: boolean) => {
-    if (!isAdmin) return;
+    if (!canModerate) return;
     setQaQuestions(prev => prev.map(q => q.id === questionId ? { ...q, answered } : q));
     if (sigChannelRef.current) {
       sigChannelRef.current.send({
@@ -2589,28 +2615,26 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Phase 3 (Feature 1) — breakout control transport. Control must
+  // Phase 3 (Feature 2) — breakout control transport. Control must
   // reach EVERY room, but the P2P signalling channel splits per room
   // (`sig-webrtc-<id>-breakout-<n>`), so a host in the main room cannot
   // reach breakout rooms over it (and rooms cannot reach each other).
   // The meeting-events channel (`meeting-events-<id>`) is subscribed by
   // everyone regardless of room or engine, so all breakout control
-  // (start / end / move / broadcast) goes over it. Falls back to the
-  // signalling channel only if the events channel is not up yet.
-  const sendBreakoutControl = (event: string, payload: any) => {
-    const sendOn = (ch: any) => {
-      if (!ch) return false;
-      ch.send({ type: 'broadcast', event, payload });
-      return true;
-    };
-    if (sendOn(eventsChannelRef.current)) return;
-    if (sendOn(sigChannelRef.current)) return;
-    setTimeout(() => {
-      if (!sendOn(eventsChannelRef.current)) sendOn(sigChannelRef.current);
-    }, 600);
+  // (start / end / move / broadcast) goes over it — via the SERVER route
+  // POST /api/meetings/breakout, which verifies the caller is the host,
+  // a co-host or a moderator and broadcasts with a `server: true`
+  // marker. Receivers ignore breakout events without the marker, so a
+  // guest can no longer move everyone between rooms from the browser.
+  // (Feature 1 sent these as direct client broadcasts; that transport
+  // is gone.) Throws with the server's honest message on failure, so
+  // each handler below only updates local state after the server OKs.
+  const sendBreakoutControl = async (event: string, payload: any) => {
+    await giinApi.breakoutControl(meetingId, event, payload);
   };
 
-  const handleStartBreakouts = (roomsCount: number, durationMinutes: number) => {
+  const handleStartBreakouts = async (roomsCount: number, durationMinutes: number) => {
+    if (!canModerate) return;
     const assignments: { [peerKey: string]: number } = {};
     let roomIdx = 0;
     participants.forEach(p => {
@@ -2623,19 +2647,32 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
     // Phase 3: keep the host's live record of who is where, so the
     // room-management roster below can show it and moves can update it.
+    // The server verifies the caller first — local state only changes
+    // after the server OKs, so a rejected start shows nothing.
+    try {
+      await sendBreakoutControl('start-breakout', {
+        assignments,
+        durationSeconds: durationMinutes * 60
+      });
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not start the breakout rooms — please try again.');
+      return;
+    }
+    breakoutActiveRef.current = true;
     setBreakoutAssignments(assignments);
     setBreakoutBroadcast(null);
-    sendBreakoutControl('start-breakout', {
-      assignments,
-      durationSeconds: durationMinutes * 60
-    });
-
     setBreakoutTimeRemaining(durationMinutes * 60);
     alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes. Breakout rooms run peer-to-peer, not on the video server, so video quality may drop — this is a labelled fallback, not the LiveKit engine.`);
   };
 
-  const handleEndBreakouts = () => {
-    sendBreakoutControl('end-breakout', {});
+  const handleEndBreakouts = async () => {
+    try {
+      await sendBreakoutControl('end-breakout', {});
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not end the breakout rooms — please try again.');
+      return;
+    }
+    breakoutActiveRef.current = false;
     setBreakoutAssignments({});
     setBreakoutBroadcast(null);
     enterBreakoutRoom(null);
@@ -2647,15 +2684,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // the meeting-events channel, so it reaches the participant no matter
   // which room they are in right now; only the named peerKey acts on it.
   // The host's roster is updated optimistically at the same time.
-  const handleMoveParticipant = (peerKey: string, targetRoom: number | null) => {
-    if (!isAdmin || breakoutTimeRemaining === null) return;
+  const handleMoveParticipant = async (peerKey: string, targetRoom: number | null) => {
+    if (!canModerate || breakoutTimeRemaining === null) return;
     const currentRoom = breakoutAssignments[peerKey] ?? null;
     if (currentRoom === targetRoom) return;
-    sendBreakoutControl('move-breakout', {
-      peerKey,
-      roomNumber: targetRoom,
-      durationSeconds: breakoutTimeRemaining
-    });
+    try {
+      await sendBreakoutControl('move-breakout', {
+        peerKey,
+        roomNumber: targetRoom,
+        durationSeconds: breakoutTimeRemaining
+      });
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not move that participant — please try again.');
+      return;
+    }
     setBreakoutAssignments(prev => {
       const next = { ...prev };
       if (targetRoom === null) delete next[peerKey];
@@ -2668,12 +2710,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // once (main room included). Same meeting-events channel as moves, so
   // it reaches participants in every breakout room, not just the host's
   // own room. The host sees their own message as a banner too.
-  const handleBroadcastToBreakouts = () => {
-    if (!isAdmin || breakoutTimeRemaining === null) return;
+  const handleBroadcastToBreakouts = async () => {
+    if (!canModerate || breakoutTimeRemaining === null) return;
     const message = breakoutBroadcastDraft.trim();
     if (!message) return;
-    const from = currentUser?.name || 'Host';
-    sendBreakoutControl('breakout-broadcast', { message, from });
+    // The server stamps the broadcast with the verified caller's name,
+    // so `from` is never taken from the request. This local copy is only
+    // for the sender's own banner.
+    const from = currentUser?.name || (isAdmin ? 'Host' : isCoHost ? 'Co-host' : isModerator ? 'Moderator' : 'Guest');
+    try {
+      await sendBreakoutControl('breakout-broadcast', { message });
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not send the broadcast — please try again.');
+      return;
+    }
     setBreakoutBroadcast({ message, from });
     setBreakoutBroadcastDraft('');
   };
@@ -2827,7 +2877,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // or engine (see the Fix Round 6 note above), so start / end / move
       // / broadcast all reach every participant wherever they are.
       .on('broadcast', { event: 'start-breakout' }, (payload: any) => {
+        // Phase 3 (Feature 2): only the server may start breakouts — a
+        // client-sent event without the server marker is ignored.
         const data = payload.payload;
+        if (!data || data.server !== true || !data.assignments) return;
+        breakoutActiveRef.current = true;
         const myAssignment = data.assignments[myKey];
         if (myAssignment) {
           enterBreakoutRoom(myAssignment);
@@ -2836,7 +2890,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           alert(`You are being moved to Breakout Room ${myAssignment}.`);
         }
       })
-      .on('broadcast', { event: 'end-breakout' }, () => {
+      .on('broadcast', { event: 'end-breakout' }, (payload: any) => {
+        // Only a server-marked end counts, and only the first one: every
+        // moderator's countdown fires at 0:00, so duplicates arrive.
+        if (!payload?.payload || payload.payload.server !== true) return;
+        if (!breakoutActiveRef.current) return;
+        breakoutActiveRef.current = false;
         enterBreakoutRoom(null);
         setBreakoutTimeRemaining(null);
         setBreakoutAssignments({});
@@ -2845,8 +2904,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'move-breakout' }, (payload: any) => {
         const data = payload.payload;
-        if (!data || data.peerKey !== myKey) return;
+        if (!data || data.server !== true || data.peerKey !== myKey) return;
         const target = typeof data.roomNumber === 'number' ? data.roomNumber : null;
+        // Breakouts are still running globally even when this move sends us
+        // back to the main room, so the end-breakout event must still reach us.
+        breakoutActiveRef.current = true;
         enterBreakoutRoom(target);
         if (target === null) {
           setBreakoutTimeRemaining(null);
@@ -2860,9 +2922,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'breakout-broadcast' }, (payload: any) => {
         const data = payload.payload;
-        if (!data || typeof data.message !== 'string' || !data.message.trim()) return;
+        if (!data || data.server !== true || typeof data.message !== 'string' || !data.message.trim()) return;
         setBreakoutBroadcast({ message: data.message.trim(), from: data.from || 'Host' });
-        triggerToast(`Host: ${data.message.trim()}`);
+        triggerToast(`${data.from || 'Host'}: ${data.message.trim()}`);
       })
       .subscribe();
     return () => {
@@ -3939,7 +4001,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => {
     if (breakoutTimeRemaining === null) return;
     if (breakoutTimeRemaining <= 0) {
-      if (isAdmin) {
+      if (canModerate) {
         handleEndBreakouts();
       }
       return;
@@ -3948,7 +4010,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setBreakoutTimeRemaining(prev => (prev !== null ? prev - 1 : null));
     }, 1000);
     return () => clearTimeout(timer);
-  }, [breakoutTimeRemaining, isAdmin]);
+  }, [breakoutTimeRemaining, canModerate]);
 
   // Screen sharing track feed replacement injector (User gesture compliant)
   const startScreenShare = async (): Promise<boolean> => {
@@ -4165,7 +4227,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Hosts and co-hosts check for waiting participants via realtime and fallback polling
   useEffect(() => {
-    if (!canModerate) return;
+    if (!canAdmit) return;
     const checkWaitroom = async () => {
       try {
         const list = await giinApi.getWaitingParticipants(meetingId);
@@ -4196,7 +4258,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
-  }, [meetingId, canModerate]);
+  }, [meetingId, canAdmit]);
 
   // Handle host admission action - host-verified, server-side.
   // Fix Round 7 (#4): the route flips the row and broadcasts the
@@ -6270,7 +6332,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
         {/* Waiting Room Alert Overlay for Hosts — the full queue, not just
             the first person waiting. */}
-        {canModerate && waitingList.length > 0 && (
+        {canAdmit && waitingList.length > 0 && (
           <div style={{
             position: 'absolute',
             top: '20px',
@@ -6925,9 +6987,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                   backdropFilter: 'blur(4px)',
                   zIndex: 10
                 }}>
-                  {/* Only Host / Co-host get a role shown on a video card;
+                  {/* Only Host / Co-host / Moderator get a role shown on a video card;
                       everyone else is just their name. */}
-                  <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>You{isAdmin ? ' (Host)' : isCoHost ? ' (Co-host)' : ''}</span>
+                  <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>You{isAdmin ? ' (Host)' : isCoHost ? ' (Co-host)' : isModerator ? ' (Moderator)' : ''}</span>
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                   <span
                     style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)' }}
@@ -7717,7 +7779,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </div>
                   <div>
                     <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>You</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{isAdmin ? 'Host' : isCoHost ? 'Co-host' : 'Guest'}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{isAdmin ? 'Host' : isCoHost ? 'Co-host' : isModerator ? 'Moderator' : 'Guest'}</div>
                   </div>
                 </div>
                 <div>
@@ -7759,7 +7821,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         {isAdmin && (
                           <button
                             onClick={async () => {
-                              const { error } = await giinApi.setParticipantRole(p.id, 'CoHost');
+                              const { error } = await giinApi.setParticipantRole(meetingId, p.id, 'CoHost');
                               if (error) {
                                 triggerToast(`Could not make ${p.name} a co-host — please try again.`);
                               } else {
@@ -7769,13 +7831,63 @@ Media encrypted in transit (DTLS-SRTP).`;
                                   if (p.userId) next.add(p.userId);
                                   return next;
                                 });
-                                triggerToast(`${p.name} is now a co-host and can admit people and mute participants.`);
+                                triggerToast(`${p.name} is now a co-host and can admit people, mute and remove participants, and manage breakout rooms.`);
                               }
                             }}
                             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
-                            title="Make Co-Host (can admit people and mute participants)"
+                            title="Make Co-Host (can admit people, mute and remove participants, and manage breakout rooms)"
                           >
                             Make Co-Host
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            onClick={async () => {
+                              const { error } = await giinApi.setParticipantRole(meetingId, p.id, 'Moderator');
+                              if (error) {
+                                triggerToast(`Could not make ${p.name} a moderator — please try again.`);
+                              } else {
+                                setModeratorKeys(prev => {
+                                  const next = new Set(prev);
+                                  next.add(p.id);
+                                  if (p.userId) next.add(p.userId);
+                                  return next;
+                                });
+                                triggerToast(`${p.name} is now a moderator and can mute and remove participants and manage breakout rooms (but cannot admit people).`);
+                              }
+                            }}
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
+                            title="Make Moderator (can mute and remove participants and manage breakout rooms; cannot admit people)"
+                          >
+                            Make Moderator
+                          </button>
+                        )}
+                        {isAdmin && (p.role === 'CoHost' || p.role === 'Moderator') && (
+                          <button
+                            onClick={async () => {
+                              const { error } = await giinApi.setParticipantRole(meetingId, p.id, 'Participant');
+                              if (error) {
+                                triggerToast(`Could not remove ${p.name}'s role — please try again.`);
+                              } else {
+                                setCoHostKeys(prev => {
+                                  const next = new Set(prev);
+                                  next.delete(p.id);
+                                  if (p.userId) next.delete(p.userId);
+                                  return next;
+                                });
+                                setModeratorKeys(prev => {
+                                  const next = new Set(prev);
+                                  next.delete(p.id);
+                                  if (p.userId) next.delete(p.userId);
+                                  return next;
+                                });
+                                triggerToast(`${p.name} is a participant again.`);
+                              }
+                            }}
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: '#FCA5A5', fontWeight: 600, padding: '2px 4px' }}
+                            title="Remove this person's co-host / moderator role"
+                          >
+                            Remove Role
                           </button>
                         )}
                         
@@ -7807,7 +7919,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           </button>
                         )}
 
-                        {isAdmin && (
+                        {canModerate && (isAdmin || (p.role !== 'Admin' && p.role !== 'CoHost' && p.role !== 'Moderator')) && (
                         <button
                           disabled={busyControlKey === p.id}
                           onClick={async () => {
@@ -7890,7 +8002,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             </div>
           </div>
         )}
-        {activePanel === 'host-settings' && isAdmin && (
+        {activePanel === 'host-settings' && (isAdmin || canModerate) && (
           <div className="meeting-side-panel" style={{
             width: '300px',
             borderLeft: '1px solid #1E293B',
@@ -7902,7 +8014,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             zIndex: 5
           }}>
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
-              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Host Controls</h4>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>{isAdmin ? 'Host Controls' : 'Moderator Controls'}</h4>
               <button 
                 onClick={() => setActivePanel('none')}
                 className="panel-close-btn" aria-label="Close panel"
@@ -7912,6 +8024,12 @@ Media encrypted in transit (DTLS-SRTP).`;
             </div>
 
             <div style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {/* Host-only settings (lock, waiting room, chat, screen share,
+                  mute on entry): the toggles call host-only routes, so they
+                  stay hidden from co-hosts and moderators. Global Actions
+                  and Breakout Rooms below are moderation powers, so every
+                  role-holder sees them. */}
+              {isAdmin && (<>
               {/* Lock Meeting Toggle */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
@@ -8071,6 +8189,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </div>
 
               <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+              </>)}
 
               {/* Global Audio/Video Actions */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -8534,7 +8653,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                               <span style={{ fontSize: '0.8rem', color: 'white', fontWeight: 500 }}>{q.text}</span>
                               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Asked by {q.author}</span>
-                              {isAdmin && (
+                              {canModerate && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); markQuestionAnswered(q.id, true); }}
                                   style={{ background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: 0, textAlign: 'left' }}
@@ -8588,7 +8707,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                               <span style={{ fontSize: '0.8rem', color: 'white', fontWeight: 500 }}>✓ {q.text}</span>
                               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Asked by {q.author} · {q.upvotes} upvote{q.upvotes === 1 ? '' : 's'}</span>
                             </div>
-                            {isAdmin && (
+                            {canModerate && (
                               <button
                                 onClick={() => markQuestionAnswered(q.id, false)}
                                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: 0, whiteSpace: 'nowrap' }}
@@ -10187,8 +10306,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Soundboard Reacts</span>
                   </button>
 
-                  {/* Host Controls (if Admin) */}
-                  {isAdmin && (
+                  {/* Host Controls (host) / Moderator Controls (co-host or moderator) */}
+                  {canModerate && (
                     <button 
                       onClick={() => {
                         setActivePanel(activePanel === 'host-settings' ? 'none' : 'host-settings');
@@ -10214,7 +10333,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       }}
                     >
                       <Settings size={16} style={{ flexShrink: 0 }} />
-                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Host Controls</span>
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{isAdmin ? 'Host Controls' : 'Moderator Controls'}</span>
                     </button>
                   )}
 

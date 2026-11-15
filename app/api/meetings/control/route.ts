@@ -7,13 +7,22 @@ import { createClient } from '@supabase/supabase-js';
 // broadcasts — the sig-webrtc channel was passcode-gated and
 // loadDetails sets passcode='' for every non-host. Now the client
 // calls this route, the route verifies the caller is the host (or a
-// co-host, for mutes), and the SERVER broadcasts the event with a
-// `server: true` marker. Receivers ignore these events without the
-// marker, so a participant can no longer mute, kick, or reconfigure
-// anyone from the browser.)
+// co-host / moderator, for moderation actions), and the SERVER
+// broadcasts the event with a `server: true` marker. Receivers ignore
+// these events without the marker, so a participant can no longer
+// mute, kick, or reconfigure anyone from the browser.)
 //
-//   - mute-all, mute-participant, disable-video-all: host or co-host.
-//   - remove-participant, settings-update: host only.
+// Phase 3 (Feature 2) — role split, all verified here:
+//   - mute-all, mute-participant, disable-video-all, remove-participant:
+//     host, co-host, or moderator. (Remove used to be host-only; it is
+//     an in-meeting moderation power, so moderators and co-hosts get
+//     it — BUT a co-host / moderator can never remove the host or
+//     another role-holder; only the host can remove a co-host or a
+//     moderator. See the guard in the remove block below.)
+//   - settings-update: host only. Ending the meeting, locking it, and
+//     transferring the host role stay host-only too (their own routes).
+//   - Admit from the waiting room is NOT here: it is the admit route,
+//     host + co-host only. A moderator cannot admit people.
 //   - remove-participant also deletes the participant row server-side,
 //     so the kicked guest leaves even if the broadcast is missed (the
 //     participants poll has a self-row-gone check as well).
@@ -55,8 +64,8 @@ async function broadcastToRoom(admin: any, meetingId: string, event: string, pay
   }
 }
 
-const MODERATOR_ACTIONS = ['mute-all', 'mute-participant', 'disable-video-all'];
-const HOST_ONLY_ACTIONS = ['remove-participant', 'settings-update'];
+const MODERATOR_ACTIONS = ['mute-all', 'mute-participant', 'disable-video-all', 'remove-participant'];
+const HOST_ONLY_ACTIONS = ['settings-update'];
 
 export async function POST(req: NextRequest) {
   try {
@@ -74,10 +83,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Caller credential: a signed-in user's session token, or a guest
-    // co-host's participant row id (the same dual credential the token
-    // route uses). One of them is required.
+    // co-host's / moderator's participant row id (the same dual
+    // credential the token route uses). One of them is required.
     if (!accessToken && !participantRowId) {
-      return NextResponse.json({ error: 'UNAUTHORIZED', message: 'Only the host or a co-host can control the room.' }, { status: 401 });
+      return NextResponse.json({ error: 'UNAUTHORIZED', message: 'Only the host, a co-host or a moderator can control the room.' }, { status: 401 });
     }
 
     const { data: meeting } = await admin
@@ -92,10 +101,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'MEETING_ENDED', message: 'This meeting has ended.' }, { status: 403 });
     }
 
-    // Authorise: host (by auth user id), or a co-host row. A guest
-    // co-host proves it with their participant row id.
+    // Authorise: host (by auth user id), or a co-host / moderator row.
+    // A guest role-holder proves it with their participant row id.
+    // isModerator covers BOTH granted roles: 'CoHost' and 'Moderator'.
     let isHost = false;
-    let isCoHost = false;
+    let isModerator = false;
     if (accessToken) {
       const { data: { user }, error: userError } = await admin.auth.getUser(accessToken);
       if (userError || !user) {
@@ -108,10 +118,10 @@ export async function POST(req: NextRequest) {
           .select('id')
           .eq('meeting_id', meetingId)
           .eq('user_id', user.id)
-          .eq('role', 'CoHost')
+          .in('role', ['CoHost', 'Moderator'])
           .eq('status', 'Admitted')
           .maybeSingle();
-        isCoHost = !!coRow;
+        isModerator = !!coRow;
       }
     } else {
       const { data: grow } = await admin
@@ -120,10 +130,10 @@ export async function POST(req: NextRequest) {
         .eq('id', participantRowId)
         .eq('meeting_id', meetingId)
         .maybeSingle();
-      if (!grow || grow.status !== 'Admitted' || grow.role !== 'CoHost') {
-        return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host or a co-host can control the room.' }, { status: 403 });
+      if (!grow || grow.status !== 'Admitted' || (grow.role !== 'CoHost' && grow.role !== 'Moderator')) {
+        return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host, a co-host or a moderator can control the room.' }, { status: 403 });
       }
-      isCoHost = true;
+      isModerator = true;
       isHost = isCurrentHost(meeting, grow.user_id);
     }
 
@@ -131,8 +141,8 @@ export async function POST(req: NextRequest) {
     if (hostOnly && !isHost) {
       return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the meeting host can do that.' }, { status: 403 });
     }
-    if (!isHost && !isCoHost) {
-      return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host or a co-host can control the room.' }, { status: 403 });
+    if (!isHost && !isModerator) {
+      return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host, a co-host or a moderator can control the room.' }, { status: 403 });
     }
 
     // Kick: delete the row server-side first, so the guest leaves even
@@ -143,6 +153,30 @@ export async function POST(req: NextRequest) {
       const key = targetRowId || targetUserId;
       if (!key) {
         return NextResponse.json({ error: 'BAD_REQUEST', message: 'Choose a participant to remove.' }, { status: 400 });
+      }
+      // Phase 3 (Feature 2): a co-host / moderator may remove ordinary
+      // participants, but never the host and never another role-holder.
+      // Only the host can remove a co-host or a moderator (and only the
+      // host can remove the host — nobody else). Without this, two
+      // moderators could remove each other, and a moderator could
+      // remove the host who granted them the role.
+      if (!isHost) {
+        const hostUserId = meeting.admin_id || meeting.user_id;
+        if (targetUserId && hostUserId && targetUserId === hostUserId) {
+          return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host can remove the host.' }, { status: 403 });
+        }
+        const { data: targetRow } = await admin
+          .from('meeting_participants')
+          .select('id, user_id, role')
+          .eq('meeting_id', meetingId)
+          .or('id.eq.' + key + ',user_id.eq.' + key)
+          .maybeSingle();
+        if (targetRow && targetRow.user_id && hostUserId && targetRow.user_id === hostUserId) {
+          return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host can remove the host.' }, { status: 403 });
+        }
+        if (targetRow && (targetRow.role === 'CoHost' || targetRow.role === 'Moderator')) {
+          return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host can remove a co-host or a moderator.' }, { status: 403 });
+        }
       }
       // Round 9 (9A): a removed participant keeps their row with status
       // 'Removed' — it is the marker that blocks rejoin (the token route

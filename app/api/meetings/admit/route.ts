@@ -13,6 +13,12 @@ import { tierLimitForPremium, tierForPremium, TIER_LABELS } from '../../../../sr
 // giinmeet_admission_lockdown.sql, which Suku runs in the Supabase
 // SQL Editor. Until that SQL runs, this route is still the only writer
 // the app uses; after it runs, the bypass is closed for good.)
+//
+// Phase 3 (Feature 2) — admission is deliberately host + co-host
+// ONLY. A moderator cannot admit people: the checks below match
+// role 'CoHost' exactly, so a 'Moderator' row gets a 403 here. That
+// is the co-host / moderator split: co-host = moderator powers PLUS
+// admit from the waiting room.
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

@@ -932,16 +932,17 @@ export const giinApi = {
 
   // Room controls, host-verified server-side (Fix Round 7, #1 + #3).
   // POST /api/meetings/control verifies the caller is the host (or a
-  // co-host, for mutes) and broadcasts the event with a server marker -
-  // receivers ignore these events without it. A guest co-host proves
-  // themselves with their participant row id, like the token route.
-  // Throws with the server's honest message on any failure.
+  // co-host / moderator, for moderation actions) and broadcasts the
+  // event with a server marker - receivers ignore these events without
+  // it. A guest role-holder proves themselves with their participant
+  // row id, like the token route. Throws with the server's honest
+  // message on any failure.
   controlMeeting: async (meetingId: string, action: string, opts?: { targetUserId?: string; targetRowId?: string; settings?: Record<string, boolean> }) => {
     const { data: { session } } = await supabase.auth.getSession();
     let participantRowId: string | null = null;
     try { participantRowId = localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { /* storage unavailable */ }
     if (!session?.access_token && !participantRowId) {
-      throw new Error('Only the host or a co-host can control the room.');
+      throw new Error('Only the host, a co-host or a moderator can control the room.');
     }
     // Fix Round 8 (#10): a control call (mute/kick) must never hang
     // forever on a degraded connection — 15 s, then an honest error
@@ -965,6 +966,42 @@ export const giinApi = {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) {
       throw new Error(data.message || data.error || 'Could not control the room.');
+    }
+    return data;
+  },
+
+  // Breakout-room control, host-verified server-side (Phase 3,
+  // Feature 2). POST /api/meetings/breakout verifies the caller is the
+  // host, a co-host or a moderator and the SERVER broadcasts the event
+  // with a server marker on the meeting-events channel — receivers
+  // ignore breakout events without it. Same dual credential and 15 s
+  // timeout as controlMeeting. Throws with the server's honest message.
+  breakoutControl: async (meetingId: string, event: string, payload?: { assignments?: Record<string, number>; durationSeconds?: number; peerKey?: string; roomNumber?: number | null; message?: string }) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    let participantRowId: string | null = null;
+    try { participantRowId = localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { /* storage unavailable */ }
+    if (!session?.access_token && !participantRowId) {
+      throw new Error('Only the host, a co-host or a moderator can manage breakout rooms.');
+    }
+    const controller = new AbortController();
+    const controlTimer = setTimeout(() => controller.abort(), 15000);
+    let res: Response;
+    try {
+      res = await fetch('/api/meetings/breakout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, event, accessToken: session?.access_token || undefined, participantRowId: participantRowId || undefined, ...(payload || {}) }),
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error('The rooms did not answer in time — check your connection and try again.');
+      throw e;
+    } finally {
+      clearTimeout(controlTimer);
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not manage the breakout rooms.');
     }
     return data;
   },
@@ -1482,30 +1519,63 @@ export const giinApi = {
     }
   },
 
-  // Grant or revoke the co-host role on a meeting_participants row.
-  // Only 'CoHost' / 'Participant' are settable here; host transfer stays
-  // in changeMeetingAdmin.
-  setParticipantRole: async (participantRowId: string, role: 'CoHost' | 'Participant') => {
-    const { data, error } = await supabase
-      .from('meeting_participants')
-      .update({ role, updated_at: new Date() })
-      .eq('id', participantRowId);
-    return { data, error };
+  // Grant or revoke a role on a meeting_participants row — host-only,
+  // server-side (Phase 3, Feature 2). POST /api/meetings/role verifies
+  // the caller is the current host and writes with the service-role
+  // key. The old direct client-side update is gone on purpose: the
+  // admission-lockdown SQL kept UPDATE (role) granted to anon, so any
+  // guest could grant THEMSELVES CoHost and then admit/mute through
+  // the server routes. Only 'CoHost' / 'Moderator' / 'Participant'
+  // (revoke) are settable here; host transfer stays in transferHost.
+  // Returns the { data, error } shape the participants panel checks.
+  setParticipantRole: async (meetingId: string, participantRowId: string, role: 'CoHost' | 'Moderator' | 'Participant') => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return { data: null, error: { message: 'Only the signed-in host can change roles.' } };
+    }
+    try {
+      const res = await fetch('/api/meetings/role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, participantRowId, role, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        return { data: null, error: { message: data.message || data.error || 'Could not change the role.' } };
+      }
+      return { data, error: null };
+    } catch (e: any) {
+      return { data: null, error: { message: e?.message || 'Could not change the role.' } };
+    }
   },
 
-  // Co-host rows for a meeting (role 'CoHost', any status).
-  getCoHosts: async (meetingId: string) => {
+  // Role-holder rows for a meeting (role 'CoHost' or 'Moderator', any
+  // status). The room polls this so a granted role lights up on the
+  // holder's own device within seconds, before their next token mint.
+  getMeetingRoles: async (meetingId: string) => {
     try {
       const { data, error } = await supabase
         .from('meeting_participants')
-        .select('id, user_id, name')
+        .select('id, user_id, name, role')
         .eq('meeting_id', meetingId)
-        .eq('role', 'CoHost');
+        .in('role', ['CoHost', 'Moderator']);
       if (error) return [];
       return data || [];
     } catch (e) {
       return [];
     }
+  },
+
+  // Co-host rows for a meeting (role 'CoHost', any status).
+  getCoHosts: async (meetingId: string) => {
+    const rows = await giinApi.getMeetingRoles(meetingId);
+    return (rows || []).filter((r: any) => r.role === 'CoHost');
+  },
+
+  // Moderator rows for a meeting (role 'Moderator', any status).
+  getModerators: async (meetingId: string) => {
+    const rows = await giinApi.getMeetingRoles(meetingId);
+    return (rows || []).filter((r: any) => r.role === 'Moderator');
   },
 
   // Upload a file shared in meeting chat. Uses the 'chat-files' storage

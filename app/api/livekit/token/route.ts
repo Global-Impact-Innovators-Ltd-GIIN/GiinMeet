@@ -85,9 +85,10 @@ export async function POST(req: NextRequest) {
     let displayName = typeof userName === 'string' && userName ? userName : 'Guest';
     // Roles the token route derives (client-supplied roles are never trusted):
     // HOST = meeting creator/admin, COHOST = granted by the host (a
-    // meeting_participants row with role 'CoHost'), GUEST = everyone else.
-    // SPEAKER is never assigned.
-    let derivedRole: 'HOST' | 'COHOST' | 'GUEST' = 'GUEST';
+    // meeting_participants row with role 'CoHost'), MODERATOR = granted
+    // by the host (a meeting_participants row with role 'Moderator'),
+    // GUEST = everyone else. SPEAKER is never assigned.
+    let derivedRole: 'HOST' | 'COHOST' | 'MODERATOR' | 'GUEST' = 'GUEST';
 
     // Fetch the meeting row (admin truth) once.
     const { data: meeting, error: meetingError } = await admin
@@ -205,6 +206,7 @@ export async function POST(req: NextRequest) {
         }
         if (prow.name) displayName = prow.name;
         if (prow.role === 'CoHost') derivedRole = 'COHOST';
+        else if (prow.role === 'Moderator') derivedRole = 'MODERATOR';
       }
     } else {
       // Guest: the admitted participant row id is the credential. It is a
@@ -243,6 +245,7 @@ export async function POST(req: NextRequest) {
       if (grow.name) displayName = grow.name;
       if (isHostUser(grow.user_id)) derivedRole = 'HOST';
       else if (grow.role === 'CoHost') derivedRole = 'COHOST';
+      else if (grow.role === 'Moderator') derivedRole = 'MODERATOR';
     }
 
     // 4. Capacity check — counted against LIVE LiveKit participants, not
@@ -338,12 +341,13 @@ export async function POST(req: NextRequest) {
 
     // 5. Upsert the participant allocation row (derived identity/role/name).
     // NOTE: the participants.role CHECK only allows HOST/SPEAKER/GUEST, so
-    // a co-host is stored as GUEST in this allocation row (the column is
-    // cosmetic — capacity and identity never read it). Co-host-ness lives
-    // on the meeting_participants row and in the token response's `role`.
-    // See giinmeet_cohost_role.sql: after Suku runs it, COHOST is allowed
-    // in both role columns, but this mapping stays as a safe default.
-    const storedRole = derivedRole === 'COHOST' ? 'GUEST' : derivedRole;
+    // a co-host or moderator is stored as GUEST in this allocation row
+    // (the column is cosmetic — capacity and identity never read it).
+    // Role-ness lives on the meeting_participants row and in the token
+    // response's `role`. See giinmeet_cohost_moderator_roles.sql: after
+    // Suku runs it, COHOST / MODERATOR are allowed in both role columns,
+    // but this mapping stays as a safe default.
+    const storedRole = derivedRole === 'HOST' ? 'HOST' : 'GUEST';
     const { error: participantError } = await supabase
       .from('participants')
       .upsert({
