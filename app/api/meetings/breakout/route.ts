@@ -68,7 +68,7 @@ function isValidAssignments(v: any): boolean {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { meetingId, accessToken, participantRowId, event, assignments, durationSeconds, peerKey, roomNumber, message } = body;
+    const { meetingId, accessToken, participantRowId, event, assignments, durationSeconds, peerKey, roomNumber, message, roomsCount } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
     }
@@ -83,6 +83,11 @@ export async function POST(req: NextRequest) {
       }
       if (!Number.isInteger(durationSeconds) || durationSeconds < 60 || durationSeconds > 3600) {
         return NextResponse.json({ error: 'BAD_REQUEST', message: 'Breakout duration must be between 1 and 60 minutes.' }, { status: 400 });
+      }
+      // The room count every client's roster needs (see the start
+      // receiver): optional for older clients, which never sent it.
+      if (roomsCount !== undefined && (!Number.isInteger(roomsCount) || roomsCount < 1 || roomsCount > 5)) {
+        return NextResponse.json({ error: 'BAD_REQUEST', message: 'Breakout room count must be between 1 and 5.' }, { status: 400 });
       }
     }
     if (event === 'move-breakout') {
@@ -180,6 +185,10 @@ export async function POST(req: NextRequest) {
     if (event === 'start-breakout') {
       payload.assignments = assignments;
       payload.durationSeconds = durationSeconds;
+      // Forwarded so every moderator's panel knows how many rooms
+      // exist — not just the client that started them. Falls back to
+      // the highest assigned room when an older client omits it.
+      payload.roomsCount = Number.isInteger(roomsCount) ? roomsCount : Math.max(1, ...(Object.values(assignments) as number[]));
     } else if (event === 'move-breakout') {
       payload.peerKey = peerKey;
       payload.roomNumber = roomNumber === undefined ? null : roomNumber;

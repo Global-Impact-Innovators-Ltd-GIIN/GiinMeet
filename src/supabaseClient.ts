@@ -1048,7 +1048,7 @@ export const giinApi = {
   // with a server marker on the meeting-events channel — receivers
   // ignore breakout events without it. Same dual credential and 15 s
   // timeout as controlMeeting. Throws with the server's honest message.
-  breakoutControl: async (meetingId: string, event: string, payload?: { assignments?: Record<string, number>; durationSeconds?: number; peerKey?: string; roomNumber?: number | null; message?: string }) => {
+  breakoutControl: async (meetingId: string, event: string, payload?: { assignments?: Record<string, number>; durationSeconds?: number; peerKey?: string; roomNumber?: number | null; message?: string; roomsCount?: number }) => {
     const { data: { session } } = await supabase.auth.getSession();
     let participantRowId: string | null = null;
     try { participantRowId = localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { /* storage unavailable */ }

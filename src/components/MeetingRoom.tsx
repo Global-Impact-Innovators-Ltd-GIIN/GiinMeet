@@ -881,15 +881,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const meetingRoomRef = useRef<HTMLDivElement | null>(null);
 
   const [breakoutRoom, setBreakoutRoom] = useState<number | null>(null);
+  // Ref mirror: the WebRTC signalling closures (presence handler) were
+  // created before the last room change, so the P2P-mesh guard must read
+  // the live value from here, not the frozen state.
+  const breakoutRoomRef = useRef<number | null>(null);
+  useEffect(() => { breakoutRoomRef.current = breakoutRoom; }, [breakoutRoom]);
   const [breakoutTimeRemaining, setBreakoutTimeRemaining] = useState<number | null>(null);
   const [breakoutRoomsCount, setBreakoutRoomsCount] = useState(2);
   const [breakoutDurationMinutes, setBreakoutDurationMinutes] = useState(5);
 
   // Phase 3 (Feature 1) — host room management. Assignments are the
-  // host's live record of who is in which room (round-robin at start,
-  // then updated by every host move). They are NOT persisted anywhere:
-  // they live in host state and travel to participants over the
-  // meeting-events channel, so this feature needs no database change.
+  // live record of who is in which room (round-robin at start, then
+  // updated by every host move, and synced to every moderator's panel
+  // by the start / move receivers on the meeting-events channel). They
+  // are NOT persisted anywhere: they live in client state and travel
+  // over the meeting-events channel, so this feature needs no database
+  // change. The roster itself is the admitted-participants list
+  // (Supabase, polled) plus these assignments — never LiveKit
+  // presence, which only ever sees the room you are in.
   const [breakoutAssignments, setBreakoutAssignments] = useState<{ [peerKey: string]: number }>({});
   // Host broadcast draft + the last broadcast banner every client shows.
   const [breakoutBroadcastDraft, setBreakoutBroadcastDraft] = useState('');
@@ -1393,9 +1402,23 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
         // Server-side authorisation: send the signed-in user's session token
         // (verified server-side) plus the admitted participant row id.
-        const data = await fetchLiveKitToken(videoRoom.slug);
+        // LiveKit-native breakouts: a breakout room is its own LiveKit
+        // room, `<main-slug>-breakout-<n>`, joined with a token minted for
+        // that room — the token route verifies admission against the main
+        // meeting and mints for the breakout slug. This effect re-runs on
+        // the breakoutRoom change, so entering a breakout disconnects the
+        // main room (cleanup below) and joins the breakout room, and
+        // returning rejoins the main room. Only one LiveKit room is ever
+        // held at a time, so voices and video from other rooms never leak
+        // in — and every room's media goes through the LiveKit server.
+        const targetSlug = breakoutRoom !== null
+          ? `${videoRoom.slug}-breakout-${breakoutRoom}`
+          : videoRoom.slug;
+        const data = await fetchLiveKitToken(targetSlug);
         if (!active) return;
-        livekitRoomSlugRef.current = videoRoom.slug;
+        livekitRoomSlugRef.current = targetSlug;
+        // The room id stays the MAIN room's id: leaving still frees the
+        // main-room capacity slot, and breakout tokens allocate nobody.
         livekitRoomIdRef.current = videoRoom.id;
         if (data.error === 'MAX_CAPACITY_REACHED') {
           // Honest stop, NOT a silent P2P downgrade: a full room must not
@@ -1692,6 +1715,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (!active) return;
         console.warn('[LiveKit Engine] Could not connect to the video server:', err);
         if (String(err?.message || '').includes('Client initiated disconnect')) return;
+        if (breakoutRoom !== null) {
+          // Breakout rooms are LiveKit-native: there is no P2P mesh to
+          // fall back to inside a breakout room, and a silent downgrade
+          // would bring back the quality drop this redesign removed.
+          // Say so honestly instead — the notice card offers "Retry
+          // video server", and the host can end the breakouts to bring
+          // everyone back to the main room.
+          setConnectionNotice(`Could not join Breakout Room ${breakoutRoom} on the video server. Check your connection, then press "Retry video server" — or ask the host to end the breakout rooms to return to the main room.`);
+          return;
+        }
         setEngineType('P2P');
       }
     };
@@ -1724,12 +1757,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // object — the session restore replaces the object identity after
   // mount, and the old dependency tore the LiveKit room down and
   // reconnected it on every reload.
-  }, [isMediaInitialized, engineType, meetingId, myKey, currentUser?.id, isAdmin, livekitReconnectNonce]);
+  // `breakoutRoom` IS a dependency: switching rooms is a clean
+  // disconnect from one LiveKit room and a reconnect to the other.
+  }, [isMediaInitialized, engineType, meetingId, myKey, currentUser?.id, isAdmin, livekitReconnectNonce, breakoutRoom]);
 
   // Fix Round 6: when the engine becomes LiveKit, the P2P mesh is
   // redundant — tear it down (see teardownP2PMesh). The mesh rebuilds
   // itself from presence broadcasts if the engine ever falls back to
-  // P2P (breakouts / LiveKit failure), so this cannot strand a call.
+  // P2P (LiveKit failure in the main room only — never inside a
+  // breakout room), so this cannot strand a call.
   useEffect(() => {
     if (engineType !== 'LIVEKIT') return;
     teardownP2PMesh();
@@ -2602,17 +2638,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Breakout Rooms Functions
-  // Move into / out of a breakout room. The peer-to-peer mesh splits by
-  // signalling channel, but the LiveKit room does not split on its own —
-  // so entering a breakout disconnects LiveKit (otherwise voices and video
-  // from the other breakout rooms would keep leaking in), and returning to
-  // the main room reconnects it.
+  // Move into / out of a breakout room. Breakout rooms are LiveKit-native:
+  // each one is its own LiveKit room (`<main-slug>-breakout-<n>`), so
+  // entering a breakout leaves the main LiveKit room and joins the
+  // breakout's LiveKit room with a fresh token minted for it — the LiveKit
+  // connect effect below re-runs on the breakoutRoom change and does the
+  // switch. The engine NEVER flips to P2P here: breakout media is routed
+  // through the LiveKit server exactly like the main meeting, so quality
+  // holds with several people in a room. If the main room had fallen back
+  // to P2P (LiveKit unreachable), entering a breakout retries LiveKit
+  // immediately instead of waiting for the once-a-minute P2P recovery —
+  // a breakout has no P2P mesh to fall back to.
   const enterBreakoutRoom = (roomNumber: number | null) => {
     setBreakoutRoom(roomNumber);
-    if (roomNumber !== null) {
-      setEngineType('P2P');
-    } else {
+    if (roomNumber !== null && engineTypeRef.current === 'P2P') {
       setEngineType('LIVEKIT');
+      setLivekitReconnectNonce(n => n + 1);
     }
   };
 
@@ -2636,6 +2677,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const handleStartBreakouts = async (roomsCount: number, durationMinutes: number) => {
     if (!canModerate) return;
+    // The room-count input is free text: clamp it so the assignments and
+    // the count every client receives always agree (rooms 1-5).
+    roomsCount = Math.min(5, Math.max(1, roomsCount || 2));
     const assignments: { [peerKey: string]: number } = {};
     let roomIdx = 0;
     participants.forEach(p => {
@@ -2653,7 +2697,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       await sendBreakoutControl('start-breakout', {
         assignments,
-        durationSeconds: durationMinutes * 60
+        durationSeconds: durationMinutes * 60,
+        roomsCount
       });
     } catch (err: any) {
       triggerToast(err?.message || 'Could not start the breakout rooms — please try again.');
@@ -2661,9 +2706,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     breakoutActiveRef.current = true;
     setBreakoutAssignments(assignments);
+    setBreakoutRoomsCount(roomsCount);
     setBreakoutBroadcast(null);
     setBreakoutTimeRemaining(durationMinutes * 60);
-    alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes. Breakout rooms run peer-to-peer, not on the video server, so video quality may drop — this is a labelled fallback, not the LiveKit engine.`);
+    alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes. Breakout rooms run on the video server, like the main room.`);
   };
 
   const handleEndBreakouts = async () => {
@@ -2883,6 +2929,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const data = payload.payload;
         if (!data || data.server !== true || !data.assignments) return;
         breakoutActiveRef.current = true;
+        // The roster is shared, not host-only: every moderator's "who is
+        // where" panel follows these assignments, and the room count the
+        // server forwarded tells every panel how many rooms exist (the
+        // starter's form value is local to their client otherwise).
+        setBreakoutAssignments(data.assignments);
+        if (typeof data.roomsCount === 'number' && data.roomsCount >= 1 && data.roomsCount <= 5) {
+          setBreakoutRoomsCount(data.roomsCount);
+        }
         const myAssignment = data.assignments[myKey];
         if (myAssignment) {
           enterBreakoutRoom(myAssignment);
@@ -2905,8 +2959,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'move-breakout' }, (payload: any) => {
         const data = payload.payload;
-        if (!data || data.server !== true || data.peerKey !== myKey) return;
-        const target = typeof data.roomNumber === 'number' ? data.roomNumber : null;
+        if (!data || data.server !== true || typeof data.peerKey !== 'string') return;
+        // The roster is shared: every moderator's "who is where" follows
+        // the move, not just the moved participant's own client.
+        const movedTarget = typeof data.roomNumber === 'number' ? data.roomNumber : null;
+        setBreakoutAssignments(prev => {
+          const next = { ...prev };
+          if (movedTarget === null) delete next[data.peerKey];
+          else next[data.peerKey] = movedTarget;
+          return next;
+        });
+        if (data.peerKey !== myKey) return;
+        const target = movedTarget;
         // Breakouts are still running globally even when this move sends us
         // back to the main room, so the end-breakout event must still reach us.
         breakoutActiveRef.current = true;
@@ -3403,6 +3467,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // the sender's engine so the answerer can tell. Answers and
       // candidates need no gate: they only arrive for a PC this side
       // already created.
+      // LiveKit-native breakouts: never answer a mesh offer inside a
+      // breakout room — not even from a peer on an older build (or one
+      // whose LiveKit failed) offering peer-to-peer. Breakout media
+      // goes through the LiveKit server only.
+      if (breakoutRoomRef.current !== null && type === 'offer') return;
       if (data.engine) peerEnginesRef.current[senderKey] = data.engine;
       if (type === 'offer' && engineTypeRef.current === 'LIVEKIT' && data.engine !== 'P2P') return;
 
@@ -3573,12 +3642,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             existingPc.connectionState === 'closed';
 
           // Fix Round 6: build the mesh only when it is actually the
-          // transport — our engine is P2P (fallback / breakout), or the
+          // transport — our engine is P2P (main-room fallback), or the
           // peer's is (their LiveKit failed, so the SFU cannot carry
           // them). Two LiveKit peers never mesh: their voices already
           // meet on the server, and a parallel mesh only doubles the
           // uplink and the jitter.
-          if (isInitiator && needsConnection && (engineTypeRef.current === 'P2P' || data.engine === 'P2P')) {
+          // LiveKit-native breakouts: NEVER mesh inside a breakout room,
+          // in either direction. Breakout media goes through the LiveKit
+          // server; a mesh here would silently bring back peer-to-peer
+          // breakout video (and the quality drop with several people).
+          // A peer whose LiveKit failed inside a breakout stays without
+          // media until their LiveKit retry lands — the honest failure,
+          // not a quiet P2P downgrade.
+          if (isInitiator && needsConnection && breakoutRoomRef.current === null && (engineTypeRef.current === 'P2P' || data.engine === 'P2P')) {
             initPeerConnection(senderKey);
           }
         }
@@ -8220,8 +8296,8 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Breakout Rooms Management */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Breakout Rooms</span>
-                <span style={{ fontSize: '0.75rem', color: '#FCA5A5', lineHeight: 1.45 }}>
-                  Breakout rooms run peer-to-peer, not on the video server — video quality may drop with several people. LiveKit-native breakouts need breakout-scoped presence (a bigger redesign) and are not in this release.
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                  Breakout rooms run on the video server, like the main room — each room is its own LiveKit room, so video quality holds with several people in a room.
                 </span>
                 {breakoutTimeRemaining === null ? (
                   <>
@@ -8313,12 +8389,17 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </div>
 
                     {/* Phase 3 (Feature 1) — who is in which room, with
-                        live moves. The roster is the host's assignment
-                        record: round-robin at start, updated by every
-                        move below. Anyone who joined after the start
-                        shows as Main until the host moves them in.
-                        Moves and broadcasts travel on the meeting-events
-                        channel, so they reach every room. */}
+                        live moves. The roster is the shared assignment
+                        record: round-robin at start, updated on every
+                        move for every moderator's panel. Anyone who
+                        joined after the start shows as Main until the
+                        host moves them in. Moves and broadcasts travel
+                        on the meeting-events channel, so they reach
+                        every room. The video in each room runs on the
+                        LiveKit server — the roster itself comes from
+                        the admitted-participants list plus these
+                        assignments, not from LiveKit presence, so it
+                        stays correct across rooms. */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem', textAlign: 'left' }}>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Who is where:</span>
                       {participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').length === 0 ? (
@@ -10868,7 +10949,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               &times;
             </button>
           </div>
-          {engineType === 'P2P' && (
+          {(engineType === 'P2P' || breakoutRoom !== null) && (
             <button
               onClick={handleRetryLiveKit}
               style={{ marginTop: '1rem', backgroundColor: 'var(--color-accent)', color: 'black', border: 'none', borderRadius: '6px', padding: '0.5rem 1rem', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' }}

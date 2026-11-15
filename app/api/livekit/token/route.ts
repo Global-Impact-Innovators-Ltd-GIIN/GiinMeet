@@ -49,12 +49,27 @@ export async function POST(req: NextRequest) {
       }, { status: 500 });
     }
 
-    // 1. Fetch the active target room
+    // 1. Fetch the active target room.
+    // LiveKit-native breakouts: a breakout room is its own LiveKit room,
+    // `<main-slug>-breakout-<n>`, and there is NO `rooms` row for it.
+    // The main room's row stays the authority for admission, meeting and
+    // tier, so a `-breakout-<n>` suffix on the requested slug is stripped
+    // for the lookup and re-attached for the token grant and the capacity
+    // count below. A roomId lookup is only used for the main room.
+    let breakoutRoomNumber: number | null = null;
+    let lookupSlug = roomSlug as string | undefined;
+    if (typeof roomSlug === 'string') {
+      const breakoutMatch = roomSlug.match(/-breakout-([1-5])$/);
+      if (breakoutMatch) {
+        breakoutRoomNumber = parseInt(breakoutMatch[1], 10);
+        lookupSlug = roomSlug.slice(0, breakoutMatch.index);
+      }
+    }
     let roomQuery = supabase.from('rooms').select('*').eq('is_active', true);
-    if (roomId) {
+    if (roomId && breakoutRoomNumber === null) {
       roomQuery = roomQuery.eq('id', roomId);
     } else {
-      roomQuery = roomQuery.eq('slug', roomSlug);
+      roomQuery = roomQuery.eq('slug', lookupSlug);
     }
 
     const { data: room, error: roomError } = await roomQuery.maybeSingle();
@@ -286,6 +301,14 @@ export async function POST(req: NextRequest) {
       else if (grow.role === 'Moderator') derivedRole = 'MODERATOR';
     }
 
+    // The LiveKit room this token actually opens: the main room, or the
+    // breakout room when the request carried a `-breakout-<n>` suffix.
+    // Admission, meeting and tier above were all verified against the
+    // main room; the breakout room inherits them.
+    const targetLivekitSlug = breakoutRoomNumber !== null
+      ? `${room.slug}-breakout-${breakoutRoomNumber}`
+      : room.slug;
+
     // 4. Capacity check — counted against LIVE LiveKit participants, not
     // stale database rows. The `participants` table never flipped rows to
     // LEFT, so a few drop/rejoins could fill all 8 slots with ghosts and
@@ -326,7 +349,7 @@ export async function POST(req: NextRequest) {
     if (lkUrl && lkKey && lkSecret) {
       try {
         const roomService = new RoomServiceClient(lkUrl, lkKey, lkSecret);
-        const liveParticipants = await roomService.listParticipants(room.slug);
+        const liveParticipants = await roomService.listParticipants(targetLivekitSlug);
         liveIdentities = liveParticipants.map((p: any) => p.identity);
         liveCount = liveParticipants.length;
       } catch (e) {
@@ -378,30 +401,38 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Upsert the participant allocation row (derived identity/role/name).
-    // NOTE: the participants.role CHECK only allows HOST/SPEAKER/GUEST, so
-    // a co-host or moderator is stored as GUEST in this allocation row
-    // (the column is cosmetic — capacity and identity never read it).
-    // Role-ness lives on the meeting_participants row and in the token
-    // response's `role`. See giinmeet_cohost_moderator_roles.sql: after
-    // Suku runs it, COHOST / MODERATOR are allowed in both role columns,
-    // but this mapping stays as a safe default.
-    const storedRole = derivedRole === 'HOST' ? 'HOST' : 'GUEST';
-    const { error: participantError } = await supabase
-      .from('participants')
-      .upsert({
-        room_id: room.id,
-        user_id: identity,
-        user_name: displayName,
-        role: storedRole,
-        status: 'JOINED',
-      }, { onConflict: 'room_id,user_id' });
+    // Breakout tokens skip this: there is no `rooms` row for a breakout
+    // room, and the caller is already allocated in the main room by
+    // their main-room token. Upserting here would also double-count
+    // them in the main room if the capacity check ever fell back to the
+    // database count. The breakout room's own headcount is LiveKit's
+    // listParticipants above, not this table.
+    if (breakoutRoomNumber === null) {
+      // NOTE: the participants.role CHECK only allows HOST/SPEAKER/GUEST, so
+      // a co-host or moderator is stored as GUEST in this allocation row
+      // (the column is cosmetic — capacity and identity never read it).
+      // Role-ness lives on the meeting_participants row and in the token
+      // response's `role`. See giinmeet_cohost_moderator_roles.sql: after
+      // Suku runs it, COHOST / MODERATOR are allowed in both role columns,
+      // but this mapping stays as a safe default.
+      const storedRole = derivedRole === 'HOST' ? 'HOST' : 'GUEST';
+      const { error: participantError } = await supabase
+        .from('participants')
+        .upsert({
+          room_id: room.id,
+          user_id: identity,
+          user_name: displayName,
+          role: storedRole,
+          status: 'JOINED',
+        }, { onConflict: 'room_id,user_id' });
 
-    if (participantError) {
-      console.error('[Token API] Failed to allocate participant:', participantError);
-      return NextResponse.json({
-        error: 'DB_ERROR',
-        message: 'Could not register participant session.',
-      }, { status: 500 });
+      if (participantError) {
+        console.error('[Token API] Failed to allocate participant:', participantError);
+        return NextResponse.json({
+          error: 'DB_ERROR',
+          message: 'Could not register participant session.',
+        }, { status: 500 });
+      }
     }
 
     // 6. Generate the LiveKit Access Token. The server credentials are
@@ -435,7 +466,7 @@ export async function POST(req: NextRequest) {
     });
 
     at.addGrant({
-      room: room.slug,
+      room: targetLivekitSlug,
       roomJoin: true,
       canPublish: true,
       canSubscribe: true,
@@ -446,13 +477,13 @@ export async function POST(req: NextRequest) {
 
     // One info line per mint (no secrets): lets us confirm in Vercel logs
     // that a real mint happened and which room/role it was for.
-    console.log('[Token API] Minted token', { room: room.slug, role: derivedRole, identityKind: accessToken ? 'user' : 'guest' });
+    console.log('[Token API] Minted token', { room: targetLivekitSlug, breakoutRoom: breakoutRoomNumber, role: derivedRole, identityKind: accessToken ? 'user' : 'guest' });
 
     return NextResponse.json({
       token,
       expiresAt,
       engine: room.current_engine || 'LIVEKIT',
-      roomSlug: room.slug,
+      roomSlug: targetLivekitSlug,
       livekitUrl,
       role: derivedRole,
       maxCapacity,
