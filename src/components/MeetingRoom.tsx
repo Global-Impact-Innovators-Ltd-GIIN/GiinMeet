@@ -378,6 +378,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [passcode, setPasscode] = useState<string>(() => generateMeetingPasscode());
   const [isMediaInitialized, setIsMediaInitialized] = useState(false);
   const [waitingList, setWaitingList] = useState<any[]>([]);
+  // Auto-admit throttle: a waiting guest re-announces every 2s until
+  // their waiting room unmounts, so without this the same guest is
+  // auto-admitted (server call + decision broadcast) on every
+  // announcement. Keyed by admit key (row id, else signalling key).
+  const autoAdmittedAtRef = useRef<Record<string, number>>({});
   const [initialNotes, setInitialNotes] = useState<string>('');
   const [localAdminId, setLocalAdminId] = useState<string>('');
   // Email-fallback host match (see isMeetingHostForUser): set when the
@@ -3685,22 +3690,35 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             JSON.parse(localStorage.getItem(`admitted_keys_${meetingId}`) || '[]').includes(data.senderKey);
 
           if (!isWaitingRoomEnabled || isPreviouslyAdmitted) {
-            handleAdmitParticipant(admitKey, 'Admitted');
+            // The guest re-announces every 2s until their waiting room
+            // unmounts, so without this guard the same guest is
+            // auto-admitted (server call + decision broadcast) on every
+            // announcement. Admit once per guest per 10s.
+            const now = Date.now();
+            if (now - (autoAdmittedAtRef.current[admitKey] || 0) > 10000) {
+              autoAdmittedAtRef.current[admitKey] = now;
+              handleAdmitParticipant(admitKey, 'Admitted');
+            }
             return;
           }
 
           setWaitingList(prev => {
-            // One entry per guest: a guest first announces with their
-            // signalling key, then with their database row id — keep the
-            // row id on the same entry so Admit updates the real row.
-            const existing = prev.find(p => p.id === data.senderKey || (data.participantRowId && p.participantRowId === data.participantRowId));
+            // ONE entry per guest, keyed by the database row id once it
+            // is known (else the signalling key). The 5s database poll
+            // returns rows keyed by row id, so an entry keyed by the
+            // signalling key would never match it and the same guest
+            // showed twice — once per key. Normalising the id to the
+            // row id here (and in the poll merge below) keeps both
+            // writers on the same identity.
+            const rowId = data.participantRowId;
+            const existing = prev.find(p => p.id === data.senderKey || (rowId && (p.participantRowId === rowId || p.id === rowId)));
             if (existing) {
-              if (data.participantRowId && existing.participantRowId !== data.participantRowId) {
-                return prev.map(p => p.id === existing.id ? { ...p, participantRowId: data.participantRowId } : p);
+              if (rowId && existing.id !== rowId) {
+                return prev.map(p => p === existing ? { ...p, id: rowId, participantRowId: rowId } : p);
               }
               return prev;
             }
-            return [...prev, { id: data.senderKey, name: data.name, participantRowId: data.participantRowId || undefined }];
+            return [...prev, { id: rowId || data.senderKey, name: data.name, participantRowId: rowId || undefined }];
           });
         }
       })
@@ -4308,7 +4326,26 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const checkWaitroom = async () => {
       try {
         const list = await giinApi.getWaitingParticipants(meetingId);
-        setWaitingList(list);
+        // Merge, don't replace: a guest who announced over broadcast
+        // but whose database row is not visible yet would otherwise
+        // flicker out of the list until their next 2s announcement.
+        // Identity is the database row id once known, else the
+        // signalling key — the same rule as the broadcast handler —
+        // so one guest is never two entries. A stale broadcast copy
+        // (signalling key id, row id attached) is dropped outright
+        // once the database row for that guest is in the list.
+        setWaitingList(prev => {
+          const byKey = new Map<string, any>();
+          const keyOf = (e: any) => e.participantRowId || e.id;
+          prev.forEach(e => byKey.set(keyOf(e), e));
+          list.forEach((row: any) => {
+            const entry = { ...row, participantRowId: row.id };
+            byKey.set(keyOf(entry), entry);
+          });
+          const merged = [...byKey.values()];
+          const rowIds = new Set(merged.map(e => e.participantRowId).filter(Boolean));
+          return merged.filter(e => !e.participantRowId || e.id === e.participantRowId || !rowIds.has(e.participantRowId));
+        });
       } catch (err) {
         console.error(err);
       }
@@ -4371,7 +4408,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         });
       }
 
-      setWaitingList(prev => prev.filter(p => p.id !== participantId));
+      // Match on both keys: a broadcast entry is keyed by the signalling
+      // key until its row id is known, so filtering on the row id alone
+      // left the admitted guest sitting in the waiting list.
+      setWaitingList(prev => prev.filter(p => p.id !== participantId && p.participantRowId !== participantId));
     } catch (err) {
       console.error(err);
     }
@@ -5402,6 +5442,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // Round 3: leave — soft falling tone, someone left.
         tone({ wave: 'sine', freq: 440, at: 0, dur: 0.4, peak: 0.06 });
         tone({ wave: 'sine', freq: 329.63, at: 0.12, dur: 0.4, peak: 0.05 });
+      } else if (type === 'admit-request') {
+        // Someone is waiting to be admitted — a "knock on the door"
+        // followed by a bright rising chime. The two low knocks make
+        // it unmistakable on first hearing: nothing else in the app
+        // knocks. Distinct from hand-question (E5->A5 sine),
+        // hand-idea (C-E-G arpeggio), join (D5->A5) and leave
+        // (falling A4->E4) — different rhythm, timbre and contour.
+        tone({ wave: 'triangle', freq: 392, at: 0, dur: 0.12, peak: 0.11 });
+        tone({ wave: 'triangle', freq: 392, at: 0.16, dur: 0.12, peak: 0.11 });
+        tone({ wave: 'sine', freq: 987.77, at: 0.34, dur: 0.3, peak: 0.11 });
+        tone({ wave: 'sine', freq: 1318.5, at: 0.48, dur: 0.55, peak: 0.11 });
+        tone({ wave: 'triangle', freq: 2637, at: 0.48, dur: 0.3, peak: 0.02 });
       } else {
         // Neutral default ("Just Raise Hand" and anything unknown):
         // a single soft chime.
@@ -5460,6 +5512,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
+
+  // Waiting-room request chime: one unique sound per newly-waiting
+  // guest. The guest re-announces every 2s and the list is re-polled
+  // every 5s, so the chime is keyed on guest identity (row id, else
+  // signalling key) — never on the list changing. Guests already
+  // waiting when the host joins chime once on first sight; a guest
+  // who leaves and returns chimes again (their keys are forgotten
+  // once they leave the list). playSynthesizedSound already queues
+  // the sound when the AudioContext is suspended (iOS) and flushes
+  // it on the next gesture, so the chime waits for a tap instead of
+  // being silently dropped.
+  const waitingChimedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const seen = waitingChimedRef.current;
+    const currentKeys = new Set<string>();
+    let isNewGuest = false;
+    for (const w of waitingList) {
+      const keys = [w.participantRowId, w.id].filter(Boolean) as string[];
+      keys.forEach(k => currentKeys.add(k));
+      if (keys.length > 0 && !keys.some(k => seen.has(k))) {
+        isNewGuest = true;
+      }
+      keys.forEach(k => seen.add(k));
+    }
+    // Forget guests who left, so a return chimes again.
+    [...seen].forEach(k => { if (!currentKeys.has(k)) seen.delete(k); });
+    if (isNewGuest) playSynthesizedSound('admit-request');
+  }, [waitingList]);
 
   const handleCreatePoll = () => {
     if (!newPollQuestion.trim()) return;
@@ -6771,6 +6851,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           /* Professional Fintech boardroom details dashboard when alone in a meeting (and not sharing your screen -- sharing uses the main screen-share layout below) */
           <div style={{
             flex: 1,
+            minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -7644,6 +7725,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
+            minHeight: 0,
             flexDirection: 'column',
             animation: 'slide-in 0.2s ease',
             zIndex: 5
@@ -7659,7 +7741,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             </div>
             
             {/* Messages Feed */}
-            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {messages.map((m, idx) => (
                 <div key={idx} style={{
                   alignSelf: m.self ? 'flex-end' : 'flex-start',
@@ -7753,6 +7835,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
+            minHeight: 0,
             flexDirection: 'column',
             animation: 'slide-in 0.2s ease',
             zIndex: 5
@@ -7767,7 +7850,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {/* Speaker Queue (Handraises) */}
               {handRaises.length > 0 && (
                 <div style={{
@@ -8471,6 +8554,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
+            minHeight: 0,
             flexDirection: 'column',
             animation: 'slide-in 0.2s ease',
             zIndex: 5
@@ -8511,7 +8595,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* Content */}
             {!isQAActive ? (
-              <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 {/* Host Poll Creator */}
                 {isAdmin && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
@@ -8677,7 +8761,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 </div>
               </div>
             ) : (
-              <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>SUBMIT A QUESTION</span>
                 <form 
                   onSubmit={(e) => {
@@ -8813,6 +8897,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
+            minHeight: 0,
             flexDirection: 'column',
             animation: 'slide-in 0.2s ease',
             zIndex: 5
@@ -8830,7 +8915,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               
               {/* AI Studio Voice Section */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -8946,6 +9031,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
+            minHeight: 0,
             flexDirection: 'column',
             animation: 'slide-in 0.2s ease',
             zIndex: 5
@@ -8997,7 +9083,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {!isSummaryTabActive ? (
                 <>
                   <div className="flex-between" style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
@@ -9058,7 +9144,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Analyzing transcript audio...</span>
                     </div>
                   ) : aiSummary ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto' }}>
+                    <div style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', gap: '1rem', overflowY: 'auto' }}>
                       <div style={{
                         backgroundColor: 'rgba(255,255,255,0.02)',
                         border: '1px solid var(--border-color)',
@@ -9133,6 +9219,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
+            minHeight: 0,
             flexDirection: 'column',
             animation: 'slide-in 0.2s ease',
             zIndex: 5
@@ -9147,7 +9234,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRIGGER SOUND EFFECTS</span>
               <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sounds play for everyone in the room, in real time. Muting only silences them for you.</span>
               <button
@@ -9173,7 +9260,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                   { id: 'applause', label: '👏 Applause' },
                   { id: 'bell', label: '🔔 Bell Chime' },
                   { id: 'horn', label: '🎉 Party Horn' },
-                  { id: 'alert', label: '⚠️ Warning' }
+                  { id: 'alert', label: '⚠️ Warning' },
+                  // The waiting-room knock: tap to hear the exact sound
+                  // that plays when a guest asks to be admitted.
+                  { id: 'admit-request', label: '🚪 Admit Knock' }
                 ].map(s => (
                   <button 
                     key={s.id}
@@ -9200,6 +9290,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
+            minHeight: 0,
             flexDirection: 'column',
             animation: 'slide-in 0.2s ease',
             zIndex: 5
@@ -9214,7 +9305,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>MEETING TITLE</span>
                 <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'white' }}>{meetingTitle}</span>
@@ -9299,6 +9390,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             borderLeft: '1px solid #1E293B',
             backgroundColor: 'rgba(11, 15, 25, 0.95)',
             display: 'flex',
+            minHeight: 0,
             flexDirection: 'column',
             animation: 'slide-in 0.2s ease',
             zIndex: 5
@@ -9354,7 +9446,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 onClose={() => setActivePanel('none')}
               />
             ) : (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '0.75rem', overflowY: 'auto' }}>
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '0.75rem', overflowY: 'auto' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <ListChecks size={16} color="var(--color-accent)" />
                   <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>MEETING AGENDA</span>

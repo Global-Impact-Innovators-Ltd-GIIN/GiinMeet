@@ -1569,7 +1569,10 @@ export const giinApi = {
         console.warn('[Supabase Client] Error getting waiting list:', error.message);
         return [];
       }
-      return data || [];
+      // Expose the row id as participantRowId too: the meeting room
+      // keys waiting guests by row id once known, and the broadcast
+      // handler can only match a database row if the row carries it.
+      return (data || []).map((row: any) => ({ ...row, participantRowId: row.id }));
     } catch (err: any) {
       console.warn('[Supabase Client] Error getting waiting list:', err.message);
       return [];
