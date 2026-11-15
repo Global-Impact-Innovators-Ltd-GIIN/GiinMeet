@@ -123,6 +123,47 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host or a co-host can admit people.' }, { status: 403 });
     }
 
+    // Phase 3 (Feature 3) — team meetings: only a team member may be
+    // admitted. A guest row has no user_id, so guests are refused too.
+    // Best-effort read — the team_id column only exists once
+    // giinmeet_phase3_teams.sql has been run, so a missing column
+    // means "not a team meeting", never a failure.
+    if (status === 'Admitted') {
+      let meetingTeamId: string | null = null;
+      try {
+        const { data: teamRow } = await admin
+          .from('meetings')
+          .select('team_id')
+          .eq('id', meetingId)
+          .maybeSingle();
+        meetingTeamId = (teamRow as any)?.team_id || null;
+      } catch (e) { /* team_id column not set up yet: not a team meeting */ }
+      if (meetingTeamId) {
+        const { data: prow } = await admin
+          .from('meeting_participants')
+          .select('user_id')
+          .eq('id', participantId)
+          .eq('meeting_id', meetingId)
+          .maybeSingle();
+        let isMember = false;
+        if (prow?.user_id) {
+          const { data: memberRow } = await admin
+            .from('team_members')
+            .select('id')
+            .eq('team_id', meetingTeamId)
+            .eq('user_id', prow.user_id)
+            .maybeSingle();
+          isMember = !!memberRow;
+        }
+        if (!isMember) {
+          return NextResponse.json({
+            error: 'TEAM_MEMBERS_ONLY',
+            message: 'Only team members can join this meeting — this person is not a member of the team.',
+          }, { status: 403 });
+        }
+      }
+    }
+
     // Round 3: participant limit by host tier, checked at admit time.
     // The token route is the exact final gate (live LiveKit count);
     // this is the early, human-readable one, so the host is not

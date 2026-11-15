@@ -23,6 +23,11 @@ interface Meeting {
   recurrence_rule?: string | null;
   recurrence_count?: number | null;
   personal_room_slug?: string | null;
+  // Phase 3 (Feature 3) — team workspaces: a meeting scheduled inside
+  // a team carries its team_id (and the team name for the badge).
+  // Both are optional: personal meetings have neither.
+  team_id?: string | null;
+  team_name?: string | null;
 }
 
 interface DashboardProps {
@@ -30,7 +35,7 @@ interface DashboardProps {
   onNavigate: (view: string) => void;
   onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean, passcode?: string | null) => void;
   meetingHistory: Meeting[];
-  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number } }) => Promise<Meeting | null>;
+  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number }; teamId?: string; teamName?: string }) => Promise<Meeting | null>;
   onCancelMeeting?: (meetingId: string, title: string) => void;
   // Phase 1 — cancel every upcoming meeting in a recurring series.
   onCancelSeries?: (seriesId: string, title: string) => void;
@@ -678,6 +683,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                   <div>
                     <h4 style={{ fontSize: '0.95rem', fontWeight: 600 }}>{meeting.title}</h4>
+                    {meeting.team_id && (
+                      <p style={{ fontSize: '0.75rem', color: 'var(--color-accent)', margin: '0.15rem 0 0', fontWeight: 600 }}>
+                        👥 Team{meeting.team_name ? `: ${meeting.team_name}` : ''}
+                      </p>
+                    )}
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                       {(() => {
                         try {

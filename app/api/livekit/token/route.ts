@@ -113,6 +113,21 @@ export async function POST(req: NextRequest) {
       }, { status: 403 });
     }
 
+    // Phase 3 (Feature 3) — team meetings: only team members may
+    // join. Best-effort read — the column only exists once
+    // giinmeet_phase3_teams.sql has been run, so a missing column
+    // means "not a team meeting", never a failure. The host is the
+    // one exception: they own the meeting.
+    let meetingTeamId: string | null = null;
+    try {
+      const { data: teamRow } = await admin
+        .from('meetings')
+        .select('team_id')
+        .eq('id', derivedMeetingId)
+        .maybeSingle();
+      meetingTeamId = (teamRow as any)?.team_id || null;
+    } catch (e) { /* team_id column not set up yet: not a team meeting */ }
+
     // Round 9 (9C): link expiry, enforced server-side. Best-effort
     // read — the columns only exist once giinmeet_link_expiry.sql has
     // been run, so a missing column means "no expiry set", never a
@@ -167,6 +182,20 @@ export async function POST(req: NextRequest) {
       }
 
       identity = user.id;
+      if (meetingTeamId && !isHostUser(user.id)) {
+        const { data: memberRow } = await admin
+          .from('team_members')
+          .select('id')
+          .eq('team_id', meetingTeamId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (!memberRow) {
+          return NextResponse.json({
+            error: 'TEAM_MEMBERS_ONLY',
+            message: 'This is a team meeting — only members of the team can join. Ask a team admin to add you.',
+          }, { status: 403 });
+        }
+      }
       if (isHostUser(user.id)) {
         derivedRole = 'HOST';
         // Host display name: prefer the participant row name if present.
@@ -233,6 +262,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           error: 'ADMISSION_REQUIRED',
           message: 'You have not been admitted to this meeting yet. Please wait for the host.',
+        }, { status: 403 });
+      }
+      // Phase 3 (Feature 3): a guest has no GiinMeet account, so they
+      // can never be a team member — a team meeting refuses guests
+      // outright, even one the host admitted by mistake.
+      if (meetingTeamId) {
+        return NextResponse.json({
+          error: 'TEAM_MEMBERS_ONLY',
+          message: 'This is a team meeting. Sign in with a team member account to join.',
         }, { status: 403 });
       }
       // Guest identity is the participant row UUID itself. It must stay a

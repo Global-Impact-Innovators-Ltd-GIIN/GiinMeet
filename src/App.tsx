@@ -5,6 +5,7 @@ import {
   Phone, PhoneOff, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
+import { Teams } from './components/Teams';
 import { MeetingRoom, startRingSound, stopRingSound } from './components/MeetingRoom';
 import { Contacts } from './components/Contacts';
 import { Chats } from './components/Chats';
@@ -44,6 +45,10 @@ interface Meeting {
   recurrence_rule?: string | null;
   recurrence_count?: number | null;
   personal_room_slug?: string | null;
+  // Phase 3 (Feature 3) — team workspaces: a meeting scheduled inside
+  // a team carries its team_id (and the team name for the badge).
+  team_id?: string | null;
+  team_name?: string | null;
 }
 
 function App() {
@@ -115,7 +120,7 @@ function App() {
     }
     if (hash.startsWith('#/')) {
       const view = hash.substring(2).split('?')[0];
-      if (['dashboard', 'chats', 'contacts', 'private', 'help', 'settings', 'billing', 'superadmin'].includes(view)) {
+      if (['dashboard', 'chats', 'contacts', 'private', 'help', 'settings', 'billing', 'superadmin', 'teams'].includes(view)) {
         return view;
       }
     }
@@ -1016,6 +1021,16 @@ function App() {
 
           let data = await giinApi.getMeetingsForUser(user.id, user.email);
 
+          // Phase 3 (Feature 3): team meetings other members scheduled
+          // are not in the personal list — merge them in, team row wins
+          // on a duplicate id so the team badge survives.
+          let teamData: any[] = [];
+          try { teamData = await giinApi.getMyTeamMeetings(); } catch (e) { teamData = []; }
+          if (teamData && teamData.length > 0) {
+            const seenIds = new Set(teamData.map((m: any) => m.id));
+            data = [...teamData, ...(data || []).filter((m: any) => !seenIds.has(m.id))];
+          }
+
           if (data && data.length > 0) {
             const mapped: Meeting[] = data.filter((m: any) => m.status !== 'Cancelled').map((m: any) => ({
               id: m.id,
@@ -1024,7 +1039,9 @@ function App() {
               duration: m.duration || '40m limit',
               status: m.status as 'Completed' | 'In Progress' | 'Scheduled',
               host: m.host || 'You',
-              passcode: m.passcode
+              passcode: m.passcode,
+              team_id: (m as any).team_id ?? null,
+              team_name: (m as any).team_name ?? null
             }));
 
             // Merge with local cache
@@ -1059,8 +1076,17 @@ function App() {
   const refreshMeetingHistory = async () => {
     if (!user?.id) return;
     try {
-      const data = await giinApi.getMeetingsForUser(user.id, user.email);
-      if (!data) return;
+      const ownData = await giinApi.getMeetingsForUser(user.id, user.email);
+      if (!ownData) return;
+      // Phase 3 (Feature 3): same team-meetings merge as the startup
+      // load, so a teammate's meeting appears without a reload.
+      let teamData: any[] = [];
+      try { teamData = await giinApi.getMyTeamMeetings(); } catch (e) { teamData = []; }
+      let data: any[] = ownData;
+      if (teamData && teamData.length > 0) {
+        const seenIds = new Set(teamData.map((m: any) => m.id));
+        data = [...teamData, ...ownData.filter((m: any) => !seenIds.has(m.id))];
+      }
       const mapped: Meeting[] = data
         .filter((m: any) => m.status !== 'Cancelled')
         .map((m: any) => ({
@@ -1070,7 +1096,9 @@ function App() {
           duration: m.duration || '40m limit',
           status: m.status as 'Completed' | 'In Progress' | 'Scheduled',
           host: m.host || 'You',
-          passcode: m.passcode
+          passcode: m.passcode,
+          team_id: (m as any).team_id ?? null,
+          team_name: (m as any).team_name ?? null
         }));
       setMeetingHistory(prev => {
         const merged = [...mapped];
@@ -1726,7 +1754,7 @@ function App() {
     }));
   };
 
-  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number } }) => {
+  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number }; teamId?: string; teamName?: string }) => {
     if (!user || !user.id) {
       window.alert('Sign in to schedule a meeting.');
       return null;
@@ -1780,7 +1808,13 @@ function App() {
         newDbMeet.recurrence_rule = meet.series.rule;
         newDbMeet.recurrence_count = meet.series.count;
       }
-      const savedMeet = await giinApi.createMeeting(newDbMeet);
+      // Phase 3 (Feature 3): a team meeting goes through
+      // createTeamMeeting, which enforces the team's who-can-start
+      // rule and applies its defaults — the meeting itself is still
+      // created by the same createMeeting engine.
+      const savedMeet = meet.teamId
+        ? await giinApi.createTeamMeeting(meet.teamId, newDbMeet)
+        : await giinApi.createMeeting(newDbMeet);
 
       const finalMeet: Meeting = {
         id: savedMeet.id,
@@ -1800,7 +1834,11 @@ function App() {
         // series without a re-read.
         series_id: (savedMeet as any).series_id ?? meet.series?.id ?? null,
         recurrence_rule: (savedMeet as any).recurrence_rule ?? meet.series?.rule ?? null,
-        recurrence_count: (savedMeet as any).recurrence_count ?? meet.series?.count ?? null
+        recurrence_count: (savedMeet as any).recurrence_count ?? meet.series?.count ?? null,
+        // Phase 3 (Feature 3) — team link, so the dashboard can badge
+        // the meeting with its team without waiting for a refresh.
+        team_id: (savedMeet as any).team_id ?? meet.teamId ?? null,
+        team_name: (savedMeet as any).team_name ?? meet.teamName ?? null
       };
 
       setMeetingHistory(prev => [finalMeet, ...prev]);
@@ -1826,6 +1864,15 @@ function App() {
       window.alert(`Could not schedule the meeting: ${err?.message || 'the meeting could not be saved.'} Please check your connection and try again.`);
       return null;
     }
+  };
+
+  // Phase 3 (Feature 3) — the Teams view schedules through this: the
+  // team id/name ride along so the new row is badged immediately.
+  // handleAddMeeting already alerts on failure, so false here just
+  // means "the user was already told".
+  const handleScheduleTeamMeeting = async (teamId: string, teamName: string, meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null }) => {
+    const saved = await handleAddMeeting({ ...meeting, teamId, teamName });
+    return saved !== null;
   };
 
   const handleAuthSuccess = (authenticatedUser: { id: string; email: string; name: string; workspaceName: string; domain: string; is_superadmin?: boolean; avatar_url?: string }) => {
@@ -2195,6 +2242,33 @@ function App() {
               {!isSidebarCollapsed && <span>Dashboard</span>}
             </button>
 
+            {/* Teams Link */}
+            <button
+              onClick={() => setCurrentView('teams')}
+              className={`sidebar-btn ${currentView === 'teams' ? 'active' : ''}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                gap: isSidebarCollapsed ? '0' : '0.75rem',
+                padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
+                borderRadius: 'var(--radius-md)',
+                border: 'none',
+                background: currentView === 'teams' ? 'var(--color-secondary)' : 'transparent',
+                color: currentView === 'teams' ? 'white' : 'rgba(255,255,255,0.7)',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontWeight: currentView === 'teams' ? 600 : 400,
+                fontSize: '0.95rem',
+                width: '100%',
+                transition: 'all var(--transition-fast)'
+              }}
+              title="Team Workspaces"
+            >
+              <Users size={18} />
+              {!isSidebarCollapsed && <span>Teams</span>}
+            </button>
+
             {/* Chats Link */}
             <button 
               onClick={() => setCurrentView('chats')}
@@ -2468,6 +2542,9 @@ function App() {
             <div className="top-navbar-links">
               <button onClick={() => setCurrentView('dashboard')} className={`top-navbar-btn ${currentView === 'dashboard' ? 'active' : ''}`}>
                 <Home size={16} /> Dashboard
+              </button>
+              <button onClick={() => setCurrentView('teams')} className={`top-navbar-btn ${currentView === 'teams' ? 'active' : ''}`}>
+                <Users size={16} /> Teams
               </button>
               <button onClick={() => setCurrentView('chats')} className={`top-navbar-btn ${currentView === 'chats' ? 'active' : ''}`}>
                 <MessageSquare size={16} /> Chat Center
@@ -2826,6 +2903,14 @@ function App() {
             />
           )}
 
+          {currentView === 'teams' && (
+            <Teams
+              user={user}
+              onStartMeeting={handleStartCall}
+              onScheduleTeamMeeting={handleScheduleTeamMeeting}
+            />
+          )}
+
           {currentView === 'lobby' && lobbyMeetingData && (
             <MeetingLobby
               meetingId={lobbyMeetingData.id}
@@ -2987,6 +3072,30 @@ function App() {
             color: currentView === 'dashboard' ? 'var(--color-active-nav)' : 'var(--text-muted)',
             fontFamily: 'var(--font-heading)'
           }}>Home</span>
+        </button>
+
+        <button 
+          onClick={() => setCurrentView('teams')}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'none',
+            border: 'none',
+            gap: '4px',
+            cursor: 'pointer',
+            padding: '0.25rem',
+            flex: 1
+          }}
+        >
+          <Users size={20} color={currentView === 'teams' ? 'var(--color-active-nav)' : 'var(--text-muted)'} style={{ color: currentView === 'teams' ? 'var(--color-active-nav)' : 'var(--text-muted)' }} />
+          <span style={{
+            fontSize: '0.65rem',
+            fontWeight: currentView === 'teams' ? 700 : 500,
+            color: currentView === 'teams' ? 'var(--color-active-nav)' : 'var(--text-muted)',
+            fontFamily: 'var(--font-heading)'
+          }}>Teams</span>
         </button>
 
         <button 

@@ -173,6 +173,64 @@ export async function probeSeriesSupport(): Promise<boolean> {
   return seriesSupportedCache;
 }
 
+// Phase 3 (Feature 3) — team workspaces: same probe for the teams
+// tables (giinmeet_phase3_teams.sql) and for the meetings.team_id
+// column. A missing table/column is "not set up yet", never a crash —
+// every team read returns an empty list and every team write throws
+// an honest error until the SQL runs.
+let teamsSupportedCache: boolean | null = null;
+export async function probeTeamsSupport(): Promise<boolean> {
+  if (teamsSupportedCache !== null) return teamsSupportedCache;
+  try {
+    const { error } = await supabase.from('teams').select('id').limit(1);
+    teamsSupportedCache = !error;
+  } catch (e) {
+    teamsSupportedCache = false;
+  }
+  return teamsSupportedCache;
+}
+
+let teamMeetingSupportedCache: boolean | null = null;
+export async function probeTeamMeetingSupport(): Promise<boolean> {
+  if (teamMeetingSupportedCache !== null) return teamMeetingSupportedCache;
+  try {
+    const { error } = await supabase.from('meetings').select('team_id').limit(1);
+    teamMeetingSupportedCache = !error;
+  } catch (e) {
+    teamMeetingSupportedCache = false;
+  }
+  return teamMeetingSupportedCache;
+}
+
+export const TEAMS_NOT_SET_UP_MESSAGE =
+  'Team workspaces are not set up yet — run giinmeet_phase3_teams.sql in the Supabase SQL Editor first.';
+
+// Phase 3 (Feature 3) — team workspaces. A team has members, its own
+// meetings (meetings.team_id), and shared settings. `myRole` is the
+// signed-in user's role in that team ('admin' | 'member' | null).
+export interface Team {
+  id: string;
+  name: string;
+  created_by: string;
+  created_at?: string;
+  myRole?: 'admin' | 'member' | null;
+}
+
+export interface TeamMember {
+  user_id: string;
+  name?: string;
+  email?: string;
+  role: 'admin' | 'member';
+  joined_at?: string;
+}
+
+export interface TeamSettings {
+  team_id: string;
+  who_can_start: 'any_member' | 'admin_only';
+  default_require_waiting_room: boolean;
+  default_duration: string;
+}
+
 export const MEETING_PUBLIC_COLUMNS =
   'id,user_id,title,time,duration,status,host,notes,action_items_count,created_at,admin_id,require_waiting_room';
 
@@ -714,7 +772,7 @@ export const giinApi = {
   // best-effort here (it is retried when the meeting is joined); if it
   // fails, a clear warning is logged and the video call will surface the
   // missing room instead of silently dropping to a peer-to-peer call.
-  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null; reminder_enabled?: boolean; reminder_minutes_before?: number; series_id?: string; recurrence_rule?: string; recurrence_count?: number }) => {
+  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null; reminder_enabled?: boolean; reminder_minutes_before?: number; series_id?: string; recurrence_rule?: string; recurrence_count?: number; team_id?: string | null }) => {
     // Generate UUID on the client side to avoid race conditions and mismatches
     const meetingId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -788,6 +846,20 @@ export const giinApi = {
         payload.recurrence_count = serCount ?? null;
       } else {
         try { localStorage.setItem(`giin_series_${meetingId}`, JSON.stringify({ seriesId: serId, rule: serRule || null, count: serCount ?? null })); } catch (e) {}
+      }
+    }
+
+    // Phase 3 (Feature 3) — team meeting (same probe pattern): the
+    // team_id rides in the spread, so strip it and re-add only when
+    // the column exists. When it does not exist, NEVER silently save
+    // the meeting as a personal one — throw honestly instead.
+    delete payload.team_id;
+    const teamId = (meeting as any).team_id as string | undefined;
+    if (teamId) {
+      if (await probeTeamMeetingSupport()) {
+        payload.team_id = teamId;
+      } else {
+        throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
       }
     }
 
@@ -1729,6 +1801,292 @@ export const giinApi = {
       .update({ avatar_url: base64Data, updated_at: new Date() })
       .eq('id', userId);
     return { data: base64Data, error };
+  },
+
+  // ---- Team workspaces (Phase 3, Feature 3) ---------------------------
+  // A team has members, its own meetings (meetings.team_id) and shared
+  // settings. Every method below fails honestly when the teams SQL has
+  // not been run yet (probeTeamsSupport / probeTeamMeetingSupport) —
+  // never a silent personal meeting, never a faked team.
+  // Membership truth lives in team_members; RLS (see
+  // giinmeet_phase3_teams.sql) only lets a team admin add/remove
+  // members, so these client-side role checks are for honest error
+  // messages, not the security boundary.
+
+  // Signed-in user's own membership row in a team, or null.
+  getMyTeamMembership: async (teamId: string): Promise<{ role: 'admin' | 'member' } | null> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data, error } = await supabase
+        .from('team_members')
+        .select('role')
+        .eq('team_id', teamId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (error || !data) return null;
+      return { role: (data as any).role as 'admin' | 'member' };
+    } catch (e) {
+      return null;
+    }
+  },
+
+  // All teams the signed-in user belongs to, each with their role.
+  // Returns [] when the teams SQL has not been run yet.
+  getMyTeams: async (): Promise<Team[]> => {
+    try {
+      if (!(await probeTeamsSupport())) return [];
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+      const { data: memberships, error: mErr } = await supabase
+        .from('team_members')
+        .select('team_id,role')
+        .eq('user_id', user.id);
+      if (mErr || !memberships || memberships.length === 0) return [];
+      const roleByTeam = new Map((memberships as any[]).map((m: any) => [m.team_id, m.role]));
+      const { data: teams, error: tErr } = await supabase
+        .from('teams')
+        .select('id,name,created_by,created_at')
+        .in('id', [...roleByTeam.keys()])
+        .order('created_at', { ascending: true });
+      if (tErr || !teams) return [];
+      return (teams as any[]).map((t: any) => ({ ...t, myRole: roleByTeam.get(t.id) ?? null }));
+    } catch (e) {
+      return [];
+    }
+  },
+
+  // Create a team; the creator becomes its admin and gets the default
+  // settings row. Throws honestly when the teams SQL has not run.
+  createTeam: async (name: string): Promise<Team> => {
+    const clean = (name || '').trim();
+    if (!clean) throw new Error('Give the team a name first.');
+    if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Sign in to create a team.');
+    const { data: team, error } = await supabase
+      .from('teams')
+      .insert([{ name: clean, created_by: user.id }])
+      .select('id,name,created_by,created_at')
+      .single();
+    if (error || !team) throw new Error(`Could not create the team: ${error?.message || 'the team could not be saved.'}`);
+    // Creator is the team's admin. RLS lets the creator insert this
+    // row (is_team_admin counts the creator as admin).
+    const { error: mErr } = await supabase
+      .from('team_members')
+      .insert([{ team_id: (team as any).id, user_id: user.id, role: 'admin' }]);
+    if (mErr) throw new Error(`The team was created but you could not be made its admin: ${mErr.message}`);
+    // Default settings row (best-effort: the team works without it —
+    // getTeamSettings falls back to the same defaults).
+    try {
+      await supabase.from('team_settings').insert([{ team_id: (team as any).id }]);
+    } catch (e) { /* defaults apply from getTeamSettings */ }
+    return { ...(team as any), myRole: 'admin' };
+  },
+
+  // Delete a team (creator only). Memberships and settings cascade;
+  // past meetings keep their rows with team_id cleared (ON DELETE SET
+  // NULL), so they become ordinary personal meetings of their hosts.
+  deleteTeam: async (teamId: string): Promise<void> => {
+    if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Sign in to delete a team.');
+    const { data: team } = await supabase.from('teams').select('created_by').eq('id', teamId).maybeSingle();
+    if (!team) throw new Error('That team no longer exists.');
+    if ((team as any).created_by !== user.id) throw new Error('Only the team creator can delete the team.');
+    const { error } = await supabase.from('teams').delete().eq('id', teamId);
+    if (error) throw new Error(`Could not delete the team: ${error.message}`);
+  },
+
+  // Members of one team, with names/emails from the public profiles
+  // directory. Returns [] when the teams SQL has not been run yet.
+  getTeamMembers: async (teamId: string): Promise<TeamMember[]> => {
+    try {
+      if (!(await probeTeamsSupport())) return [];
+      const { data: rows, error } = await supabase
+        .from('team_members')
+        .select('user_id,role,joined_at')
+        .eq('team_id', teamId)
+        .order('joined_at', { ascending: true });
+      if (error || !rows || rows.length === 0) return [];
+      const ids = (rows as any[]).map((r: any) => r.user_id);
+      const { data: profiles } = await supabase.from('profiles').select('id,name,email').in('id', ids);
+      const byId = new Map(((profiles as any[]) || []).map((p: any) => [p.id, p]));
+      return (rows as any[]).map((r: any) => ({
+        user_id: r.user_id,
+        role: r.role as 'admin' | 'member',
+        joined_at: r.joined_at,
+        name: (byId.get(r.user_id) as any)?.name,
+        email: (byId.get(r.user_id) as any)?.email,
+      }));
+    } catch (e) {
+      return [];
+    }
+  },
+
+  // Find a GiinMeet account by email (profiles are publicly readable).
+  // Returns null when no account uses that email — the caller must say
+  // so honestly, never pretend the invite went through.
+  findProfileByEmail: async (email: string): Promise<{ id: string; name?: string; email?: string } | null> => {
+    const clean = (email || '').trim().toLowerCase();
+    if (!clean) return null;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,name,email')
+      .ilike('email', clean)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data as any;
+  },
+
+  // Add a member by email. The person MUST already have a GiinMeet
+  // account — inviting a non-user fails honestly ("no account uses
+  // that email yet"), it never silently drops the invite. Only a team
+  // admin can add members (checked here for the message, enforced by
+  // RLS in giinmeet_phase3_teams.sql).
+  addTeamMember: async (teamId: string, email: string): Promise<TeamMember> => {
+    if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
+    const me = await giinApi.getMyTeamMembership(teamId);
+    if (!me) throw new Error('You are not a member of this team.');
+    if (me.role !== 'admin') throw new Error('Only a team admin can add members.');
+    const profile = await giinApi.findProfileByEmail(email);
+    if (!profile) throw new Error(`No GiinMeet account uses ${email.trim()} yet — ask them to sign up first, then add them.`);
+    const existing = await supabase.from('team_members').select('user_id').eq('team_id', teamId).eq('user_id', profile.id).maybeSingle();
+    if (existing.data) throw new Error(`${profile.name || profile.email} is already a member of this team.`);
+    const { error } = await supabase
+      .from('team_members')
+      .insert([{ team_id: teamId, user_id: profile.id, role: 'member' }]);
+    if (error) throw new Error(`Could not add the member: ${error.message}`);
+    return { user_id: profile.id, name: profile.name, email: profile.email, role: 'member' };
+  },
+
+  // Remove a member (admin only). The creator cannot be removed and
+  // nobody removes themselves this way — leaving is leaveTeam.
+  removeTeamMember: async (teamId: string, userId: string): Promise<void> => {
+    if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
+    const me = await giinApi.getMyTeamMembership(teamId);
+    if (!me) throw new Error('You are not a member of this team.');
+    if (me.role !== 'admin') throw new Error('Only a team admin can remove members.');
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && user.id === userId) throw new Error('To leave a team yourself, use Leave team instead.');
+    const { data: team } = await supabase.from('teams').select('created_by').eq('id', teamId).maybeSingle();
+    if (team && (team as any).created_by === userId) throw new Error('The team creator cannot be removed from their own team.');
+    const { error } = await supabase.from('team_members').delete().eq('team_id', teamId).eq('user_id', userId);
+    if (error) throw new Error(`Could not remove the member: ${error.message}`);
+  },
+
+  // Leave a team. The creator cannot leave their own team (they own
+  // it — delete it instead); any other member, admin included, can.
+  leaveTeam: async (teamId: string): Promise<void> => {
+    if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Sign in to leave a team.');
+    const { data: team } = await supabase.from('teams').select('created_by').eq('id', teamId).maybeSingle();
+    if (!team) throw new Error('That team no longer exists.');
+    if ((team as any).created_by === user.id) throw new Error('The team creator cannot leave the team — delete the team instead.');
+    const { error } = await supabase.from('team_members').delete().eq('team_id', teamId).eq('user_id', user.id);
+    if (error) throw new Error(`Could not leave the team: ${error.message}`);
+  },
+
+  // Shared settings for a team. Falls back to the defaults when no row
+  // exists yet (e.g. the team was created before the settings insert
+  // landed) or when the teams SQL has not been run.
+  getTeamSettings: async (teamId: string): Promise<TeamSettings> => {
+    const fallback: TeamSettings = { team_id: teamId, who_can_start: 'any_member', default_require_waiting_room: true, default_duration: '40m limit' };
+    try {
+      if (!(await probeTeamsSupport())) return fallback;
+      const { data, error } = await supabase
+        .from('team_settings')
+        .select('team_id,who_can_start,default_require_waiting_room,default_duration')
+        .eq('team_id', teamId)
+        .maybeSingle();
+      if (error || !data) return fallback;
+      return data as TeamSettings;
+    } catch (e) {
+      return fallback;
+    }
+  },
+
+  // Save shared settings (admin only). Upserts so a team created
+  // before its settings row existed still saves cleanly.
+  updateTeamSettings: async (teamId: string, patch: Partial<Pick<TeamSettings, 'who_can_start' | 'default_require_waiting_room' | 'default_duration'>>): Promise<TeamSettings> => {
+    if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
+    const me = await giinApi.getMyTeamMembership(teamId);
+    if (!me) throw new Error('You are not a member of this team.');
+    if (me.role !== 'admin') throw new Error('Only a team admin can change team settings.');
+    const current = await giinApi.getTeamSettings(teamId);
+    const next: TeamSettings = { ...current, ...patch, team_id: teamId };
+    const { error } = await supabase
+      .from('team_settings')
+      .upsert([{ team_id: teamId, who_can_start: next.who_can_start, default_require_waiting_room: next.default_require_waiting_room, default_duration: next.default_duration }], { onConflict: 'team_id' });
+    if (error) throw new Error(`Could not save the team settings: ${error.message}`);
+    return next;
+  },
+
+  // Meetings of ONE team, newest first. Only returns rows for teams
+  // the signed-in user belongs to — the caller checks membership
+  // first, and the list the user sees comes from getMyTeamMeetings.
+  getMeetingsForTeam: async (teamId: string): Promise<any[]> => {
+    try {
+      if (!(await probeTeamMeetingSupport())) return [];
+      const me = await giinApi.getMyTeamMembership(teamId);
+      if (!me) return [];
+      const { data, error } = await supabase
+        .from('meetings')
+        .select(MEETING_PUBLIC_COLUMNS + ',team_id')
+        .eq('team_id', teamId)
+        .order('time', { ascending: false });
+      if (error || !data) return [];
+      return data;
+    } catch (e) {
+      return [];
+    }
+  },
+
+  // Every team meeting the signed-in user may see: meetings whose
+  // team_id is one of their teams, including meetings scheduled by
+  // other members. Returns [] when the teams SQL has not been run.
+  getMyTeamMeetings: async (): Promise<any[]> => {
+    try {
+      if (!(await probeTeamMeetingSupport())) return [];
+      const myTeams = await giinApi.getMyTeams();
+      if (myTeams.length === 0) return [];
+      const teamIds = myTeams.map((t) => t.id);
+      const { data, error } = await supabase
+        .from('meetings')
+        .select(MEETING_PUBLIC_COLUMNS + ',team_id')
+        .in('team_id', teamIds)
+        .order('time', { ascending: false });
+      if (error || !data) return [];
+      const nameById = new Map(myTeams.map((t) => [t.id, t.name]));
+      return (data as any[]).map((m: any) => ({ ...m, team_name: nameById.get(m.team_id) || null }));
+    } catch (e) {
+      return [];
+    }
+  },
+
+  // Schedule a meeting inside a team. The team's shared settings
+  // apply: who_can_start is enforced (an 'admin_only' team refuses a
+  // plain member honestly), and the team's defaults fill in the
+  // waiting-room and duration choices the caller did not set. The
+  // meeting itself is created by the same createMeeting engine as a
+  // personal meeting — same LiveKit room, same passcode rules.
+  createTeamMeeting: async (teamId: string, meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null; reminder_enabled?: boolean; reminder_minutes_before?: number; series_id?: string; recurrence_rule?: string; recurrence_count?: number }) => {
+    if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
+    if (!(await probeTeamMeetingSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
+    const me = await giinApi.getMyTeamMembership(teamId);
+    if (!me) throw new Error('You are not a member of this team, so you cannot schedule its meetings.');
+    const settings = await giinApi.getTeamSettings(teamId);
+    if (settings.who_can_start === 'admin_only' && me.role !== 'admin') {
+      throw new Error('Only a team admin can start meetings in this team.');
+    }
+    const saved = await giinApi.createMeeting({
+      ...meeting,
+      duration: meeting.duration || settings.default_duration,
+      require_waiting_room: meeting.require_waiting_room ?? settings.default_require_waiting_room,
+      team_id: teamId,
+    });
+    return { ...saved, team_id: teamId };
   }
 };
 
