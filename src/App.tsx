@@ -2184,6 +2184,8 @@ function App() {
         zIndex: 50,
         color: 'white',
         flexShrink: 0,
+        height: '100dvh',
+        minHeight: 0,
         position: 'relative',
         transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
       }}>
@@ -2218,6 +2220,19 @@ function App() {
         >
           {isSidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
+
+        {/* Sidebar scroll region: logo + nav + tier card together are
+            taller than short viewports, so this wrapper is the scroll
+            container (flex:1 + minHeight:0 + overflow-y:auto). */}
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between'
+        }}>
 
         {/* Upper Logo Section */}
         <div>
@@ -2584,6 +2599,7 @@ function App() {
             </div>
           )}
 
+        </div>
         </div>
       </aside>
       )}
