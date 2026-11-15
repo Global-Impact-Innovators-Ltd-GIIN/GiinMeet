@@ -128,6 +128,25 @@ export async function POST(req: NextRequest) {
       }, { status: 403 });
     }
 
+    // Delete-from-history: a meeting removed from history stays
+    // removed — its old join link must not mint a new token either.
+    // Best-effort read — the column only exists once
+    // giinmeet_delete_history.sql has been run, so a missing column
+    // means "not deleted", never a failure.
+    try {
+      const { data: delRow } = await admin
+        .from('meetings')
+        .select('deleted_at')
+        .eq('id', derivedMeetingId)
+        .maybeSingle();
+      if ((delRow as any)?.deleted_at) {
+        return NextResponse.json({
+          error: 'MEETING_DELETED',
+          message: 'This meeting was deleted from history.',
+        }, { status: 410 });
+      }
+    } catch (e) { /* deleted_at column not set up yet: not deleted */ }
+
     // Phase 3 (Feature 3) — team meetings: only team members may
     // join. Best-effort read — the column only exists once
     // giinmeet_phase3_teams.sql has been run, so a missing column
