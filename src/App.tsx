@@ -1043,7 +1043,13 @@ function App() {
           }
 
           if (data && data.length > 0) {
-            const mapped: Meeting[] = data.filter((m: any) => m.status !== 'Cancelled').map((m: any) => ({
+            // Soft-deleted rows come back with deleted_at set (the
+            // history queries read it best-effort) — hide them here,
+            // and keep them out of the local-cache merge below so a
+            // deleted meeting cannot come back from this browser's
+            // cache on the next load.
+            const deletedIds = new Set((data as any[]).filter((m: any) => m.deleted_at).map((m: any) => m.id));
+            const mapped: Meeting[] = data.filter((m: any) => m.status !== 'Cancelled' && !m.deleted_at).map((m: any) => ({
               id: m.id,
               title: m.title,
               time: m.time || new Date().toISOString(),
@@ -1061,10 +1067,10 @@ function App() {
               team_name: (m as any).team_name ?? null
             }));
 
-            // Merge with local cache
+            // Merge with local cache (skipping anything deleted).
             const merged = [...mapped];
             cached.forEach((cm: any) => {
-              if (!merged.some(m => m.id === cm.id)) {
+              if (!deletedIds.has(cm.id) && !merged.some(m => m.id === cm.id)) {
                 merged.push(cm);
               }
             });
@@ -1104,8 +1110,9 @@ function App() {
         const seenIds = new Set(teamData.map((m: any) => m.id));
         data = [...teamData, ...ownData.filter((m: any) => !seenIds.has(m.id))];
       }
+      const deletedIds = new Set((data as any[]).filter((m: any) => m.deleted_at).map((m: any) => m.id));
       const mapped: Meeting[] = data
-        .filter((m: any) => m.status !== 'Cancelled')
+        .filter((m: any) => m.status !== 'Cancelled' && !m.deleted_at)
         .map((m: any) => ({
           id: m.id,
           title: m.title,
@@ -1125,7 +1132,7 @@ function App() {
       setMeetingHistory(prev => {
         const merged = [...mapped];
         prev.forEach((cm: any) => {
-          if (!merged.some(m => m.id === cm.id)) merged.push(cm);
+          if (!deletedIds.has(cm.id) && !merged.some(m => m.id === cm.id)) merged.push(cm);
         });
         return merged;
       });
@@ -1735,6 +1742,23 @@ function App() {
     const { error } = await giinApi.updateMeetingStatus(meetingId, 'Cancelled');
     if (error) {
       window.alert('Could not cancel the meeting — please try again.');
+      return;
+    }
+    setMeetingHistory(prev => prev.filter(m => m.id !== meetingId));
+  };
+
+  // Delete from history (soft delete, owner only): a Completed meeting,
+  // or a Scheduled meeting whose start time has passed, can be removed
+  // from Meeting Logs & History. The server marks the row deleted_at
+  // and writes the audit row — nothing else is deleted. In Progress
+  // and upcoming Scheduled meetings are refused by the server (cancel
+  // an upcoming meeting instead).
+  const handleDeleteMeeting = async (meetingId: string, title: string) => {
+    if (!window.confirm(`Delete "${title}" from your history? It will no longer appear in Meeting Logs & History. The meeting record is kept for audit — nothing else is deleted.`)) return;
+    try {
+      await giinApi.deleteMeetingFromHistory(meetingId);
+    } catch (e: any) {
+      window.alert(e?.message || 'Could not delete the meeting from your history — please try again.');
       return;
     }
     setMeetingHistory(prev => prev.filter(m => m.id !== meetingId));
@@ -2923,6 +2947,7 @@ function App() {
               onStartMeeting={handleStartCall}
               meetingHistory={meetingHistory}
               onCancelMeeting={handleCancelMeeting}
+              onDeleteMeeting={handleDeleteMeeting}
               onCancelSeries={handleCancelSeries}
               onAddMeeting={handleAddMeeting}
               userName={user?.name || userName}

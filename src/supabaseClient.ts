@@ -239,6 +239,28 @@ export interface TeamSettings {
 export const MEETING_PUBLIC_COLUMNS =
   'id,user_id,title,time,duration,status,host,notes,action_items_count,created_at,admin_id,require_waiting_room,series_id,recurrence_rule,recurrence_count';
 
+// Delete-from-history: the deleted_at column only exists once
+// giinmeet_delete_history.sql has run. A query that asks for it
+// before then fails with "column meetings.deleted_at does not
+// exist" — the history readers below catch exactly that and retry
+// without the column, so the app keeps working before the SQL runs.
+const isMissingDeletedAtColumn = (err: any): boolean => {
+  const msg = String(err?.message || err || '');
+  return /deleted_at/i.test(msg) && (/does not exist/i.test(msg) || /42703/.test(msg));
+};
+
+// The delete scope, shared by the history UI and the server route:
+// a Completed meeting, or a Scheduled meeting whose start time has
+// already passed ("expired"). In Progress and upcoming Scheduled
+// meetings are never deletable here — an upcoming meeting is
+// cancelled, not deleted.
+export const isDeletableFromHistory = (m: { status?: string | null; time?: string | null }): boolean => {
+  if (m.status === 'Completed') return true;
+  if (m.status !== 'Scheduled') return false;
+  if (!m.time) return false;
+  return new Date(m.time).getTime() < Date.now();
+};
+
 // Build a calendar (.ics) file for a meeting, for download or import into
 // Google/Outlook/Apple Calendar. Pure client-side generation — no provider.
 export const buildICS = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }, brandName: string = 'GiinMeet'): string => {
@@ -731,11 +753,21 @@ export const giinApi = {
   },
 
   getMeetings: async (userId: string) => {
-    const { data, error } = await supabase
+    // Read deleted_at when the column exists (giinmeet_delete_history.sql
+    // run) so history can hide soft-deleted rows; fall back to the
+    // plain columns when it does not exist yet.
+    let { data, error } = await supabase
       .from('meetings')
-      .select(MEETING_PUBLIC_COLUMNS)
+      .select(MEETING_PUBLIC_COLUMNS + ',deleted_at')
       .eq('user_id', userId)
       .order('time', { ascending: false });
+    if (error && isMissingDeletedAtColumn(error)) {
+      ({ data, error } = await supabase
+        .from('meetings')
+        .select(MEETING_PUBLIC_COLUMNS)
+        .eq('user_id', userId)
+        .order('time', { ascending: false }));
+    }
     if (error) throw new Error(`Could not load your meetings: ${error.message}`);
     return data || [];
   },
@@ -752,11 +784,18 @@ export const giinApi = {
       .ilike('email', clean);
     if (pErr || !profiles || profiles.length === 0) return [];
     const ids = profiles.map((p: any) => p.id);
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('meetings')
-      .select(MEETING_PUBLIC_COLUMNS)
+      .select(MEETING_PUBLIC_COLUMNS + ',deleted_at')
       .in('user_id', ids)
       .order('time', { ascending: false });
+    if (error && isMissingDeletedAtColumn(error)) {
+      ({ data, error } = await supabase
+        .from('meetings')
+        .select(MEETING_PUBLIC_COLUMNS)
+        .in('user_id', ids)
+        .order('time', { ascending: false }));
+    }
     if (error) throw new Error(`Could not load your meetings: ${error.message}`);
     return data || [];
   },
@@ -916,6 +955,27 @@ export const giinApi = {
       .update({ status })
       .eq('id', meetingId);
     return { error };
+  },
+
+  // Delete a meeting from Meeting Logs & History (soft delete, owner
+  // only, completed/expired only). Server-verified via POST
+  // /api/meetings/delete — the route marks the row deleted_at and
+  // writes the audit row. Throws with the server's plain message.
+  deleteMeetingFromHistory: async (meetingId: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error('Sign in again to delete this meeting from your history.');
+    }
+    const res = await fetch('/api/meetings/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, accessToken: session.access_token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not delete the meeting from your history.');
+    }
+    return data;
   },
 
   // Phase 1 — cancel a whole recurring series: every still-Scheduled
@@ -2036,11 +2096,18 @@ export const giinApi = {
       if (!(await probeTeamMeetingSupport())) return [];
       const me = await giinApi.getMyTeamMembership(teamId);
       if (!me) return [];
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('meetings')
-        .select(MEETING_PUBLIC_COLUMNS + ',team_id')
+        .select(MEETING_PUBLIC_COLUMNS + ',team_id,deleted_at')
         .eq('team_id', teamId)
         .order('time', { ascending: false });
+      if (error && isMissingDeletedAtColumn(error)) {
+        ({ data, error } = await supabase
+          .from('meetings')
+          .select(MEETING_PUBLIC_COLUMNS + ',team_id')
+          .eq('team_id', teamId)
+          .order('time', { ascending: false }));
+      }
       if (error || !data) return [];
       return data;
     } catch (e) {
@@ -2057,11 +2124,18 @@ export const giinApi = {
       const myTeams = await giinApi.getMyTeams();
       if (myTeams.length === 0) return [];
       const teamIds = myTeams.map((t) => t.id);
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('meetings')
-        .select(MEETING_PUBLIC_COLUMNS + ',team_id')
+        .select(MEETING_PUBLIC_COLUMNS + ',team_id,deleted_at')
         .in('team_id', teamIds)
         .order('time', { ascending: false });
+      if (error && isMissingDeletedAtColumn(error)) {
+        ({ data, error } = await supabase
+          .from('meetings')
+          .select(MEETING_PUBLIC_COLUMNS + ',team_id')
+          .in('team_id', teamIds)
+          .order('time', { ascending: false }));
+      }
       if (error || !data) return [];
       const nameById = new Map(myTeams.map((t) => [t.id, t.name]));
       return (data as any[]).map((m: any) => ({ ...m, team_name: nameById.get(m.team_id) || null }));

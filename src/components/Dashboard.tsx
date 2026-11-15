@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2 } from 'lucide-react';
-import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
+import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2 } from 'lucide-react';
+import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
 
 interface Meeting {
@@ -38,6 +38,8 @@ interface DashboardProps {
   meetingHistory: Meeting[];
   onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number }; teamId?: string; teamName?: string }) => Promise<Meeting | null>;
   onCancelMeeting?: (meetingId: string, title: string) => void;
+  // Delete from history (soft delete, owner only, completed/expired only).
+  onDeleteMeeting?: (meetingId: string, title: string) => void;
   // Phase 1 — cancel every upcoming meeting in a recurring series.
   onCancelSeries?: (seriesId: string, title: string) => void;
   userName: string;
@@ -51,6 +53,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   meetingHistory,
   onAddMeeting,
   onCancelMeeting,
+  onDeleteMeeting,
   onCancelSeries,
   userName,
   userDomain,
@@ -927,6 +930,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           </button>
                         );
                       })()}
+                      {isDeletableFromHistory(meeting) && (
+                        <button
+                          onClick={() => onDeleteMeeting?.(meeting.id, meeting.title)}
+                          className="premium-btn premium-btn-secondary"
+                          style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          title="Delete this expired meeting from your history"
+                        >
+                          <Trash2 size={14} />
+                          <span>Delete</span>
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -940,6 +954,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         title="Who joined, when, and how long they stayed (recorded in this browser during the meeting)"
                       >
                         Attendance
+                      </button>
+                      <button
+                        onClick={() => onDeleteMeeting?.(meeting.id, meeting.title)}
+                        className="premium-btn premium-btn-secondary"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        title="Delete this meeting from your history"
+                      >
+                        <Trash2 size={14} />
+                        <span>Delete</span>
                       </button>
                     </div>
                   )}
