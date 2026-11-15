@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendMail } from '../../../../src/utils/mailer';
+import { loadWorkspaceBrandName } from '../../../../src/utils/brand';
 
 // Phase 1 — the email outbox runner. Called by Vercel Cron every 5 minutes
 // (see vercel.json) and does two jobs in one pass:
@@ -51,6 +52,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'SERVER_MISCONFIGURED', message: 'The video service is not configured on this server.' }, { status: 500 });
     }
 
+    // Phase 3 (Feature 4) — sign reminders with the workspace brand
+    // name when one is published. Best-effort: a missing table or no
+    // brand set keeps the default "GiinMeet" sign-off and never fails
+    // the run.
+    const brandName = await loadWorkspaceBrandName(admin);
+
     // The outbox must exist before either job can run.
     const { error: tableError } = await admin.from('pending_emails').select('id').limit(1);
     if (tableError) {
@@ -99,9 +106,9 @@ export async function GET(req: NextRequest) {
         ``,
         `Join here: ${joinLink}`,
         ``,
-        `— GIIN Meet`,
+        `— ${brandName}`,
       ].join('\n');
-      const html = `<p>Hi ${hostName},</p><p>Your meeting <strong>${(meeting as any).title}</strong> starts at ${when} — in about ${minutes} minutes.</p><p><a href="${joinLink}">Join the meeting</a></p><p>— GIIN Meet</p>`;
+      const html = `<p>Hi ${hostName},</p><p>Your meeting <strong>${(meeting as any).title}</strong> starts at ${when} — in about ${minutes} minutes.</p><p><a href="${joinLink}">Join the meeting</a></p><p>— ${brandName}</p>`;
       const { error: insertError } = await admin.from('pending_emails').insert([{
         type: 'meeting_reminder',
         meeting_id: (meeting as any).id,

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { applyAccentColor, applyBorderRadius, applyFont, applyGlassOpacity, applyUiStyle } from '../utils/theme';
+import { probeBrandSupport, loadWorkspaceBrand, saveWorkspaceBrand, resetWorkspaceBrand, DEFAULT_BRAND_NAME, DEFAULT_BRAND_SLOGAN, DEFAULT_BRAND_ACCENT, DEFAULT_BRAND_ACCENT_HOVER, type WorkspaceBrand } from '../utils/brand';
 
 interface SettingsProps {
   isDarkMode: boolean;
@@ -19,6 +20,9 @@ interface SettingsProps {
   userTimezone?: string;
   userLocation?: string;
   userWorkspaceName?: string;
+  // Phase 3 (Feature 4): only the superadmin can publish/remove the
+  // shared workspace brand (RLS enforces it server-side too).
+  isSuperadmin?: boolean;
   userDomain?: string;
   userSkills?: string[];
   userSocialHandles?: {
@@ -93,6 +97,7 @@ export const Settings: React.FC<SettingsProps> = ({
   userTimezone = 'UTC',
   userLocation = '',
   userWorkspaceName = 'Personal Workspace',
+  isSuperadmin = false,
   userDomain = 'personal',
   userSkills = [],
   userSocialHandles = {},
@@ -140,6 +145,28 @@ export const Settings: React.FC<SettingsProps> = ({
     const v = localStorage.getItem('giin_brand_slogan');
     return !v || v === 'VIRTUALIZATION HUB' ? 'Connect, Collaborate, Virtualize' : v;
   });
+  // Phase 3 (Feature 4) — shared workspace brand: what everyone
+  // currently sees (null = no shared brand set, default GiinMeet brand
+  // everywhere). Probe-gated: before giinmeet_phase3_brand.sql runs
+  // this just reports "not set up" and the local controls below keep
+  // working exactly as before.
+  const [sharedBrand, setSharedBrand] = useState<WorkspaceBrand | null>(null);
+  const [brandSetupKnown, setBrandSetupKnown] = useState(false);
+  const [brandNotSetUp, setBrandNotSetUp] = useState(false);
+  const [publishingBrand, setPublishingBrand] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supported = await probeBrandSupport(supabase);
+      if (cancelled) return;
+      setBrandSetupKnown(true);
+      if (!supported) { setBrandNotSetUp(true); return; }
+      const brand = await loadWorkspaceBrand(supabase);
+      if (!cancelled) setSharedBrand(brand);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const [fontHeading, setFontHeading] = useState(() => localStorage.getItem('giin_font_heading') || 'Outfit');
   const [fontBody, setFontBody] = useState(() => localStorage.getItem('giin_font_body') || 'Inter');
   const [borderRadiusVal, setBorderRadiusVal] = useState(() => localStorage.getItem('giin_border_radius') || '8');
@@ -501,6 +528,57 @@ export const Settings: React.FC<SettingsProps> = ({
     localStorage.setItem('giin_brand_slogan', slogan);
     window.dispatchEvent(new Event('giin_branding_changed'));
     triggerToast('Brand identity updated!');
+  };
+
+  // Phase 3 (Feature 4) — publish the brand currently shown on
+  // this device (name, tagline, logo, accent from the controls below)
+  // as the shared workspace brand, so every user on every device sees
+  // it. The local values are the draft — nothing is shared until
+  // Publish is pressed. Superadmin only in the UI; the RLS policy on
+  // workspace_brand is the real enforcement.
+  const publishSharedBrand = async () => {
+    setPublishingBrand(true);
+    const result = await saveWorkspaceBrand(supabase, {
+      brand_name: brandNameState,
+      slogan: brandSloganState,
+      logo_url: logoPreview || null,
+      accent_color: accentColor,
+      accent_hover: localStorage.getItem('giin_accent_hover') || accentColor,
+    });
+    setPublishingBrand(false);
+    if (!result.ok) { triggerToast(result.reason); return; }
+    setSharedBrand({
+      brand_name: brandNameState,
+      slogan: brandSloganState,
+      logo_url: logoPreview || null,
+      accent_color: accentColor,
+      accent_hover: localStorage.getItem('giin_accent_hover') || accentColor,
+    });
+    triggerToast(`Shared brand published — everyone now sees ${brandNameState || DEFAULT_BRAND_NAME}.`);
+  };
+
+  // Remove the shared brand: everyone goes back to the default
+  // GiinMeet brand, including this device (local brand keys are
+  // cleared and the change is applied live).
+  const removeSharedBrand = async () => {
+    setPublishingBrand(true);
+    const result = await resetWorkspaceBrand(supabase);
+    setPublishingBrand(false);
+    if (!result.ok) { triggerToast(result.reason); return; }
+    setSharedBrand(null);
+    localStorage.removeItem('giin_brand_name');
+    localStorage.removeItem('giin_brand_slogan');
+    localStorage.removeItem('giin_custom_logo');
+    localStorage.setItem('giin_accent_color', DEFAULT_BRAND_ACCENT);
+    localStorage.setItem('giin_accent_hover', DEFAULT_BRAND_ACCENT_HOVER);
+    setBrandNameState(DEFAULT_BRAND_NAME);
+    setBrandSloganState(DEFAULT_BRAND_SLOGAN);
+    setLogoPreview('');
+    setAccentColor(DEFAULT_BRAND_ACCENT);
+    applyAccentColor(DEFAULT_BRAND_ACCENT, DEFAULT_BRAND_ACCENT_HOVER);
+    window.dispatchEvent(new Event('giin_logo_changed'));
+    window.dispatchEvent(new Event('giin_branding_changed'));
+    triggerToast('Shared brand removed — everyone sees the default GiinMeet brand again.');
   };
 
   const handleUpdateFont = (heading: string, body: string) => {
@@ -951,25 +1029,72 @@ export const Settings: React.FC<SettingsProps> = ({
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '780px', width: '100%' }}>
               
+              {/* Shared workspace brand (Phase 3, Feature 4) */}
+              <SectionCard icon={Globe} title="Shared Workspace Brand" subtitle="The logo, name, tagline and accent everyone sees — on every device, including the sign-in screen, waiting room and lobby.">
+                {brandNotSetUp ? (
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
+                    Shared branding is not set up yet — run giinmeet_phase3_brand.sql in the Supabase SQL Editor first. Until then, the branding below applies to this device only.
+                  </p>
+                ) : !brandSetupKnown ? (
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>Loading the shared brand…</p>
+                ) : sharedBrand ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {sharedBrand.logo_url && (
+                      <img src={sharedBrand.logo_url} alt="Shared brand logo" style={{ width: '40px', height: '40px', objectFit: 'contain', borderRadius: '6px', backgroundColor: '#090D16' }} />
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 700 }}>{sharedBrand.brand_name}</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{sharedBrand.slogan}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                        Accent <span style={{ display: 'inline-block', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: sharedBrand.accent_color, verticalAlign: '-1px' }} /> {sharedBrand.accent_color}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
+                    No shared brand is set — everyone currently sees the default GiinMeet brand. {isSuperadmin ? 'Edit the brand below, then publish it to share it with everyone.' : 'Only the workspace admin can publish one.'}
+                  </p>
+                )}
+                {isSuperadmin && !brandNotSetUp && brandSetupKnown && (
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                    <button type="button" onClick={publishSharedBrand} disabled={publishingBrand} className="premium-btn premium-btn-primary" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
+                      {publishingBrand ? 'Publishing…' : 'Publish current brand for everyone'}
+                    </button>
+                    {sharedBrand && (
+                      <button type="button" onClick={removeSharedBrand} disabled={publishingBrand} className="premium-btn premium-btn-danger" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
+                        Remove shared brand
+                      </button>
+                    )}
+                  </div>
+                )}
+                {!isSuperadmin && sharedBrand && (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: '0.75rem 0 0' }}>
+                    Set by your workspace admin — the name, tagline and logo below are locked to the shared brand.
+                  </p>
+                )}
+              </SectionCard>
+
               {/* Brand Identity Details */}
               <SectionCard icon={Type} title="Brand Identity Texts" subtitle="The name and tagline shown across the platform.">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Company/App Name</label>
-                    <input 
-                      type="text" 
-                      value={brandNameState} 
-                      onChange={(e) => handleUpdateBrandingText(e.target.value, brandSloganState)} 
-                      className="premium-input" 
+                    <input
+                      type="text"
+                      value={brandNameState}
+                      disabled={!!sharedBrand && !isSuperadmin}
+                      onChange={(e) => handleUpdateBrandingText(e.target.value, brandSloganState)}
+                      className="premium-input"
                     />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Tagline / Slogan</label>
-                    <input 
-                      type="text" 
-                      value={brandSloganState} 
-                      onChange={(e) => handleUpdateBrandingText(brandNameState, e.target.value)} 
-                      className="premium-input" 
+                    <input
+                      type="text"
+                      value={brandSloganState}
+                      disabled={!!sharedBrand && !isSuperadmin}
+                      onChange={(e) => handleUpdateBrandingText(brandNameState, e.target.value)}
+                      className="premium-input"
                     />
                   </div>
                 </div>
@@ -998,11 +1123,11 @@ export const Settings: React.FC<SettingsProps> = ({
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button type="button" onClick={() => logoInputRef.current?.click()} className="premium-btn premium-btn-primary" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
+                    <button type="button" onClick={() => logoInputRef.current?.click()} disabled={!!sharedBrand && !isSuperadmin} className="premium-btn premium-btn-primary" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
                       Upload Brand Logo
                     </button>
                     {logoPreview && (
-                      <button type="button" onClick={resetToDefaultLogo} className="premium-btn premium-btn-danger" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
+                      <button type="button" onClick={resetToDefaultLogo} disabled={!!sharedBrand && !isSuperadmin} className="premium-btn premium-btn-danger" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
                         Reset Default
                       </button>
                     )}

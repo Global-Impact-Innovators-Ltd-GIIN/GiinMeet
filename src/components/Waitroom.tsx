@@ -13,6 +13,9 @@ interface WaitroomProps {
   onAdmitted: (meetingTitle: string, participantId: string, displayName: string) => void;
   onDeclined: () => void;
   onBack: () => void;
+  // Phase 3 (Feature 4) — shared workspace brand, passed from App.
+  brandName?: string;
+  logoUrl?: string;
 }
 
 export const Waitroom: React.FC<WaitroomProps> = ({
@@ -22,7 +25,9 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   user,
   onAdmitted,
   onDeclined,
-  onBack
+  onBack,
+  brandName = 'GiinMeet',
+  logoUrl = '/logo.png'
 }) => {
   const [meetingDetails, setMeetingDetails] = useState<{ title: string; passcode: string; require_waiting_room?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -447,11 +452,17 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     <div className="flex-center" style={{ minHeight: '80vh', padding: '2rem' }}>
       <div className="glass-panel" style={{ maxWidth: '450px', width: '100%', padding: '2.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         
-        {/* Header Title details */}
+        {/* Header Title details — workspace brand, then the meeting */}
         <div style={{ textAlign: 'center' }}>
+          <img
+            src={logoUrl}
+            alt={`${brandName} logo`}
+            style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '8px', margin: '0 auto 0.5rem', display: 'block' }}
+          />
+          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>{brandName}</div>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
             <Sparkles size={12} />
-            <span>GIIN MEET Security waitroom</span>
+            <span>{brandName} Security waitroom</span>
           </span>
           <h2 style={{ fontSize: '1.6rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)' }}>
             {meetingDetails?.title || 'Active Video Call'}

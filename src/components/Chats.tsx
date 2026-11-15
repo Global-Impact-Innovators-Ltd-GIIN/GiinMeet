@@ -6,6 +6,7 @@ import {
   ExternalLink, Minimize2, Paintbrush, Calendar, Phone, Users, Lock, Plus
 } from 'lucide-react';
 import { giinApi, supabase } from '../supabaseClient';
+import { getLocalBrandName } from '../utils/brand';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
 
 export interface MessageReaction {
@@ -1016,7 +1017,7 @@ export const Chats: React.FC<ChatsProps> = ({
   // Generate invitation link for non-registered contacts
   const handleCopyInviteLink = () => {
     const inviteLink = `${window.location.origin}/#/join`;
-    const inviteText = `Hey! Join me on GiinMeet for secure virtual meetings and instant chats. Sign up here: ${inviteLink}`;
+    const inviteText = `Hey! Join me on ${getLocalBrandName()} for secure virtual meetings and instant chats. Sign up here: ${inviteLink}`;
     navigator.clipboard.writeText(inviteText);
     setToastMessage('Invitation copied to clipboard!');
     setTimeout(() => setToastMessage(''), 3000);

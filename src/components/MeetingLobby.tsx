@@ -15,6 +15,9 @@ interface MeetingLobbyProps {
   currentUser: { name: string; email: string } | null;
   onJoin: (videoOn: boolean, audioOn: boolean) => void;
   onCancel: () => void;
+  // Phase 3 (Feature 4) — shared workspace brand, passed from App.
+  brandName?: string;
+  logoUrl?: string;
 }
 
 export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
@@ -24,7 +27,9 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
   hostName,
   currentUser,
   onJoin,
-  onCancel
+  onCancel,
+  brandName = 'GiinMeet',
+  logoUrl = '/logo.png'
 }) => {
   // Fix Round 6: honour the join presets from Settings (mute on join /
   // camera off on join). The lobby toggles still win once the user
@@ -312,6 +317,10 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
             gap: '1.25rem'
           }}>
             <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem' }}>
+                <img src={logoUrl} alt={`${brandName} logo`} style={{ width: '36px', height: '36px', objectFit: 'contain', borderRadius: '6px' }} />
+                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)' }}>{brandName}</span>
+              </div>
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
                 Virtual Meeting Room
               </span>

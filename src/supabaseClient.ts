@@ -236,7 +236,7 @@ export const MEETING_PUBLIC_COLUMNS =
 
 // Build a calendar (.ics) file for a meeting, for download or import into
 // Google/Outlook/Apple Calendar. Pure client-side generation — no provider.
-export const buildICS = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }): string => {
+export const buildICS = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }, brandName: string = 'GiinMeet'): string => {
   const start = new Date(meeting.time);
   const mins = parseInt(String(meeting.duration || '60').replace(/\D/g, ''), 10) || 60;
   const end = new Date(start.getTime() + mins * 60000);
@@ -246,22 +246,22 @@ export const buildICS = (meeting: { id: string; title: string; time: string; dur
   return [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//GIIN MEET//EN',
+    `PRODID:-//${brandName}//EN`,
     'BEGIN:VEVENT',
     `UID:${meeting.id}@giinmeet`,
     `DTSTAMP:${fmt(new Date())}`,
     `DTSTART:${fmt(start)}`,
     `DTEND:${fmt(end)}`,
     `SUMMARY:${esc(meeting.title)}`,
-    `DESCRIPTION:${esc(`GIIN Meet video meeting. Join: ${link}`)}`,
+    `DESCRIPTION:${esc(`${brandName} video meeting. Join: ${link}`)}`,
     `LOCATION:${esc(link)}`,
     'END:VEVENT',
     'END:VCALENDAR',
   ].join('\r\n');
 };
 
-export const downloadICS = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }) => {
-  const blob = new Blob([buildICS(meeting)], { type: 'text/calendar' });
+export const downloadICS = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }, brandName?: string) => {
+  const blob = new Blob([buildICS(meeting, brandName)], { type: 'text/calendar' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -273,10 +273,10 @@ export const downloadICS = (meeting: { id: string; title: string; time: string; 
 // Phase 2 (#2) — WhatsApp / SMS invites. The invite words are built
 // once here so the copy button, the mailto: invite, the WhatsApp share
 // and the SMS invite all send the same text; only the channel differs.
-export const buildInviteText = (meeting: { id: string; title: string; time?: string | null; passcode?: string | null }, link: string): string => {
+export const buildInviteText = (meeting: { id: string; title: string; time?: string | null; passcode?: string | null }, link: string, brandName: string = 'GiinMeet'): string => {
   const timeStr = meeting.time ? new Date(meeting.time).toLocaleString() : '';
   return [
-    'Please join my GIIN Meet video meeting:',
+    `Please join my ${brandName} video meeting:`,
     `Topic: ${meeting.title}`,
     ...(timeStr ? [`Time: ${timeStr}`] : []),
     `Join link: ${link}`,
@@ -292,8 +292,8 @@ export const buildInviteText = (meeting: { id: string; title: string; time?: str
 // person; without one it opens WhatsApp's share sheet so the host picks
 // the contact there. The number is digits only (country code + number);
 // anything else is dropped rather than guessed at.
-export const buildWhatsAppInviteUrl = (meeting: { id: string; title: string; time?: string | null; passcode?: string | null }, link: string, phone?: string | null): string => {
-  const text = encodeURIComponent(buildInviteText(meeting, link));
+export const buildWhatsAppInviteUrl = (meeting: { id: string; title: string; time?: string | null; passcode?: string | null }, link: string, phone?: string | null, brandName?: string): string => {
+  const text = encodeURIComponent(buildInviteText(meeting, link, brandName));
   const digits = (phone || '').replace(/\D/g, '');
   return digits ? `https://wa.me/${digits}?text=${text}` : `https://api.whatsapp.com/send?text=${text}`;
 };
@@ -305,7 +305,7 @@ export const buildWhatsAppInviteUrl = (meeting: { id: string; title: string; tim
 // no keys, no account needed. The full two-way sync (creating the
 // event in the host's calendar from GiinMeet) still needs a Google
 // Cloud OAuth client — see docs/phase2-setup.md.
-export const buildGoogleCalendarUrl = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }): string => {
+export const buildGoogleCalendarUrl = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }, brandName: string = 'GiinMeet'): string => {
   const start = new Date(meeting.time);
   const mins = parseInt(String(meeting.duration || '60').replace(/\D/g, ''), 10) || 60;
   const end = new Date(start.getTime() + mins * 60000);
@@ -315,7 +315,7 @@ export const buildGoogleCalendarUrl = (meeting: { id: string; title: string; tim
     action: 'TEMPLATE',
     text: meeting.title,
     dates: `${fmt(start)}/${fmt(end)}`,
-    details: `GIIN Meet video meeting. Join: ${link}`,
+    details: `${brandName} video meeting. Join: ${link}`,
     location: link,
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;

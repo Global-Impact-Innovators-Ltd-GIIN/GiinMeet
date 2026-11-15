@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2 } from 'lucide-react';
 import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
+import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
 
 interface Meeting {
   id: string;
@@ -457,9 +458,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="bl-controls"><span className="bl-ctl" /><span className="bl-ctl" /><span className="bl-ctl" /><span className="bl-ctl bl-ctl-end" /></div>
             <div className="bl-logo">
               <div className="bl-logo-panel">
-                <img src="/logo.png" alt="" />
-                <div className="bl-logo-name">GiinMeet</div>
-                <div className="bl-logo-tag">Connect. Collaborate. Virtualize.</div>
+                <img src={getLocalLogoUrl()} alt="" />
+                <div className="bl-logo-name">{getLocalBrandName()}</div>
+                <div className="bl-logo-tag">{getLocalBrandSlogan()}</div>
               </div>
             </div>
           </div>
@@ -758,7 +759,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <button
                         onClick={async () => {
                           const full = await withHostPasscode(meeting);
-                          downloadICS(full);
+                          downloadICS(full, getLocalBrandName());
                         }}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -770,7 +771,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <button
                         onClick={async () => {
                           const full = await withHostPasscode(meeting);
-                          window.open(buildGoogleCalendarUrl(full), '_blank', 'noopener,noreferrer');
+                          window.open(buildGoogleCalendarUrl(full, getLocalBrandName()), '_blank', 'noopener,noreferrer');
                         }}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -1293,10 +1294,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   }
                   const full = await withHostPasscode(inviteMeeting);
                   const link = buildJoinLink(full.id, full.passcode);
-                  const subject = encodeURIComponent(`Invitation: ${full.title} — GIIN Meet`);
-                  const body = encodeURIComponent(`Please join my GIIN Meet video meeting:\nTopic: ${full.title}\nTime: ${new Date(full.time).toLocaleString()}\nJoin link: ${link}\nMeeting ID: ${full.id}\nPasscode: ${full.passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
+                  const subject = encodeURIComponent(`Invitation: ${full.title} — ${getLocalBrandName()}`);
+                  const body = encodeURIComponent(`Please join my ${getLocalBrandName()} video meeting:\nTopic: ${full.title}\nTime: ${new Date(full.time).toLocaleString()}\nJoin link: ${link}\nMeeting ID: ${full.id}\nPasscode: ${full.passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
                   window.location.href = `mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`;
-                  setInviteNote('Your mail app opened with the invitation ready to send. No email is sent automatically — GIIN Meet has no mail provider configured yet.');
+                  setInviteNote(`Your mail app opened with the invitation ready to send. No email is sent automatically — ${getLocalBrandName()} has no mail provider configured yet.`);
                 }}
               >
                 Email Invite
@@ -1355,7 +1356,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   onClick={async () => {
                     const full = await withHostPasscode(inviteMeeting);
                     const link = buildJoinLink(full.id, full.passcode);
-                    window.open(buildWhatsAppInviteUrl(full, link, invitePhone), '_blank', 'noopener,noreferrer');
+                    window.open(buildWhatsAppInviteUrl(full, link, invitePhone, getLocalBrandName()), '_blank', 'noopener,noreferrer');
                     setInviteNote('WhatsApp opened with the invitation ready to send.');
                   }}
                 >
@@ -1551,7 +1552,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 Meeting Scheduled Successfully
               </h3>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                Your professional GIIN Meet room is ready.
+                Your professional {getLocalBrandName()} room is ready.
                 {seriesCreated > 1 && ` This is a recurring series — ${seriesCreated} meetings were created (details below are for the first one).`}
               </p>
             </div>
@@ -1636,7 +1637,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     return scheduledMeetingDetails.time;
                   }
                 })();
-                const invitation = `Please join my GIIN Meet video conference:
+                const invitation = `Please join my ${getLocalBrandName()} video conference:
 Topic: ${scheduledMeetingDetails.title}
 Time: ${timeStr}
 
@@ -1658,7 +1659,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             <button
               onClick={async () => {
                 const full = await withHostPasscode(scheduledMeetingDetails);
-                downloadICS(full);
+                downloadICS(full, getLocalBrandName());
               }}
               className="premium-btn premium-btn-secondary"
               style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem' }}
@@ -1669,7 +1670,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             <button
               onClick={async () => {
                 const full = await withHostPasscode(scheduledMeetingDetails);
-                window.open(buildGoogleCalendarUrl(full), '_blank', 'noopener,noreferrer');
+                window.open(buildGoogleCalendarUrl(full, getLocalBrandName()), '_blank', 'noopener,noreferrer');
               }}
               className="premium-btn premium-btn-secondary"
               style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem' }}

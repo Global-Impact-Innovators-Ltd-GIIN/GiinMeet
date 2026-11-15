@@ -21,6 +21,7 @@ import { Superadmin } from './components/Superadmin';
 import { MeetingLobby } from './components/MeetingLobby';
 import { giinApi, supabase, getTransparentLogo, isMeetingHost, isMeetingHostForUser } from './supabaseClient';
 import { applyAccentColor, applyBorderRadius, applyFont, applyUiStyle } from './utils/theme';
+import { loadAndApplySharedBrand } from './utils/brand';
 import { encryptMessage, decryptMessage } from './services/e2ee';
 
 
@@ -216,6 +217,16 @@ function App() {
     return () => {
       window.removeEventListener('giin_logo_changed', handleLogoUpdate);
     };
+  }, []);
+
+  // Phase 3 (Feature 4) — shared workspace brand: load the brand the
+  // workspace admin published (if any) and sync it into the same
+  // localStorage keys + events above, so this device shows the same
+  // brand as everyone else. Runs for guests too: the sign-in screen,
+  // waiting room and lobby all render from this state. No brand row
+  // (or SQL not run) leaves the local/default brand untouched.
+  useEffect(() => {
+    loadAndApplySharedBrand(supabase);
   }, []);
 
   // Guest user session state
@@ -1219,20 +1230,20 @@ function App() {
     if (totalUnreadMessages > 0 && !isWindowFocused) {
       let showAlert = true;
       interval = setInterval(() => {
-        document.title = showAlert 
-          ? `💬 (${totalUnreadMessages}) New Message!` 
-          : 'GiinMeet';
+        document.title = showAlert
+          ? `💬 (${totalUnreadMessages}) New Message!`
+          : brandName;
         showAlert = !showAlert;
       }, 1500);
     } else {
-      document.title = totalUnreadMessages > 0 
-        ? `💬 (${totalUnreadMessages}) GiinMeet | Chat` 
-        : 'GiinMeet';
+      document.title = totalUnreadMessages > 0
+        ? `💬 (${totalUnreadMessages}) ${brandName} | Chat`
+        : brandName;
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [totalUnreadMessages, isWindowFocused]);
+  }, [totalUnreadMessages, isWindowFocused, brandName]);
 
   // Sync state changes to storage and update URL hash
   useEffect(() => {
@@ -2038,11 +2049,13 @@ function App() {
       );
     }
     return (
-      <Waitroom 
+      <Waitroom
         meetingId={joinMeetingData.meetingId}
         initialPasscode={joinMeetingData.passcode}
         initialDisplayName={preJoinName}
         user={user}
+        brandName={brandName}
+        logoUrl={logoUrl}
         onAdmitted={(title, _participantId, displayName) => {
           setIsP2PCall(false);
           setActiveCallTitle(title);
@@ -2086,6 +2099,9 @@ function App() {
     return (
       <Auth
         initialMode="recover"
+        brandName={brandName}
+        brandSlogan={brandSlogan}
+        logoUrl={logoUrl}
         onAuthSuccess={handleAuthSuccess}
         onPasswordResetDone={() => setPasswordRecovery(false)}
       />
@@ -2093,7 +2109,7 @@ function App() {
   }
 
   if (user === null) {
-    return <Auth onAuthSuccess={handleAuthSuccess} />;
+    return <Auth brandName={brandName} brandSlogan={brandSlogan} logoUrl={logoUrl} onAuthSuccess={handleAuthSuccess} />;
   }
 
   return (
@@ -2918,6 +2934,8 @@ function App() {
               passcode={lobbyMeetingData.passcode}
               hostName={lobbyMeetingData.host}
               currentUser={user}
+              brandName={brandName}
+              logoUrl={logoUrl}
               onJoin={(videoOn, audioOn) => {
                 setActiveCallTitle(lobbyMeetingData.title);
                 setActiveMeetingId(lobbyMeetingData.id);
@@ -2997,8 +3015,9 @@ function App() {
           )}
 
           {currentView === 'settings' && (
-            <Settings 
+            <Settings
               isDarkMode={isDarkMode}
+              isSuperadmin={user?.is_superadmin}
               onToggleTheme={handleToggleTheme}
               userName={userName}
               userEmail={userEmail}

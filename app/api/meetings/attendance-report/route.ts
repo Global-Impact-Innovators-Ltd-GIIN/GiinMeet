@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { loadWorkspaceBrandName } from '../../../../src/utils/brand';
 
 // Phase 1 — attendance auto-report. Called once by the host's browser
 // when a meeting ends for everyone (fire-and-forget — the end never
@@ -125,6 +126,10 @@ export async function POST(req: NextRequest) {
     if (!hostEmail) {
       return NextResponse.json({ ok: true, queued: false, reason: 'NO_HOST_EMAIL', message: 'The attendance report was saved, but no email address is on file for the host, so no email was queued.' });
     }
+    // Phase 3 (Feature 4) — sign the report with the workspace
+    // brand name when one is published. Best-effort: a missing table
+    // or no brand set keeps the default "GiinMeet" sign-off.
+    const brandName = await loadWorkspaceBrandName(admin);
     const title = (meeting as any).title || 'Meeting';
     const when = (meeting as any).time ? new Date((meeting as any).time).toLocaleString() : '';
     const lateCount = withLate.filter((r) => r.isLate).length;
@@ -140,13 +145,13 @@ export async function POST(req: NextRequest) {
       ``,
       `You can also view and download this attendance list from your dashboard.`,
       ``,
-      `— GIIN Meet`,
+      `— ${brandName}`,
     ];
     const htmlRows = withLate
       .sort((a, b) => a.joinedAt - b.joinedAt)
       .map((r) => `<tr><td>${r.name}</td><td>${formatTime(r.joinedAt)}</td><td>${r.leftAt ? formatTime(r.leftAt) : '—'}</td><td>${formatDuration(r.stayedMs)}</td><td>${r.isLate ? '<strong>Late</strong>' : ''}</td></tr>`)
       .join('');
-    const html = `<p>Hi ${hostName},</p><p>Attendance for <strong>${title}</strong>${when ? ` (${when})` : ''}: ${withLate.length} participant${withLate.length === 1 ? '' : 's'}${lateCount ? `, ${lateCount} late` : ''}.</p><table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>Name</th><th>Joined</th><th>Left</th><th>Stayed</th><th></th></tr></thead><tbody>${htmlRows}</tbody></table><p>You can also view and download this attendance list from your dashboard.</p><p>— GIIN Meet</p>`;
+    const html = `<p>Hi ${hostName},</p><p>Attendance for <strong>${title}</strong>${when ? ` (${when})` : ''}: ${withLate.length} participant${withLate.length === 1 ? '' : 's'}${lateCount ? `, ${lateCount} late` : ''}.</p><table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>Name</th><th>Joined</th><th>Left</th><th>Stayed</th><th></th></tr></thead><tbody>${htmlRows}</tbody></table><p>You can also view and download this attendance list from your dashboard.</p><p>— ${brandName}</p>`;
     const { error: queueError } = await admin.from('pending_emails').insert([{
       type: 'attendance_report',
       meeting_id: meetingId,

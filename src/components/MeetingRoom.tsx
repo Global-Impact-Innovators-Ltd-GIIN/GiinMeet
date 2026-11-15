@@ -11,6 +11,7 @@ import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
 import { DeviceSettingsModal } from './DeviceSettingsModal';
 import { getParticipantInitials } from '../utils/getParticipantInitials';
+import { getLocalBrandName } from '../utils/brand';
 
 // Web Audio API Synthesized sound effects
 let audioCtx: AudioContext | null = null;
@@ -6265,7 +6266,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <button
               onClick={() => {
                 const link = buildJoinLink(meetingId, passcode);
-                const invitation = `Please join my GIIN Meet video conference:
+                const invitation = `Please join my ${getLocalBrandName()} video conference:
 Topic: ${meetingTitle}
 Join Link: ${link}
 Meeting ID: ${meetingId}
@@ -6288,7 +6289,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             <button
               onClick={() => {
                 const link = buildJoinLink(meetingId, passcode);
-                window.open(buildWhatsAppInviteUrl({ id: meetingId, title: meetingTitle, passcode }, link), '_blank', 'noopener,noreferrer');
+                window.open(buildWhatsAppInviteUrl({ id: meetingId, title: meetingTitle, passcode }, link, undefined, getLocalBrandName()), '_blank', 'noopener,noreferrer');
               }}
               className="premium-btn premium-btn-secondary"
               style={{ width: '100%', justifyContent: 'center', gap: '6px', padding: '0.5rem', fontSize: '0.75rem' }}
@@ -9196,10 +9197,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                       return;
                     }
                     const link = buildJoinLink(meetingId, passcode);
-                    const subject = encodeURIComponent(`Invitation: ${meetingTitle} — GIIN Meet`);
-                    const body = encodeURIComponent(`Please join my GIIN Meet video meeting:\nTopic: ${meetingTitle}\nJoin link: ${link}\nMeeting ID: ${meetingId}\nPasscode: ${passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
+                    const subject = encodeURIComponent(`Invitation: ${meetingTitle} — ${getLocalBrandName()}`);
+                    const body = encodeURIComponent(`Please join my ${getLocalBrandName()} video meeting:\nTopic: ${meetingTitle}\nJoin link: ${link}\nMeeting ID: ${meetingId}\nPasscode: ${passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
                     window.location.href = `mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`;
-                    setInviteNote('Your mail app opened with the invitation ready to send. No email is sent automatically — GIIN Meet has no mail provider configured yet.');
+                    setInviteNote(`Your mail app opened with the invitation ready to send. No email is sent automatically — ${getLocalBrandName()} has no mail provider configured yet.`);
                   }}
                   className="premium-btn premium-btn-secondary"
                   style={{ width: '100%', justifyContent: 'center', gap: '0.5rem', fontSize: '0.8rem' }}

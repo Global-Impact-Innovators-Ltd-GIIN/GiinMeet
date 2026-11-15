@@ -194,9 +194,16 @@ interface AuthProps {
   // new-password form instead of sign-in.
   initialMode?: 'recover';
   onPasswordResetDone?: () => void;
+  // Phase 3 (Feature 4) — shared workspace brand, passed from App
+  // (which loads it from the server on start). The sign-in screen
+  // previously hardcoded the default logo / "Welcome to GiinMeet" and
+  // never showed a custom brand at all.
+  brandName?: string;
+  brandSlogan?: string;
+  logoUrl?: string;
 }
 
-export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswordResetDone }) => {
+export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswordResetDone, brandName: brandNameProp, brandSlogan: brandSloganProp, logoUrl: logoUrlProp }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [authMode, setAuthMode] = useState<'email' | 'phone'>('email');
 
@@ -305,11 +312,15 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
   const [workspaceDiscovery, setWorkspaceDiscovery] = useState<{ domain: string; name: string; isPersonal?: boolean } | null>(null);
   const [customWorkspaceName, setCustomWorkspaceName] = useState('');
 
-  // Transparent logo loading state
-  const [logoUrl, setLogoUrl] = useState('/logo.png');
+  // Transparent logo loading state (only used when App passes no
+  // brand: the passed logo is already the resolved shared/custom logo).
+  const [fallbackLogo, setFallbackLogo] = useState('/logo.png');
   useEffect(() => {
-    getTransparentLogo('/logo.png').then(url => setLogoUrl(url));
-  }, []);
+    if (!logoUrlProp) getTransparentLogo('/logo.png').then(url => setFallbackLogo(url));
+  }, [logoUrlProp]);
+  const logoUrl = logoUrlProp || fallbackLogo;
+  const displayBrandName = brandNameProp || 'GiinMeet';
+  const displayBrandSlogan = brandSloganProp || 'Connect, Collaborate, Virtualize';
 
   // Refs for the 6 OTP input boxes
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -738,10 +749,10 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
             }} 
           />
           <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>
-            Welcome to GiinMeet
+            Welcome to {displayBrandName}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
-            Connect, Collaborate, Virtualize
+            {displayBrandSlogan}
           </p>
         </div>
 
