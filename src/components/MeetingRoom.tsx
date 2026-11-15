@@ -3742,7 +3742,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Screen sharing track feed replacement injector (User gesture compliant)
   const startScreenShare = async (): Promise<boolean> => {
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
-      triggerToast('Screen sharing is not supported in this browser -- try Chrome or Edge on a laptop.');
+      triggerToast('Screen sharing is not supported in this browser — try a desktop browser instead.');
       return false;
     }
     setScreenShareError(null);
@@ -4178,35 +4178,120 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [livekitRemoteStreams, remoteStreams, engineType]);
 
-  // Initialize audio track (kept alive throughout the meeting)
-  useEffect(() => {
-    async function initAudio() {
-      try {
-        const savedMic = localStorage.getItem('giin_selected_mic');
-        const audioStream = await navigator.mediaDevices.getUserMedia({
-          audio: micAudioConstraints(savedMic || undefined)
-        });
-        const audioTrack = audioStream.getAudioTracks()[0];
-        localMicRawTrackRef.current = audioTrack;
-        verifyMicProcessing(audioTrack);
-        // One funnel (see publishMicTrack): local stream, P2P senders,
-        // LiveKit publication and speaking detector all get this track.
-        await publishMicTrack(audioTrack);
-      } catch (err: any) {
-        // A dead mic used to fail silently (console.error only) and the
-        // user joined the meeting unable to speak, never knowing why.
-        console.error('Error acquiring audio:', err);
-        const reason = err?.name === 'NotAllowedError'
-          ? 'Microphone blocked — allow the microphone in the browser address bar, then turn your mic on again. Others cannot hear you until then.'
-          : err?.name === 'NotFoundError'
-          ? 'No microphone was found on this device — plug one in, then turn your mic on again.'
-          : err?.name === 'NotReadableError'
-          ? 'Your microphone is in use by another app — close that app, then turn your mic on again.'
-          : `Your microphone could not be started (${err?.message || 'unknown error'}). Others cannot hear you.`;
-        triggerToast(reason);
+  // All-browsers + camera/mic-on-at-join (Round 4): media error kinds.
+  // 'denied' = the browser/site is blocking the device — retrying would
+  // just re-prompt and fail the same way. 'not-found' = no such device
+  // (or the browser cannot reach media devices at all). 'busy' = another
+  // app holds the device. 'transient' = anything that can clear on its
+  // own, e.g. the camera still releasing after the pre-join preview
+  // stopped. Only 'busy'/'transient' get one automatic retry.
+  const mediaErrorKind = (err: any): 'denied' | 'not-found' | 'busy' | 'transient' => {
+    const name = err?.name || '';
+    if (name === 'NotAllowedError' || name === 'SecurityError') return 'denied';
+    if (name === 'NotFoundError' || name === 'NotSupportedError') return 'not-found';
+    if (name === 'NotReadableError' || name === 'TrackStartError') return 'busy';
+    return 'transient';
+  };
+  // True when the user joined with everything off on purpose ("Join
+  // without camera / microphone", or both lobby toggles off): the room
+  // must NOT acquire any device at join — no permission prompt, no
+  // capture. Devices are acquired lazily the first time the user turns
+  // one on (see toggleMute / the video effect).
+  const joinedWithoutDevices = initialMutedState && !initialVideoState;
+  // One automatic join-time retry per device, so a transient failure
+  // never leaves the user silently off. Reset on every fresh
+  // user-initiated acquisition (join, or toggling a device back on).
+  const micJoinRetryRef = useRef(false);
+  const micAcquiringRef = useRef(false);
+  const videoJoinRetryRef = useRef(false);
+  // Mount guard for the delayed mic retry: if the user leaves within
+  // the 1.5 s wait, the retry must not acquire a mic into a dead room.
+  const roomMountedRef = useRef(true);
+  useEffect(() => () => { roomMountedRef.current = false; }, []);
+
+  // One mic acquisition funnel for join + unmute (see toggleMute): the
+  // same constraints, the same plain-language errors, one automatic
+  // retry for transient failures, and a retry without the saved device
+  // when a deviceId saved on another machine makes this one refuse
+  // (OverconstrainedError / NotFoundError). Returns true when a live
+  // mic track is published.
+  const acquireMicTrack = async (): Promise<boolean> => {
+    if (micAcquiringRef.current) return false;
+    const live = localMicRawTrackRef.current;
+    if (live && live.readyState === 'live') return true;
+    micAcquiringRef.current = true;
+    micJoinRetryRef.current = false;
+    const savedMic = (() => { try { return localStorage.getItem('giin_selected_mic') || ''; } catch (e) { return ''; } })();
+    const toastMicError = (err: any) => {
+      const reason = !navigator.mediaDevices?.getUserMedia
+        ? 'This browser cannot access a microphone on this page — check the browser site permissions, or try a different browser.'
+        : err?.name === 'NotAllowedError'
+        ? 'Microphone blocked — allow the microphone in the browser address bar, then turn your mic on again. Others cannot hear you until then.'
+        : err?.name === 'NotFoundError'
+        ? 'No microphone was found on this device — plug one in, then turn your mic on again.'
+        : err?.name === 'NotReadableError'
+        ? 'Your microphone is in use by another app — close that app, then turn your mic on again.'
+        : `Your microphone could not be started (${err?.message || 'unknown error'}). Others cannot hear you.`;
+      triggerToast(reason);
+    };
+    const tryOnce = async (withSaved: boolean): Promise<MediaStreamTrack> => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        const e: any = new Error('mediaDevices unavailable');
+        e.name = 'NotSupportedError';
+        throw e;
+      }
+      const s = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints(withSaved && savedMic ? savedMic : undefined) });
+      const t = s.getAudioTracks()[0];
+      if (!t) throw new Error('No audio track acquired');
+      return t;
+    };
+    const publish = async (audioTrack: MediaStreamTrack): Promise<boolean> => {
+      if (!roomMountedRef.current) { try { audioTrack.stop(); } catch (e) {} micAcquiringRef.current = false; return false; }
+      localMicRawTrackRef.current = audioTrack;
+      verifyMicProcessing(audioTrack);
+      // One funnel (see publishMicTrack): local stream, P2P senders,
+      // LiveKit publication and speaking detector all get this track.
+      await publishMicTrack(audioTrack);
+      micAcquiringRef.current = false;
+      return true;
+    };
+    let track: MediaStreamTrack | null = null;
+    let lastErr: any = null;
+    try {
+      track = await tryOnce(!!savedMic);
+    } catch (err: any) {
+      lastErr = err;
+      // A deviceId saved on another machine can make this device refuse.
+      if (savedMic && (err?.name === 'OverconstrainedError' || err?.name === 'NotFoundError')) {
+        try { track = await tryOnce(false); } catch (err2: any) { lastErr = err2; }
       }
     }
-    initAudio();
+    if (!track && lastErr) {
+      const kind = mediaErrorKind(lastErr);
+      if ((kind === 'busy' || kind === 'transient') && !micJoinRetryRef.current) {
+        micJoinRetryRef.current = true;
+        await new Promise(r => setTimeout(r, 1500));
+        if (roomMountedRef.current) {
+          try { track = await tryOnce(false); } catch (err2: any) { lastErr = err2; }
+        }
+      }
+    }
+    if (!track) {
+      console.error('Error acquiring audio:', lastErr);
+      toastMicError(lastErr);
+      micAcquiringRef.current = false;
+      return false;
+    }
+    return publish(track);
+  };
+
+  // Initialize audio track (kept alive throughout the meeting)
+  useEffect(() => {
+    // A user who joined with everything off on purpose gets no mic
+    // prompt and no capture at join — the mic is acquired lazily the
+    // first time they unmute (see toggleMute).
+    if (joinedWithoutDevices) return;
+    void acquireMicTrack();
     return () => {
       // Fix Round 6: stop the raw capture too, not just the published
       // track (when Studio Voice is on they are different objects).
@@ -4231,8 +4316,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // re-enabled an existing track, so an ended track stayed
           // "on" with a black tile; enabling an ended track is a no-op.)
           if (current && current.readyState === 'ended') localVideoTrackRef.current = null;
-          try {
-            const savedCam = localStorage.getItem('giin_selected_camera');
+          // Round 4: one acquisition funnel with retries. A camera id
+          // saved on another machine can make this device refuse outright
+          // (retry once with the default camera); a transient failure —
+          // the camera still releasing after the pre-join preview
+          // stopped, or a hiccup — gets one automatic retry after a
+          // short delay instead of leaving the user camera-off. A
+          // denied permission or a missing camera never retries.
+          videoJoinRetryRef.current = false;
+          const attemptVideo = async (withSaved: boolean): Promise<MediaStreamTrack> => {
+            if (!navigator.mediaDevices?.getUserMedia) {
+              const e: any = new Error('mediaDevices unavailable');
+              e.name = 'NotSupportedError';
+              throw e;
+            }
+            const savedCam = withSaved ? localStorage.getItem('giin_selected_camera') : null;
             const videoStream = await navigator.mediaDevices.getUserMedia({
               video: savedCam ? {
                 deviceId: { exact: savedCam },
@@ -4245,20 +4343,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             });
             if (!active) {
               videoStream.getTracks().forEach(t => t.stop());
-              return;
+              throw new Error('Component unmounted');
             }
-            const videoTrack = videoStream.getVideoTracks()[0];
+            const t = videoStream.getVideoTracks()[0];
+            if (!t) throw new Error('No video track acquired');
+            return t;
+          };
+          const attachAcquiredVideo = (videoTrack: MediaStreamTrack) => {
             videoTrack.enabled = true;
             attachLocalCameraTrack(videoTrack);
             localCameraRecoverRef.current.attempts = 0;
-            
             setStream(prev => {
               const newStream = prev || new MediaStream();
               newStream.getVideoTracks().forEach(t => newStream.removeTrack(t));
               newStream.addTrack(videoTrack);
               return newStream;
             });
-
             // Replace track in all active peer connections
             Object.values(pcsRef.current).forEach(pc => {
               const senders = pc.getSenders();
@@ -4269,19 +4369,45 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 const sender = pc.addTrack(videoTrack, stream || new MediaStream([videoTrack]));
               }
             });
-
             // And publish it to LiveKit (the connect effect does not re-run
             // when the camera is switched on mid-call).
             publishLiveKitTrack(videoTrack, Track.Source.Camera);
+          };
+          let videoTrack: MediaStreamTrack | null = null;
+          let lastVideoErr: any = null;
+          try {
+            videoTrack = await attemptVideo(true);
           } catch (err: any) {
-            console.warn('Error acquiring video:', err);
-            const reason = err?.name === 'NotAllowedError'
+            lastVideoErr = err;
+            // A camera id saved on another machine can make this device refuse.
+            const savedCam = localStorage.getItem('giin_selected_camera');
+            if (savedCam && (err?.name === 'OverconstrainedError' || err?.name === 'NotFoundError')) {
+              try { videoTrack = await attemptVideo(false); } catch (err2: any) { lastVideoErr = err2; }
+            }
+          }
+          if (!videoTrack && lastVideoErr && lastVideoErr.message !== 'Component unmounted') {
+            const kind = mediaErrorKind(lastVideoErr);
+            if ((kind === 'busy' || kind === 'transient') && !videoJoinRetryRef.current) {
+              videoJoinRetryRef.current = true;
+              await new Promise(r => setTimeout(r, 1500));
+              if (active) {
+                try { videoTrack = await attemptVideo(false); } catch (err2: any) { lastVideoErr = err2; }
+              }
+            }
+          }
+          if (videoTrack) {
+            attachAcquiredVideo(videoTrack);
+          } else if (lastVideoErr && lastVideoErr.message !== 'Component unmounted') {
+            console.warn('Error acquiring video:', lastVideoErr);
+            const reason = !navigator.mediaDevices?.getUserMedia
+              ? 'This browser cannot access a camera on this page — check the browser site permissions, or try a different browser.'
+              : lastVideoErr?.name === 'NotAllowedError'
               ? 'Camera blocked — allow the camera in the browser address bar, then turn your camera on again. Others see your avatar until then.'
-              : err?.name === 'NotFoundError'
+              : lastVideoErr?.name === 'NotFoundError'
               ? 'No camera was found on this device — you are joining with the camera off.'
-              : err?.name === 'NotReadableError'
+              : lastVideoErr?.name === 'NotReadableError'
               ? 'Your camera is in use by another app — close that app, then turn your camera on again.'
-              : `Your camera could not be started (${err?.message || 'unknown error'}). You are joining with the camera off.`;
+              : `Your camera could not be started (${lastVideoErr?.message || 'unknown error'}). You are joining with the camera off.`;
             triggerToast(reason);
             setLocalCameraLive(false);
             setIsVideoOn(false);
@@ -4397,8 +4523,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const toggleMute = () => {
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
-    if (localAudioTrackRef.current) {
-      localAudioTrackRef.current.enabled = !nextMuted;
+    if (nextMuted) {
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.enabled = false;
+      }
+    } else {
+      // Unmuting with no live mic (the join acquisition failed, or the
+      // user joined without devices): acquire one now. A mute toggle
+      // must never be a dead end — before this fix, unmuting did
+      // nothing at all when no track existed, and only a reload could
+      // bring the mic back.
+      const raw = localMicRawTrackRef.current;
+      if (!raw || raw.readyState !== 'live') {
+        void acquireMicTrack().then(ok => {
+          if (!ok) {
+            // Stay honestly muted — acquireMicTrack already explained why.
+            setIsMuted(true);
+            broadcastMediaState({ isMuted: true });
+          }
+        });
+      } else if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.enabled = true;
+      }
     }
 
     // Broadcast audio state change (through the helper: it reads the live

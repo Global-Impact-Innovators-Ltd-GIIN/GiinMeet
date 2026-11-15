@@ -62,7 +62,7 @@ const fixFor = (kind: 'camera' | 'mic', errName?: string): string => {
       ? 'Your camera is in use by another app — close that app (or the other browser tab using it), then press Retry.'
       : 'Your microphone is in use by another app — close that app, then press Retry.';
   if (errName === 'OverconstrainedError')
-    return 'Your browser refused the camera settings — try another browser (Chrome or Edge on a laptop works best).';
+    return 'Your browser refused the camera settings — press Retry to try the default camera instead.';
   return kind === 'camera'
     ? 'The camera could not be started — check the browser permission in the address bar, then press Retry.'
     : 'The microphone could not be started — check the browser permission in the address bar, then press Retry.';
@@ -243,7 +243,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       // Camera + microphone, together.
       if (!navigator.mediaDevices?.getUserMedia) {
         if (!active) return;
-        const msg = 'This browser cannot access a camera or microphone here — join without camera/microphone below, or try Chrome on this phone.';
+        const msg = 'This browser cannot access a camera or microphone on this page — check the browser site permissions, or join without camera/microphone below.';
         setCameraStatus('fail');
         setMicStatus('fail');
         setCameraError(msg);
