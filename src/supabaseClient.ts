@@ -490,6 +490,62 @@ export const giinApi = {
     return { data: { user }, error: null };
   },
 
+  // Passwordless OTP Email Sign-In — real Supabase email OTP only. The code
+  // is generated and verified by Supabase and delivered by the project's
+  // configured email sender (Resend SMTP once configured in the Supabase
+  // dashboard; until then Supabase's built-in mailer). It is never
+  // generated here and never shown on screen.
+  // shouldCreateUser: false — email codes are a sign-in method for
+  // EXISTING accounts only (for example when the password is forgotten).
+  // Supabase would otherwise silently create a passwordless account for
+  // any email that can receive a code; a new user must register through
+  // the normal sign-up flow instead.
+  signInWithEmailCode: async (email: string, customWorkspaceName?: string) => {
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: {
+        shouldCreateUser: false,
+        data: {
+          workspace_name: customWorkspaceName || 'Personal Workspace',
+        }
+      }
+    });
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  },
+
+  // Validate Email OTP — real Supabase verification only. Any code is never
+  // accepted: an invalid or expired code throws and the user stays signed out.
+  verifyEmailCode: async (email: string, code: string, name?: string, customWorkspaceName?: string) => {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: code,
+      type: 'email'
+    });
+
+    if (error) throw error;
+
+    // Fetch or insert profile
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', data.user?.id)
+      .maybeSingle();
+
+    const user: GiinUser = {
+      id: data.user?.id || '',
+      email: data.user?.email || email,
+      name: profile?.name || name || email.split('@')[0].split('.').map((n: string) => n.charAt(0).toUpperCase() + n.slice(1)).join(' '),
+      workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
+      domain: profile?.domain || (email.split('@')[1] || 'personal'),
+      is_premium: profile?.is_premium || false,
+      is_superadmin: email.toLowerCase() === 'nimdaukus@gmail.com',
+      avatar_url: profile?.avatar_url || ''
+    };
+
+    return { data: { user }, error: null };
+  },
+
   // Fetch user profile from database
   getProfile: async (userId: string) => {
     const { data, error } = await supabase

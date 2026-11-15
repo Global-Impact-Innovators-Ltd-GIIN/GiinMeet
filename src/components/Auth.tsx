@@ -254,6 +254,18 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
     if (/invalid phone|phone.*invalid|not a valid phone/i.test(msg)) {
       return "That phone number doesn't look right. Check it and try again.";
     }
+    // Email OTP: the code is only sent to an EXISTING account
+    // (shouldCreateUser: false). Supabase: "User not found". Route the
+    // user to sign-up instead of inventing a code that will never arrive.
+    if (/user not found|no user|user.*does not exist|signups not allowed/i.test(msg)) {
+      return "We couldn't send a code to this email. Make sure it is the email you signed up with — or create an account with Sign up below.";
+    }
+    if (/invalid.*email|email.*invalid/i.test(msg)) {
+      return "That email address doesn't look right. Check it and try again.";
+    }
+    if (/email.*otp.*disabled|otp.*disabled|email.*not enabled/i.test(msg)) {
+      return "Email codes aren't turned on for this project yet — sign in with your password instead.";
+    }
     if (/expired|invalid.*link|link.*invalid|otp_expired/i.test(msg)) {
       return 'This reset link has expired or was already used. Request a new one below.';
     }
@@ -274,6 +286,13 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
   // default forced every Rwandan user to change the country code first.
   const [countryCode, setCountryCode] = useState('+250');
   const [otpSent, setOtpSent] = useState(false);
+  // Email OTP states — same 6-box entry and resend rules as phone OTP.
+  // emailCodeMode = the email tab is in "sign in with a code" mode;
+  // emailOtpSent = the code was sent and the boxes are showing.
+  // Email codes are for EXISTING accounts only (see signInWithEmailCode);
+  // a new user registers with a password through the normal sign-up.
+  const [emailCodeMode, setEmailCodeMode] = useState(false);
+  const [emailOtpSent, setEmailOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState<string[]>(['', '', '', '', '', '']);
   const [resendTimer, setResendTimer] = useState(60);
   const [validationError, setValidationError] = useState('');
@@ -295,13 +314,13 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
   // Timer countdown hook for Resend link
   useEffect(() => {
     let interval: any;
-    if (otpSent && resendTimer > 0) {
+    if ((otpSent || emailOtpSent) && resendTimer > 0) {
       interval = setInterval(() => {
         setResendTimer(prev => prev - 1);
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [otpSent, resendTimer]);
+  }, [otpSent, emailOtpSent, resendTimer]);
 
   // Auto discover email workspace domain
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -413,6 +432,83 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         setOtpCode(['', '', '', '', '', '']);
       }
       setValidationError(friendlyAuthError(err, 'OTP verification failed. Please try again.'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Email OTP: send a 6-digit sign-in code to an EXISTING account's email.
+  // The code is generated and verified by Supabase and delivered by the
+  // project's configured email sender. It is never generated here and
+  // never shown on screen.
+  const handleSendEmailCode = async () => {
+    const targetEmail = email.trim();
+    if (!targetEmail) {
+      setValidationError('Enter the email address for your account.');
+      return;
+    }
+    setIsLoading(true);
+    setValidationError('');
+    try {
+      const workspaceArg = customWorkspaceName.trim() || 'Personal Workspace';
+      await giinApi.signInWithEmailCode(targetEmail, workspaceArg);
+      setOtpCode(['', '', '', '', '', '']);
+      setEmailOtpSent(true);
+      setResendTimer(60);
+      // Focus the first OTP grid box after render
+      setTimeout(() => {
+        otpRefs.current[0]?.focus();
+      }, 100);
+    } catch (err: any) {
+      console.error('Error sending email verification code:', err);
+      setValidationError(friendlyAuthError(err, 'Could not send the sign-in code. Email sending may not be set up for this project yet — sign in with your password instead.'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Re-send the email sign-in code
+  const handleResendEmailCode = async () => {
+    setOtpCode(['', '', '', '', '', '']);
+    setValidationError('');
+    await handleSendEmailCode();
+  };
+
+  // Verify the email OTP submission
+  const handleVerifyEmailCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const enteredCode = otpCode.join('');
+    if (enteredCode.length < 6) {
+      setValidationError('Please enter all 6 digits of the code.');
+      return;
+    }
+    setIsLoading(true);
+    setValidationError('');
+    try {
+      const workspaceArg = customWorkspaceName.trim() || 'Personal Workspace';
+      const { data } = await giinApi.verifyEmailCode(email.trim(), enteredCode, name || undefined, workspaceArg);
+      if (data.user) {
+        onAuthSuccess({
+          id: data.user.id,
+          email: data.user.email,
+          name: name || data.user.name,
+          workspaceName: data.user.workspaceName,
+          domain: data.user.domain
+        });
+      } else {
+        setValidationError('Invalid verification code. Please check the code and try again.');
+      }
+    } catch (err: any) {
+      console.error('Error verifying email code:', err);
+      const msg = String(err?.message || '');
+      if (/expired|invalid/i.test(msg)) {
+        // The code is dead — let the user request a fresh one immediately
+        // instead of waiting out the resend countdown, and clear the
+        // stale code from the boxes.
+        setResendTimer(0);
+        setOtpCode(['', '', '', '', '', '']);
+      }
+      setValidationError(friendlyAuthError(err, 'Email code verification failed. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -646,7 +742,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         </div>
 
         {/* Auth Mode Tabs (Only visible when entering credentials, not in OTP entry view) */}
-        {!otpSent && resetView === 'none' && (
+        {!otpSent && !emailCodeMode && resetView === 'none' && (
           <div style={{
             display: 'flex',
             backgroundColor: '#090D16',
@@ -827,7 +923,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         )}
 
         {/* Email form gateway */}
-        {authMode === 'email' && resetView === 'none' && (
+        {authMode === 'email' && resetView === 'none' && !emailCodeMode && (
           <form onSubmit={handleEmailSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {!isLogin && (
               <div>
@@ -955,7 +1051,159 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                 </>
               )}
             </button>
+            {isLogin && (
+              <button
+                type="button"
+                onClick={() => { setEmailCodeMode(true); setOtpCode(['', '', '', '', '', '']); setValidationError(''); }}
+                style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, alignSelf: 'center' }}
+              >
+                Sign in with an email code instead
+              </button>
+            )}
           </form>
+        )}
+
+        {/* Email code sign-in (existing accounts only — a new user registers with a password) */}
+        {authMode === 'email' && resetView === 'none' && emailCodeMode && isLogin && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <button
+              type="button"
+              onClick={() => { setEmailCodeMode(false); setEmailOtpSent(false); setValidationError(''); }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--color-secondary)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.3rem',
+                fontSize: '0.8rem',
+                padding: 0,
+                alignSelf: 'flex-start'
+              }}
+            >
+              <ArrowLeft size={14} />
+              <span>Back to password sign-in</span>
+            </button>
+
+            {!emailOtpSent ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>Sign in with an email code</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+                    We will send a 6-digit code to your email. It works for the account you already have — if you don't have one yet, create it with Sign up below.
+                  </p>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
+                    Email Address
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <Mail size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
+                      type="email"
+                      className="premium-input"
+                      placeholder="you@company.com"
+                      value={email}
+                      onChange={handleEmailChange}
+                      style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
+                      required
+                    />
+                  </div>
+                </div>
+                {validationError && <div style={{ color: '#EF4444', fontSize: '0.8rem' }}>{validationError}</div>}
+                <button
+                  type="button"
+                  onClick={handleSendEmailCode}
+                  disabled={isLoading || !email.trim()}
+                  className="premium-btn premium-btn-accent"
+                  style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}
+                >
+                  {isLoading ? <span>Sending Code...</span> : <span>Send Email Code</span>}
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleVerifyEmailCode} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                  A 6-digit code was sent to <strong style={{ color: 'white' }}>{email}</strong>
+                </span>
+
+                <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center' }}>
+                  {Array.from({ length: 6 }).map((_, idx) => (
+                    <input
+                      key={idx}
+                      type="text"
+                      maxLength={1}
+                      ref={el => { otpRefs.current[idx] = el; }}
+                      value={otpCode[idx]}
+                      onChange={e => handleOtpChange(idx, e.target.value)}
+                      onKeyDown={e => handleOtpKeyDown(idx, e)}
+                      onPaste={e => handleOtpPaste(idx, e)}
+                      style={{
+                        width: '44px',
+                        height: '48px',
+                        backgroundColor: '#090D16',
+                        border: '2px solid #1E293B',
+                        borderRadius: '8px',
+                        color: 'white',
+                        textAlign: 'center',
+                        fontSize: '1.3rem',
+                        fontWeight: 800,
+                        outline: 'none',
+                        boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5)',
+                        borderColor: validationError ? '#EF4444' : '#1E293B'
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {validationError && (
+                  <span style={{ color: '#EF4444', fontSize: '0.75rem', fontWeight: 600 }}>
+                    {validationError}
+                  </span>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="premium-btn premium-btn-accent"
+                  style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}
+                >
+                  {isLoading ? <span>Verifying Code...</span> : <span>Verify & Sign In</span>}
+                </button>
+
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  {resendTimer > 0 ? (
+                    <span>Resend code in <strong style={{ color: 'white' }}>{resendTimer}s</strong></span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResendEmailCode}
+                      disabled={isLoading}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--color-accent)',
+                        cursor: isLoading ? 'wait' : 'pointer',
+                        fontWeight: 700,
+                        padding: 0
+                      }}
+                    >
+                      {isLoading ? 'Sending…' : 'Resend Email Code'}
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => { setEmailOtpSent(false); setOtpCode(['', '', '', '', '', '']); setValidationError(''); }}
+                  style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Send to a different email
+                </button>
+              </form>
+            )}
+          </div>
         )}
 
         {/* Phone form gateway */}
@@ -1149,7 +1397,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         )}
 
         {/* Divider */}
-        {!otpSent && (
+        {!otpSent && !emailCodeMode && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <div style={{ flex: 1, height: '1px', backgroundColor: '#1E293B' }} />
             <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>OR ENTER WITH SSO</span>
@@ -1158,7 +1406,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         )}
 
         {/* SSO Button (Hidden in OTP verification code entry view) */}
-        {!otpSent && resetView === 'none' && (
+        {!otpSent && !emailCodeMode && resetView === 'none' && (
           <button 
             onClick={handleGoogleSSO}
             disabled={isLoading}
@@ -1205,7 +1453,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         )}
 
         {/* Toggle between Register/Login */}
-        {!otpSent && resetView === 'none' && (
+        {!otpSent && !emailCodeMode && resetView === 'none' && (
           <div style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             {isLogin ? (
               <span>
