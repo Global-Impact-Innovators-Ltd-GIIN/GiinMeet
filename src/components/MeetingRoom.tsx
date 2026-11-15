@@ -875,6 +875,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [breakoutRoomsCount, setBreakoutRoomsCount] = useState(2);
   const [breakoutDurationMinutes, setBreakoutDurationMinutes] = useState(5);
 
+  // Phase 3 (Feature 1) — host room management. Assignments are the
+  // host's live record of who is in which room (round-robin at start,
+  // then updated by every host move). They are NOT persisted anywhere:
+  // they live in host state and travel to participants over the
+  // meeting-events channel, so this feature needs no database change.
+  const [breakoutAssignments, setBreakoutAssignments] = useState<{ [peerKey: string]: number }>({});
+  // Host broadcast draft + the last broadcast banner every client shows.
+  const [breakoutBroadcastDraft, setBreakoutBroadcastDraft] = useState('');
+  const [breakoutBroadcast, setBreakoutBroadcast] = useState<{ message: string; from: string } | null>(null);
+
   // Meeting timer, layout and pinning, unread chat badge.
   const [meetingJoinedAt] = useState(() => Date.now());
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -2579,6 +2589,27 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  // Phase 3 (Feature 1) — breakout control transport. Control must
+  // reach EVERY room, but the P2P signalling channel splits per room
+  // (`sig-webrtc-<id>-breakout-<n>`), so a host in the main room cannot
+  // reach breakout rooms over it (and rooms cannot reach each other).
+  // The meeting-events channel (`meeting-events-<id>`) is subscribed by
+  // everyone regardless of room or engine, so all breakout control
+  // (start / end / move / broadcast) goes over it. Falls back to the
+  // signalling channel only if the events channel is not up yet.
+  const sendBreakoutControl = (event: string, payload: any) => {
+    const sendOn = (ch: any) => {
+      if (!ch) return false;
+      ch.send({ type: 'broadcast', event, payload });
+      return true;
+    };
+    if (sendOn(eventsChannelRef.current)) return;
+    if (sendOn(sigChannelRef.current)) return;
+    setTimeout(() => {
+      if (!sendOn(eventsChannelRef.current)) sendOn(sigChannelRef.current);
+    }, 600);
+  };
+
   const handleStartBreakouts = (roomsCount: number, durationMinutes: number) => {
     const assignments: { [peerKey: string]: number } = {};
     let roomIdx = 0;
@@ -2590,31 +2621,61 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
     });
 
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'start-breakout',
-        payload: {
-          assignments,
-          durationSeconds: durationMinutes * 60
-        }
-      });
-    }
+    // Phase 3: keep the host's live record of who is where, so the
+    // room-management roster below can show it and moves can update it.
+    setBreakoutAssignments(assignments);
+    setBreakoutBroadcast(null);
+    sendBreakoutControl('start-breakout', {
+      assignments,
+      durationSeconds: durationMinutes * 60
+    });
 
     setBreakoutTimeRemaining(durationMinutes * 60);
     alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes. Breakout rooms run peer-to-peer, not on the video server, so video quality may drop — this is a labelled fallback, not the LiveKit engine.`);
   };
 
   const handleEndBreakouts = () => {
-    if (sigChannelRef.current) {
-      sigChannelRef.current.send({
-        type: 'broadcast',
-        event: 'end-breakout',
-        payload: {}
-      });
-    }
+    sendBreakoutControl('end-breakout', {});
+    setBreakoutAssignments({});
+    setBreakoutBroadcast(null);
     enterBreakoutRoom(null);
     setBreakoutTimeRemaining(null);
+  };
+
+  // Phase 3 (Feature 1) — move one participant to another room (or back
+  // to the main room) while breakouts are active. The move travels on
+  // the meeting-events channel, so it reaches the participant no matter
+  // which room they are in right now; only the named peerKey acts on it.
+  // The host's roster is updated optimistically at the same time.
+  const handleMoveParticipant = (peerKey: string, targetRoom: number | null) => {
+    if (!isAdmin || breakoutTimeRemaining === null) return;
+    const currentRoom = breakoutAssignments[peerKey] ?? null;
+    if (currentRoom === targetRoom) return;
+    sendBreakoutControl('move-breakout', {
+      peerKey,
+      roomNumber: targetRoom,
+      durationSeconds: breakoutTimeRemaining
+    });
+    setBreakoutAssignments(prev => {
+      const next = { ...prev };
+      if (targetRoom === null) delete next[peerKey];
+      else next[peerKey] = targetRoom;
+      return next;
+    });
+  };
+
+  // Phase 3 (Feature 1) — one message the host sends to every room at
+  // once (main room included). Same meeting-events channel as moves, so
+  // it reaches participants in every breakout room, not just the host's
+  // own room. The host sees their own message as a banner too.
+  const handleBroadcastToBreakouts = () => {
+    if (!isAdmin || breakoutTimeRemaining === null) return;
+    const message = breakoutBroadcastDraft.trim();
+    if (!message) return;
+    const from = currentUser?.name || 'Host';
+    sendBreakoutControl('breakout-broadcast', { message, from });
+    setBreakoutBroadcast({ message, from });
+    setBreakoutBroadcastDraft('');
   };
 
 
@@ -2757,6 +2818,51 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (currentUser && newAdminId === currentUser.id) {
           triggerToast('You are now the host of this meeting.');
         }
+      })
+      // Phase 3 (Feature 1) — breakout control lives on this channel, NOT
+      // on the P2P signalling channel. That channel splits per room
+      // (`sig-webrtc-<id>-breakout-<n>`), so a host in the main room could
+      // not reach breakout rooms over it, and rooms could not reach each
+      // other. This channel is subscribed by everyone regardless of room
+      // or engine (see the Fix Round 6 note above), so start / end / move
+      // / broadcast all reach every participant wherever they are.
+      .on('broadcast', { event: 'start-breakout' }, (payload: any) => {
+        const data = payload.payload;
+        const myAssignment = data.assignments[myKey];
+        if (myAssignment) {
+          enterBreakoutRoom(myAssignment);
+          setBreakoutTimeRemaining(data.durationSeconds);
+          setBreakoutBroadcast(null);
+          alert(`You are being moved to Breakout Room ${myAssignment}.`);
+        }
+      })
+      .on('broadcast', { event: 'end-breakout' }, () => {
+        enterBreakoutRoom(null);
+        setBreakoutTimeRemaining(null);
+        setBreakoutAssignments({});
+        setBreakoutBroadcast(null);
+        alert('Breakout rooms have ended. Returning to main room.');
+      })
+      .on('broadcast', { event: 'move-breakout' }, (payload: any) => {
+        const data = payload.payload;
+        if (!data || data.peerKey !== myKey) return;
+        const target = typeof data.roomNumber === 'number' ? data.roomNumber : null;
+        enterBreakoutRoom(target);
+        if (target === null) {
+          setBreakoutTimeRemaining(null);
+          triggerToast('The host moved you back to the main room.');
+        } else {
+          // A late joiner moved in mid-session has no timer yet — take
+          // the remaining time the host sent with the move.
+          setBreakoutTimeRemaining(prev => prev ?? (typeof data.durationSeconds === 'number' ? data.durationSeconds : null));
+          triggerToast(`The host moved you to Breakout Room ${target}.`);
+        }
+      })
+      .on('broadcast', { event: 'breakout-broadcast' }, (payload: any) => {
+        const data = payload.payload;
+        if (!data || typeof data.message !== 'string' || !data.message.trim()) return;
+        setBreakoutBroadcast({ message: data.message.trim(), from: data.from || 'Host' });
+        triggerToast(`Host: ${data.message.trim()}`);
       })
       .subscribe();
     return () => {
@@ -3671,20 +3777,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           sigChannelRef.current.send({ type: 'broadcast', event: 'agenda-update', payload: { items: agendaItemsRef.current } });
         }
       })
-      .on('broadcast', { event: 'start-breakout' }, (payload: any) => {
-        const data = payload.payload;
-        const myAssignment = data.assignments[myKey];
-        if (myAssignment) {
-          enterBreakoutRoom(myAssignment);
-          setBreakoutTimeRemaining(data.durationSeconds);
-          alert(`You are being moved to Breakout Room ${myAssignment}.`);
-        }
-      })
-      .on('broadcast', { event: 'end-breakout' }, () => {
-        enterBreakoutRoom(null);
-        setBreakoutTimeRemaining(null);
-        alert('Breakout rooms have ended. Returning to main room.');
-      })
+      // Phase 3 (Feature 1): start-breakout / end-breakout used to be
+      // handled here, but this P2P signalling channel splits per room
+      // (-breakout-N), so the host could not reach split rooms over it.
+      // Both events now live on the meeting-events channel above, along
+      // with move-breakout and breakout-broadcast.
       .on('broadcast', { event: 'media-state' }, (payload: any) => {
         const data = payload.payload;
         if (data.senderKey !== myKey) {
@@ -5931,6 +6028,40 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           )}
         </div>
       )}
+      {/* Phase 3 (Feature 1) — host broadcast banner. Shown to everyone
+          (main room and all breakout rooms) until dismissed or the
+          breakouts end. Sits below the room banner when both show. */}
+      {breakoutBroadcast && (
+        <div style={{
+          position: 'absolute',
+          top: breakoutRoom !== null ? '125px' : '80px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: 'rgba(245, 158, 11, 0.95)',
+          color: '#111827',
+          padding: '6px 12px',
+          borderRadius: '20px',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          zIndex: 99,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+          maxWidth: '90%'
+        }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {breakoutBroadcast.from}: {breakoutBroadcast.message}
+          </span>
+          <button
+            onClick={() => setBreakoutBroadcast(null)}
+            aria-label="Dismiss broadcast"
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, color: '#111827', padding: 0, lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* Upper Status Bar */}
       <div className="meeting-topbar" style={{
         display: 'flex',
@@ -8058,6 +8189,65 @@ Media encrypted in transit (DTLS-SRTP).`;
                             </button>
                           );
                         })}
+                      </div>
+                    </div>
+
+                    {/* Phase 3 (Feature 1) — who is in which room, with
+                        live moves. The roster is the host's assignment
+                        record: round-robin at start, updated by every
+                        move below. Anyone who joined after the start
+                        shows as Main until the host moves them in.
+                        Moves and broadcasts travel on the meeting-events
+                        channel, so they reach every room. */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem', textAlign: 'left' }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Who is where:</span>
+                      {participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').length === 0 ? (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No other participants yet.</span>
+                      ) : (
+                        participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').map(p => {
+                          const peerKey = p.userId || p.id;
+                          const currentRoom = breakoutAssignments[peerKey] ?? null;
+                          return (
+                            <div key={peerKey} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                              <span style={{ fontSize: '0.75rem', color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>{p.name}</span>
+                              <select
+                                value={currentRoom === null ? 'main' : String(currentRoom)}
+                                onChange={(e) => handleMoveParticipant(peerKey, e.target.value === 'main' ? null : parseInt(e.target.value, 10))}
+                                aria-label={`Move ${p.name} to another room`}
+                                style={{ height: '26px', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px', cursor: 'pointer' }}
+                              >
+                                <option value="main" style={{ color: 'black' }}>Main room</option>
+                                {Array.from({ length: breakoutRoomsCount }).map((_, idx) => (
+                                  <option key={idx + 1} value={String(idx + 1)} style={{ color: 'black' }}>Room {idx + 1}</option>
+                                ))}
+                              </select>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Phase 3 (Feature 1) — broadcast a message to all rooms at once. */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'left' }}>Broadcast to all rooms:</span>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <input
+                          type="text"
+                          value={breakoutBroadcastDraft}
+                          onChange={(e) => setBreakoutBroadcastDraft(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleBroadcastToBreakouts(); }}
+                          placeholder="Message for every room..."
+                          aria-label="Broadcast message to all breakout rooms"
+                          className="premium-input"
+                          style={{ flex: '1 1 auto', minWidth: 0, height: '28px', fontSize: '0.8rem' }}
+                        />
+                        <button
+                          onClick={handleBroadcastToBreakouts}
+                          className="premium-btn premium-btn-primary"
+                          style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem', whiteSpace: 'nowrap' }}
+                        >
+                          Send
+                        </button>
                       </div>
                     </div>
 
