@@ -1008,9 +1008,19 @@ export const giinApi = {
   // Send a password-reset email (Supabase). The user gets a link; the
   // reset itself happens on the recovery screen in Auth.tsx. Email
   // delivery depends on Supabase SMTP being configured in the dashboard.
+  //
+  // redirectTo MUST be the plain site origin — NOT a hash route such as
+  // /#/reset-password. Supabase appends the recovery tokens as a hash
+  // fragment (#access_token=...&type=recovery); with a hash route in the
+  // URL the tokens land after a SECOND '#', and supabase-js parses only
+  // the first fragment segment, so access_token is lost, no recovery
+  // session is ever established, and setting the new password fails with
+  // "Auth session missing!". The app detects recovery from type=recovery
+  // in the hash, so no route is needed here (same pattern as Google
+  // sign-in, which already uses the plain origin).
   requestPasswordReset: async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/#/reset-password`,
+      redirectTo: window.location.origin,
     });
     if (error) throw error;
     return { data: { success: true }, error: null };
