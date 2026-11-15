@@ -9,6 +9,18 @@
 -- silently created outside its team. If this file ran first, the OLD
 -- app would simply ignore the new tables (nothing in it reads them).
 --
+-- STATEMENT ORDER MATTERS (fixed 2026-11-15): the helper functions
+-- below are LANGUAGE sql, and Postgres checks the tables they read
+-- when the function is created — so the tables MUST be created
+-- first. The first version of this file defined the functions
+-- before the tables and failed with:
+--   ERROR 42P01: relation "public.team_members" does not exist
+--   LINE 71: select 1 from public.team_members
+-- Nothing from that failed run was created (the failing statement
+-- was the first executable one), so just re-run this corrected
+-- file from the top. Order now: tables -> functions -> policies
+-- -> meetings.team_id -> realtime.
+--
 -- WHY:
 --  1. A team is a shared space: members, its own meetings, and shared
 --     settings. Until now GiinMeet only had per-user meetings
@@ -58,9 +70,40 @@
 --   - No existing RLS policy on meetings / profiles is changed.
 -- =====================================================================
 
--- 0. Helper functions (SECURITY DEFINER so the RLS policies below
+-- 1. Tables first (no RLS/policies yet — the helper functions and
+--    the policies both need these tables to exist).
+create table if not exists public.teams (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_by uuid not null references auth.users(id) on delete cascade,
+  created_at timestamp with time zone default now() not null
+);
+
+create table if not exists public.team_members (
+  id uuid primary key default gen_random_uuid(),
+  team_id uuid not null references public.teams(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  role text not null default 'member' check (role in ('admin', 'member')),
+  joined_at timestamp with time zone default now() not null,
+  unique (team_id, user_id)
+);
+
+create index if not exists idx_team_members_team on public.team_members(team_id);
+create index if not exists idx_team_members_user on public.team_members(user_id);
+
+create table if not exists public.team_settings (
+  team_id uuid primary key references public.teams(id) on delete cascade,
+  who_can_start text not null default 'any_member' check (who_can_start in ('any_member', 'admin_only')),
+  default_require_waiting_room boolean not null default true,
+  default_duration text not null default '40m limit',
+  updated_at timestamp with time zone default now() not null
+);
+
+-- 2. Helper functions (SECURITY DEFINER so the RLS policies below
 --    can ask "is this caller an admin/member of that team" without
---    tripping over RLS on team_members itself).
+--    tripping over RLS on team_members itself). These MUST come after
+--    the tables above: LANGUAGE sql functions are validated against
+--    the tables they read at creation time.
 create or replace function public.is_team_member(p_team_id uuid)
 returns boolean
 language sql
@@ -88,14 +131,8 @@ as $$
   );
 $$;
 
--- 1. teams
-create table if not exists public.teams (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  created_by uuid not null references auth.users(id) on delete cascade,
-  created_at timestamp with time zone default now() not null
-);
-
+-- 3. RLS + policies (functions now exist, so the policy expressions
+--    that call them validate fine).
 alter table public.teams enable row level security;
 
 drop policy if exists "Teams readable by creator and members" on public.teams;
@@ -118,19 +155,6 @@ create policy "Teams deleted by a team admin"
   on public.teams for delete
   using (public.is_team_admin(id));
 
--- 2. team_members
-create table if not exists public.team_members (
-  id uuid primary key default gen_random_uuid(),
-  team_id uuid not null references public.teams(id) on delete cascade,
-  user_id uuid not null references auth.users(id) on delete cascade,
-  role text not null default 'member' check (role in ('admin', 'member')),
-  joined_at timestamp with time zone default now() not null,
-  unique (team_id, user_id)
-);
-
-create index if not exists idx_team_members_team on public.team_members(team_id);
-create index if not exists idx_team_members_user on public.team_members(user_id);
-
 alter table public.team_members enable row level security;
 
 drop policy if exists "Team members readable by team members" on public.team_members;
@@ -151,15 +175,6 @@ drop policy if exists "Team members removed by an admin or self" on public.team_
 create policy "Team members removed by an admin or self"
   on public.team_members for delete
   using (public.is_team_admin(team_id) or auth.uid() = user_id);
-
--- 3. team_settings (one row per team)
-create table if not exists public.team_settings (
-  team_id uuid primary key references public.teams(id) on delete cascade,
-  who_can_start text not null default 'any_member' check (who_can_start in ('any_member', 'admin_only')),
-  default_require_waiting_room boolean not null default true,
-  default_duration text not null default '40m limit',
-  updated_at timestamp with time zone default now() not null
-);
 
 alter table public.team_settings enable row level security;
 
