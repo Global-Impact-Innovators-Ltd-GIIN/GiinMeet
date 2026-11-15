@@ -1,4 +1,4 @@
-# Supabase Auth email via Resend SMTP — setup + live retest
+# Supabase Auth delivery setup — email (Resend SMTP) + phone OTP (Twilio)
 
 ## Why this is needed
 
@@ -96,3 +96,106 @@ recovery session was ever established, and setting the new password failed
 with "Auth session missing!". The app detects recovery from
 `type=recovery` in the hash, so no route is needed (same pattern as the
 Google sign-in redirect, which already uses the plain origin).
+
+---
+
+# Part 2 — Phone OTP sign-in via Twilio SMS — setup + live retest
+
+## Why this is needed
+
+The app's phone sign-in (6-digit SMS code) uses Supabase phone auth.
+Supabase has **no built-in SMS sender at all** — without an SMS provider
+configured, phone sign-in cannot deliver a single code, and the "Send
+Verification Code" button fails for every user. The code already handles
+that failure honestly; this setup makes the codes actually arrive.
+
+## Setup (Twilio + Supabase dashboard — needs Suku)
+
+### 1. Create a Twilio account and get a sending number
+
+1. Sign up at twilio.com/try-twilio (free trial gives test credit).
+2. **Trial warning:** a Twilio trial account can only send SMS to phone
+   numbers you have verified in the Twilio console. To send OTP codes to
+   **any** user, the Twilio account must be **upgraded to paid** and have
+   a purchased SMS-capable number (about $1.15/month). Without the
+   upgrade, only your own verified numbers receive codes.
+3. In the Twilio console, note down:
+   - **Account SID** (starts with `AC`)
+   - **Auth Token** (click to reveal — treat it like a password)
+   - Buy a phone number: **Phone Numbers → Buy a number** (any
+     SMS-capable number; it does not need to be Rwandan — Twilio sends
+     to Rwanda from international numbers).
+4. Rwanda note: Twilio sends SMS to +250 numbers. Use E.164 format
+   (`+250788123456`, 9-digit national number, **no leading 0** — the app
+   already strips the leading 0). Alphanumeric sender IDs in Rwanda need
+   carrier registration, so send from the purchased number instead.
+
+### 2. Point Supabase phone auth at Twilio
+
+Supabase's recommended option is **Twilio Verify** (a dedicated OTP
+service — it handles code generation, expiry and retries). The app's code
+works with either option; Verify is the one to pick.
+
+**Option A — Twilio Verify (recommended):**
+
+1. Twilio console → **Verify → Services → Create service**. Name it
+   `GiinMeet`. Copy the **Service SID** (starts with `VA`).
+2. Supabase dashboard → project `giinmeet` → **Authentication →
+   Providers → Phone** → toggle **on**.
+3. Phone provider: **Twilio Verify**.
+4. Fill in: **Twilio Account SID** (`AC...`), **Twilio Auth Token**,
+   **Twilio Verify Service SID** (`VA...`).
+5. Save.
+
+**Option B — Twilio Programmable Messaging (generic SMS):**
+
+1. Supabase dashboard → **Authentication → Providers → Phone** →
+   toggle **on**.
+2. Phone provider: **Twilio**.
+3. Fill in: **Twilio Account SID**, **Twilio Auth Token**,
+   **Twilio Message Service SID** (or the sender phone number from
+   step 1).
+4. Save.
+
+### 3. Cost to expect
+
+Twilio charges about **$0.26 per SMS to Rwanda** (verify current pricing
+in the Twilio console before launch) plus ~$1.15/month for the number.
+Each sign-in costs one SMS; each resend costs another. There is no
+free-forever SMS tier.
+
+## Live retest (proves the whole flow — do this after setup)
+
+1. Sign out of GiinMeet (or open a private/incognito window).
+2. On the sign-in screen, switch to the **Phone Number** tab.
+3. The country code should already be **+250 (Rwanda)**. Enter your
+   number **without the leading 0** (e.g. `788 123 456`) and click
+   **Send Verification Code**.
+4. The 6-digit code should arrive by SMS within a minute. **Paste the
+   whole code** into the first box — it should spread across all six
+   boxes. (Typing digit by digit also works.)
+5. Click **Verify & Authenticate**. You should be signed straight into
+   the dashboard.
+
+## Checks for the other paths (same retest session)
+
+- **Wrong code:** enter a wrong 6-digit code. You should see "That code
+  has expired or is wrong. Request a new code and try again." in plain
+  words — and the **Resend** button should be available immediately
+  (no waiting out the countdown for a dead code).
+- **Resend:** after the 60-second countdown, click **Resend
+  Verification SMS**. A fresh code should arrive; the old one stops
+  working.
+- **Provider not set up:** if Twilio is not configured yet, "Send
+  Verification Code" should say "Phone sign-in isn't set up for this
+  project yet — try signing in with email instead." — not a raw
+  Supabase error.
+
+## Code note (already fixed, 2026-11-15)
+
+`src/components/Auth.tsx`: OTP errors are translated to plain language;
+pasting a full code spreads it across the six boxes; an expired/wrong
+code clears the boxes and frees the resend button immediately; the resend
+button is disabled while a send is in flight; the default country code
+is +250 (Rwanda) with a Rwandan placeholder; a leading 0 is stripped so
+the number is valid E.164 (`+250788...`, never `+2500788...`).
