@@ -204,18 +204,53 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
   // (resetPasswordForEmail); delivery depends on email sending being
   // configured in the Supabase dashboard — the UI says so honestly when
   // the mail does not arrive.
-  const [resetView, setResetView] = useState<'none' | 'request' | 'sent' | 'recover'>(initialMode === 'recover' ? 'recover' : 'none');
+  // 'expired' = the reset link was already used, or it expired: Supabase
+  // redirects back with error=access_denied & error_code=otp_expired in
+  // the hash. Detect it up front so the user gets a clear message and a
+  // way to request a new link instead of a silent sign-in screen.
+  const [resetView, setResetView] = useState<'none' | 'request' | 'sent' | 'recover' | 'expired'>(() => {
+    const hash = window.location.hash;
+    if (hash.includes('error_code=otp_expired') || hash.includes('error=access_denied')) return 'expired';
+    return initialMode === 'recover' ? 'recover' : 'none';
+  });
+  const [resetDone, setResetDone] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
   // A recovery link lands here with type=recovery in the hash (Supabase
   // also fires PASSWORD_RECOVERY, which App turns into initialMode).
+  // An expired or already-used link lands with error=access_denied &
+  // error_code=otp_expired instead — show the expired card, not the
+  // new-password form (there is no session to set a password with).
   useEffect(() => {
-    if (window.location.hash.includes('type=recovery')) {
+    const hash = window.location.hash;
+    if (hash.includes('error_code=otp_expired') || hash.includes('error=access_denied')) {
+      setResetView('expired');
+    } else if (hash.includes('type=recovery')) {
       setResetView('recover');
     }
   }, []);
+
+  // Translate raw Supabase auth errors into plain language. Raw messages
+  // ("Auth session missing!", "Email rate limit exceeded") mean nothing
+  // to a user and must never reach the screen.
+  const friendlyAuthError = (err: any, fallback: string) => {
+    const msg = String(err?.message || '');
+    if (/rate limit|too many|once every/i.test(msg)) {
+      return 'Too many reset requests — please wait a few minutes and try again.';
+    }
+    if (/session missing|no session|Auth session/i.test(msg)) {
+      return 'This reset link is no longer valid. Request a new link below.';
+    }
+    if (/expired|invalid.*link|link.*invalid|otp_expired/i.test(msg)) {
+      return 'This reset link has expired or was already used. Request a new one below.';
+    }
+    if (/network|fetch failed|Failed to fetch|network request failed/i.test(msg)) {
+      return 'Could not reach the server. Check your connection and try again.';
+    }
+    return fallback;
+  };
 
   // Input states
   const [email, setEmail] = useState('');
@@ -442,7 +477,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
       await giinApi.requestPasswordReset(resetEmail.trim());
       setResetView('sent');
     } catch (err: any) {
-      setValidationError(err?.message || 'Could not send the reset email. Email sending may not be set up for this project yet — contact the administrator.');
+      setValidationError(friendlyAuthError(err, 'Could not send the reset email. Email sending may not be set up for this project yet — contact the administrator.'));
     } finally {
       setIsLoading(false);
     }
@@ -463,18 +498,24 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
     try {
       await giinApi.updatePassword(newPassword);
       const { data: { user } } = await supabase.auth.getUser();
-      if (onPasswordResetDone) onPasswordResetDone();
-      if (user) {
-        onAuthSuccess({
-          id: user.id,
-          email: user.email || '',
-          name: user.user_metadata?.name || user.email?.split('@')[0] || 'Giin User',
-          workspaceName: user.user_metadata?.workspace_name || 'Personal Workspace',
-          domain: (user.email?.split('@')[1] || 'personal'),
-        });
-      }
+      // Show the success state first so the user sees the password
+      // actually changed, then sign them straight in (or, if there is
+      // somehow no session, hand them back to sign-in).
+      setResetDone(true);
+      setTimeout(() => {
+        if (onPasswordResetDone) onPasswordResetDone();
+        if (user) {
+          onAuthSuccess({
+            id: user.id,
+            email: user.email || '',
+            name: user.user_metadata?.name || user.email?.split('@')[0] || 'Giin User',
+            workspaceName: user.user_metadata?.workspace_name || 'Personal Workspace',
+            domain: (user.email?.split('@')[1] || 'personal'),
+          });
+        }
+      }, 1200);
     } catch (err: any) {
-      setValidationError(err?.message || 'Could not set the new password. The reset link may have expired — request a new one.');
+      setValidationError(friendlyAuthError(err, 'Could not set the new password. The reset link may have expired — request a new one below.'));
     } finally {
       setIsLoading(false);
     }
@@ -656,13 +697,41 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
               Open it and choose a new password. If nothing arrives within a few minutes, check spam — and note that delivery
               needs email sending configured in the Supabase dashboard; if it is not set up, no email can arrive.
             </p>
+            <button type="button" onClick={() => { setResetView('request'); setValidationError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+              Send to a different email
+            </button>
             <button type="button" onClick={() => { setResetView('none'); setValidationError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
               Back to sign in
             </button>
           </div>
         )}
 
-        {resetView === 'recover' && (
+        {resetView === 'expired' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'center' }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>This reset link has expired</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+              Reset links work once and only for a short time. This one was already used, or too much time has passed.
+              Request a fresh link and it will work.
+            </p>
+            <button type="button" onClick={() => { setResetView('request'); setValidationError(''); }} className="premium-btn premium-btn-accent" style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}>
+              Request a new reset link
+            </button>
+            <button type="button" onClick={() => { setResetView('none'); setValidationError(''); if (onPasswordResetDone) onPasswordResetDone(); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+              Back to sign in
+            </button>
+          </div>
+        )}
+
+        {resetView === 'recover' && resetDone && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'center' }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>Password updated</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+              Your password has been changed. Signing you in…
+            </p>
+          </div>
+        )}
+
+        {resetView === 'recover' && !resetDone && (
           <form onSubmit={handleSetNewPassword} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
               <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>Choose a new password</h3>
@@ -707,6 +776,12 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
             {validationError && <div style={{ color: '#EF4444', fontSize: '0.8rem' }}>{validationError}</div>}
             <button type="submit" disabled={isLoading} className="premium-btn premium-btn-accent" style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}>
               {isLoading ? <span>Saving…</span> : <span>Set New Password</span>}
+            </button>
+            <button type="button" onClick={() => { setResetView('request'); setValidationError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+              Request a new reset link
+            </button>
+            <button type="button" onClick={() => { setResetView('none'); setValidationError(''); if (onPasswordResetDone) onPasswordResetDone(); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+              Back to sign in
             </button>
           </form>
         )}
