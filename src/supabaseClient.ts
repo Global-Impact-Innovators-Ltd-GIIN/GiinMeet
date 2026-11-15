@@ -231,8 +231,13 @@ export interface TeamSettings {
   default_duration: string;
 }
 
+// Series columns are part of the public read: the history list needs
+// series_id to group a recurring series into one row (without them the
+// dashboard could only group via the same-device localStorage
+// fallback). They are not sensitive — the meetings RLS still governs
+// which rows a caller can see.
 export const MEETING_PUBLIC_COLUMNS =
-  'id,user_id,title,time,duration,status,host,notes,action_items_count,created_at,admin_id,require_waiting_room';
+  'id,user_id,title,time,duration,status,host,notes,action_items_count,created_at,admin_id,require_waiting_room,series_id,recurrence_rule,recurrence_count';
 
 // Build a calendar (.ics) file for a meeting, for download or import into
 // Google/Outlook/Apple Calendar. Pure client-side generation — no provider.

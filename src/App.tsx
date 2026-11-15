@@ -1051,6 +1051,12 @@ function App() {
               status: m.status as 'Completed' | 'In Progress' | 'Scheduled',
               host: m.host || 'You',
               passcode: m.passcode,
+              // Recurring-series link, so the dashboard can group a series
+              // into one row without a re-read (the columns only exist
+              // once giinmeet_phase1.sql runs — hence the null fallback).
+              series_id: (m as any).series_id ?? null,
+              recurrence_rule: (m as any).recurrence_rule ?? null,
+              recurrence_count: (m as any).recurrence_count ?? null,
               team_id: (m as any).team_id ?? null,
               team_name: (m as any).team_name ?? null
             }));
@@ -1108,6 +1114,11 @@ function App() {
           status: m.status as 'Completed' | 'In Progress' | 'Scheduled',
           host: m.host || 'You',
           passcode: m.passcode,
+          // Recurring-series link, so the dashboard can group a series
+          // into one row without a re-read (see the startup load above).
+          series_id: (m as any).series_id ?? null,
+          recurrence_rule: (m as any).recurrence_rule ?? null,
+          recurrence_count: (m as any).recurrence_count ?? null,
           team_id: (m as any).team_id ?? null,
           team_name: (m as any).team_name ?? null
         }));

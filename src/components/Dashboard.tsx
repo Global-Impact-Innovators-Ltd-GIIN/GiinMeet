@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2 } from 'lucide-react';
 import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
@@ -227,25 +227,87 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return Math.max(2, Math.min(12, scheduleRecurrenceCount));
   };
 
-  // Phase 1 — series info for one meeting: from the row when present, else
-  // the localStorage fallback kept at creation time. Returns the series id,
-  // rule label, position (1-based, by start time) and total, or null.
+  // Phase 1 — the series id for one meeting: from the row when present
+  // (the columns only exist once giinmeet_phase1.sql runs), else the
+  // localStorage fallback kept at creation time. Used both by the
+  // history grouping below and by seriesInfoFor.
+  const seriesIdFor = (meeting: Meeting): string | null => {
+    if ((meeting as any).series_id) return (meeting as any).series_id as string;
+    try { const r = localStorage.getItem(`giin_series_${meeting.id}`); return r ? JSON.parse(r).seriesId : null; } catch (e) { return null; }
+  };
+  // Phase 1 — series info for one meeting: rule label, position
+  // (1-based, by start time) and total, or null when it is not part
+  // of a series.
   const seriesInfoFor = (meeting: Meeting): { seriesId: string; rule: string; position: number; total: number } | null => {
-    const raw = (meeting as any).series_id
-      ? { seriesId: (meeting as any).series_id, rule: (meeting as any).recurrence_rule || 'weekly', count: (meeting as any).recurrence_count ?? null }
-      : (() => { try { const r = localStorage.getItem(`giin_series_${meeting.id}`); return r ? JSON.parse(r) : null; } catch (e) { return null; } })();
-    if (!raw || !raw.seriesId) return null;
+    const sid = seriesIdFor(meeting);
+    if (!sid) return null;
+    const rule = (meeting as any).recurrence_rule || 'weekly';
     const siblings = meetingHistory
-      .filter((m) => {
-        const s = (m as any).series_id
-          ? (m as any).series_id
-          : (() => { try { const r = localStorage.getItem(`giin_series_${m.id}`); return r ? JSON.parse(r).seriesId : null; } catch (e) { return null; } })();
-        return s === raw.seriesId;
-      })
+      .filter((m) => seriesIdFor(m) === sid)
       .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
     const position = siblings.findIndex((m) => m.id === meeting.id) + 1;
-    return { seriesId: raw.seriesId, rule: raw.rule || 'weekly', position: position || 1, total: raw.count || siblings.length };
+    const count = (meeting as any).recurrence_count ?? null;
+    return { seriesId: sid, rule, position: position || 1, total: count || siblings.length };
   };
+  // A recurring series is N real meetings (one row per occurrence) that
+  // share one series_id — listing them flat is why one "Weekly Executive
+  // Meeting" filled the whole history. Group them: one top-level entry
+  // per series, expandable to its occurrences. A meeting with no series
+  // id (created before the Phase 1 columns existed, with no
+  // localStorage fallback on this device) stays a single row.
+  const [expandedSeries, setExpandedSeries] = useState<Record<string, boolean>>({});
+  type HistoryEntry =
+    | { kind: 'single'; key: string; meeting: Meeting }
+    | { kind: 'representative'; key: string; meeting: Meeting; seriesId: string; size: number; rule: string }
+    | { kind: 'groupbar'; key: string; seriesId: string; title: string; size: number; rule: string }
+    | { kind: 'occurrence'; key: string; meeting: Meeting; seriesId: string; groupIndex: number };
+  const historyEntries = useMemo((): HistoryEntry[] => {
+    const groups: { seriesId: string; title: string; rule: string; meetings: Meeting[] }[] = [];
+    const byId = new Map<string, (typeof groups)[number]>();
+    for (const m of meetingHistory) {
+      const sid = seriesIdFor(m);
+      if (!sid) { groups.push({ seriesId: '', title: m.title, rule: '', meetings: [m] }); continue; }
+      let g = byId.get(sid);
+      if (!g) {
+        const info = seriesInfoFor(m);
+        g = { seriesId: sid, title: m.title, rule: info?.rule || (m as any).recurrence_rule || 'weekly', meetings: [] };
+        byId.set(sid, g);
+        groups.push(g);
+      }
+      g.meetings.push(m);
+    }
+    const out: HistoryEntry[] = [];
+    for (const g of groups) {
+      if (!g.seriesId) { out.push({ kind: 'single', key: `single:${g.meetings[0].id}`, meeting: g.meetings[0] }); continue; }
+      const sorted = [...g.meetings].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+      // A series with a meeting in progress starts expanded, so the live
+      // meeting is never hidden behind a collapsed row.
+      const expanded = expandedSeries[`series:${g.seriesId}`] ?? sorted.some((m) => m.status === 'In Progress');
+      if (!expanded) {
+        const next = sorted.find((m) => m.status === 'Scheduled') || sorted[sorted.length - 1];
+        out.push({ kind: 'representative', key: `series:${g.seriesId}`, meeting: next, seriesId: g.seriesId, size: sorted.length, rule: g.rule });
+      } else {
+        out.push({ kind: 'groupbar', key: `series:${g.seriesId}:bar`, seriesId: g.seriesId, title: g.title, size: sorted.length, rule: g.rule });
+        sorted.forEach((m, i) => out.push({ kind: 'occurrence', key: `series:${g.seriesId}:${m.id}`, meeting: m, seriesId: g.seriesId, groupIndex: i }));
+      }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingHistory, expandedSeries]);
+  // Top-level entries for the history count: one per series plus one per
+  // single meeting — so the header reads "3 entries · 23 total meetings"
+  // instead of pretending 23 separate meetings were scheduled.
+  const historyTopLevelCount = useMemo(() => {
+    const ids = new Set<string>();
+    let n = 0;
+    for (const m of meetingHistory) {
+      const sid = seriesIdFor(m);
+      if (!sid) { n++; continue; }
+      if (!ids.has(sid)) { ids.add(sid); n++; }
+    }
+    return n;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingHistory]);
   // Phase 1 — meeting reminder: emailed to the host before the meeting.
   // Default on, 15 minutes before (the reminder itself only sends once
   // the Resend API key is configured — see src/utils/mailer.ts).
@@ -646,11 +708,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div className="flex-between">
             <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)' }}>Meeting Logs & History</h2>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{meetingHistory.length} total meetings</span>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{historyTopLevelCount === meetingHistory.length ? `${meetingHistory.length} total meetings` : `${historyTopLevelCount} entries · ${meetingHistory.length} total meetings`}</span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '380px', overflowY: 'auto', paddingRight: '0.5rem' }}>
-            {meetingHistory.map((meeting) => (
+            {historyEntries.map((entry) => {
+              if (entry.kind === 'groupbar') {
+                const label = entry.rule === 'daily' ? 'Daily' : entry.rule === 'weekly' ? 'Weekly' : 'Monthly';
+                return (
+                  <div key={entry.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>🔁 {entry.title} — {label} series · {entry.size} meetings</span>
+                    <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button onClick={() => setExpandedSeries((prev) => ({ ...prev, [`series:${entry.seriesId}`]: false }))} className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px' }} title="Collapse this series back to one row">Hide ▴</button>
+                      <button onClick={() => onCancelSeries?.(entry.seriesId, entry.title)} className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444' }} title="Cancel every upcoming meeting in this series">Cancel series</button>
+                    </span>
+                  </div>
+                );
+              }
+              const meeting = entry.meeting;
+              const isRepresentative = entry.kind === 'representative';
+              const isFirstOccurrence = entry.kind === 'occurrence' && entry.groupIndex === 0;
+              const repLabel = entry.kind === 'representative' ? (entry.rule === 'daily' ? 'Daily' : entry.rule === 'weekly' ? 'Weekly' : 'Monthly') : '';
+              const repSize = entry.kind === 'representative' ? entry.size : 0;
+              const repSeriesId = entry.kind === 'representative' ? entry.seriesId : '';
+              return (
               <React.Fragment key={meeting.id}>
               <div
                 style={{
@@ -698,6 +779,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         }
                       })()} &bull; {meeting.duration}
                     </p>
+                    {isRepresentative && (
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.25rem 0 0', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <span>🔁 {repLabel} series · {repSize} meetings — this row is the next one</span>
+                        <button onClick={() => setExpandedSeries((prev) => ({ ...prev, [`series:${repSeriesId}`]: true }))} className="premium-btn premium-btn-secondary" style={{ padding: '0.15rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px' }} title="Show every meeting in this series">Show all {repSize} ▾</button>
+                      </p>
+                    )}
                     {meeting.status !== 'Completed' && (
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.25rem 0 0', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                         <span>{linkExpiryLabel(meeting)}</span>
@@ -718,8 +805,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         })()}
                         {(() => {
                           // Phase 1 — series badge (e.g. "🔁 Weekly • 2 of 5").
+                          // Hidden on the collapsed series row: its summary
+                          // line already says how many meetings the series has.
                           const info = seriesInfoFor(meeting);
                           if (!info) return null;
+                          if (isRepresentative) return null;
                           const label = info.rule === 'daily' ? 'Daily' : info.rule === 'weekly' ? 'Weekly' : 'Monthly';
                           return <span>🔁 {label} • {info.position} of {info.total}</span>;
                         })()}
@@ -821,8 +911,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </button>
                       {(() => {
                         // Phase 1 — cancel the whole series from one button.
+                        // Shown once per series: on the collapsed row, or on
+                        // the first occurrence when the series is expanded.
                         const info = seriesInfoFor(meeting);
                         if (!info) return null;
+                        if (!isRepresentative && !isFirstOccurrence) return null;
                         return (
                           <button
                             onClick={() => onCancelSeries?.(info.seriesId, meeting.title)}
@@ -893,7 +986,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               )}
               </React.Fragment>
-            ))}
+              );
+            })}
           </div>
         </div>
 
