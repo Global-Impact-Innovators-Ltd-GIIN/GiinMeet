@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Video, DollarSign, Activity, Trash2, Shield, ShieldCheck, CreditCard, Search, CheckCircle } from 'lucide-react';
 import { giinApi } from '../supabaseClient';
+import { tierForProfile, TIER_LABELS, type PlanTier } from '../utils/tiers';
 
 interface Profile {
   id: string;
@@ -8,7 +9,12 @@ interface Profile {
   domain: string;
   workspace_name: string;
   phone: string;
+  email?: string;
+  updated_at?: string;
   is_premium: boolean;
+  // Plan tier (Free / Pro / Enterprise) — only exists once
+  // giinmeet_plan_tier.sql runs; absent means "decide from is_premium".
+  plan_tier?: string | null;
   is_superadmin: boolean;
 }
 
@@ -31,8 +37,9 @@ export const Superadmin: React.FC = () => {
       const meets = await giinApi.getAllMeetings();
       setMeetingsCount(meets.length);
 
-      // Generate dynamic payments list based on actual Pro members in profiles
-      const premiumUsers = profiles.filter(u => u.is_premium);
+      // Generate dynamic payments list based on actual Pro/Enterprise
+      // members in profiles (tier from plan_tier, is_premium fallback).
+      const premiumUsers = profiles.filter(u => tierForProfile(u) !== 'free');
       const dynamicPayments = premiumUsers.map(u => {
         let hash = 0;
         for (let i = 0; i < u.id.length; i++) {
@@ -40,12 +47,13 @@ export const Superadmin: React.FC = () => {
         }
         const txNum = Math.abs(hash % 900) + 100;
         const dateStr = u.updated_at ? new Date(u.updated_at).toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' }) : 'June 22, 2026';
+        const tier = tierForProfile(u);
         return {
           id: `TX-${txNum}`,
           name: u.name || 'Premium User',
           email: u.email || 'user@giinmeet.com',
-          tier: 'Pro Monthly',
-          amount: '$9.99',
+          tier: tier === 'enterprise' ? 'Enterprise Monthly' : 'Pro Monthly',
+          amount: tier === 'enterprise' ? '$19.99' : '$9.99',
           date: dateStr,
           status: 'Succeeded'
         };
@@ -79,13 +87,16 @@ export const Superadmin: React.FC = () => {
   };
 
   // Toggle Premium Tier
-  const handleTogglePremium = async (userId: string, currentVal: boolean) => {
+  // Set a user's plan tier (Free / Pro / Enterprise). Fails honestly
+  // when profiles.plan_tier does not exist yet — run
+  // giinmeet_plan_tier.sql in Supabase first.
+  const handleSetTier = async (userId: string, tier: PlanTier) => {
     try {
-      await giinApi.toggleProfilePremium(userId, !currentVal);
-      triggerToast(`User subscription tier updated successfully.`);
+      await giinApi.setProfileTier(userId, tier);
+      triggerToast(`User plan tier updated to ${TIER_LABELS[tier]}.`);
       loadData();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      window.alert(err?.message || 'Could not set the plan tier — run giinmeet_plan_tier.sql in Supabase first.');
     }
   };
 
@@ -108,8 +119,10 @@ export const Superadmin: React.FC = () => {
   );
 
   // Compute stats
-  const premiumCount = users.filter(u => u.is_premium).length;
-  const totalRevenue = (premiumCount * 9.99).toFixed(2);
+  const proCount = users.filter(u => tierForProfile(u) === 'pro').length;
+  const enterpriseCount = users.filter(u => tierForProfile(u) === 'enterprise').length;
+  const premiumCount = proCount + enterpriseCount;
+  const totalRevenue = (proCount * 9.99 + enterpriseCount * 19.99).toFixed(2);
 
   if (loading) {
     return (
@@ -227,14 +240,17 @@ export const Superadmin: React.FC = () => {
                     <td style={{ padding: '1rem 0.5rem', color: 'var(--text-muted)' }}>@{u.domain}</td>
                     <td style={{ padding: '1rem 0.5rem', color: 'var(--text-muted)' }}>{u.workspace_name}</td>
                     <td style={{ padding: '1rem 0.5rem' }}>
-                      <button 
-                        onClick={() => handleTogglePremium(u.id, u.is_premium)}
-                        className={`badge ${u.is_premium ? 'badge-premium' : ''}`} 
-                        style={{ border: 'none', cursor: 'pointer', scale: '0.9' }}
-                        title="Click to toggle subscription plan"
+                      <select
+                        value={tierForProfile(u)}
+                        onChange={(e) => handleSetTier(u.id, e.target.value as PlanTier)}
+                        className="premium-input"
+                        style={{ height: '34px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', minWidth: '140px' }}
+                        title="Set this user's plan tier — Free: 50 people, 40 min; Pro: 100 people, up to 24h; Enterprise: 250 people, up to 24h"
                       >
-                        {u.is_premium ? 'Pro Member' : 'Free Tier'}
-                      </button>
+                        <option value="free">Free Tier</option>
+                        <option value="pro">Pro Member</option>
+                        <option value="enterprise">Enterprise</option>
+                      </select>
                     </td>
                     <td style={{ padding: '1rem 0.5rem' }}>
                       <button 

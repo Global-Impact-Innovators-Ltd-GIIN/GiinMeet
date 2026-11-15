@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { parseDurationMinutes } from './utils/tiers';
 
 // Supabase configuration. No credentials are hardcoded here: the app fails
 // loudly at startup when NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are
@@ -265,7 +266,8 @@ export const isDeletableFromHistory = (m: { status?: string | null; time?: strin
 // Google/Outlook/Apple Calendar. Pure client-side generation — no provider.
 export const buildICS = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }, brandName: string = 'GiinMeet'): string => {
   const start = new Date(meeting.time);
-  const mins = parseInt(String(meeting.duration || '60').replace(/\D/g, ''), 10) || 60;
+  // parseDurationMinutes understands hours ("2 hours" is 120, not 2).
+  const mins = parseDurationMinutes(meeting.duration);
   const end = new Date(start.getTime() + mins * 60000);
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
   const link = buildJoinLink(meeting.id, meeting.passcode);
@@ -334,7 +336,8 @@ export const buildWhatsAppInviteUrl = (meeting: { id: string; title: string; tim
 // Cloud OAuth client — see docs/phase2-setup.md.
 export const buildGoogleCalendarUrl = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }, brandName: string = 'GiinMeet'): string => {
   const start = new Date(meeting.time);
-  const mins = parseInt(String(meeting.duration || '60').replace(/\D/g, ''), 10) || 60;
+  // parseDurationMinutes understands hours ("2 hours" is 120, not 2).
+  const mins = parseDurationMinutes(meeting.duration);
   const end = new Date(start.getTime() + mins * 60000);
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
   const link = buildJoinLink(meeting.id, meeting.passcode);
@@ -1785,6 +1788,21 @@ export const giinApi = {
       .from('profiles')
       .update({ is_premium: isPremium })
       .eq('id', userId);
+    return { data, error };
+  },
+
+  // Set a user's plan tier (Superadmin assigns tiers — there is no
+  // payment processor yet, so assignment is manual). is_premium is
+  // kept in sync: Pro and Enterprise are premium, Free is not, so
+  // every older is_premium-only reader keeps agreeing with the tier.
+  // Throws when profiles.plan_tier does not exist yet — run
+  // giinmeet_plan_tier.sql in Supabase first.
+  setProfileTier: async (userId: string, tier: 'free' | 'pro' | 'enterprise') => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ plan_tier: tier, is_premium: tier !== 'free' })
+      .eq('id', userId);
+    if (error) throw new Error(`Could not set the plan tier: ${error.message}`);
     return { data, error };
   },
 

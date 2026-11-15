@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../../../src/supabaseClient';
-import { tierLimitForPremium, tierForPremium, TIER_LABELS } from '../../../../src/utils/tiers';
+import { tierForProfile, TIER_LIMITS, TIER_LABELS } from '../../../../src/utils/tiers';
 
 // Server-only Supabase admin client. It uses SUPABASE_SERVICE_ROLE_KEY,
 // which bypasses RLS, so it must NEVER be imported by client code and the
@@ -342,19 +342,35 @@ export async function POST(req: NextRequest) {
     // to Free. The stored value is updated best-effort so the room
     // row stays honest for display.
     const hostUserId = meeting.admin_id || meeting.user_id;
+    // Host tier: plan_tier when the column exists, is_premium as the
+    // fallback. A bad column name returns an error object (not a
+    // throw), so a failed first read retries is_premium-only — a
+    // deploy before giinmeet_plan_tier.sql runs must never demote a
+    // Pro host to Free.
     let hostIsPremium = false;
+    let hostPlanTier: string | null = null;
     if (hostUserId) {
       try {
-        const { data: hostProfile } = await admin
+        const { data: hostProfile, error: profileError } = await admin
           .from('profiles')
-          .select('is_premium')
+          .select('is_premium, plan_tier')
           .eq('id', hostUserId)
           .maybeSingle();
-        hostIsPremium = !!(hostProfile as any)?.is_premium;
+        if (profileError) {
+          const { data: retryProfile } = await admin
+            .from('profiles')
+            .select('is_premium')
+            .eq('id', hostUserId)
+            .maybeSingle();
+          hostIsPremium = !!(retryProfile as any)?.is_premium;
+        } else if (hostProfile) {
+          hostIsPremium = !!(hostProfile as any)?.is_premium;
+          hostPlanTier = (hostProfile as any)?.plan_tier ?? null;
+        }
       } catch (e) { /* profile unreadable: Free tier */ }
     }
-    const hostTier = tierForPremium(hostIsPremium);
-    const maxCapacity = tierLimitForPremium(hostIsPremium);
+    const hostTier = tierForProfile({ is_premium: hostIsPremium, plan_tier: hostPlanTier });
+    const maxCapacity = TIER_LIMITS[hostTier];
     try {
       if (room.max_capacity !== maxCapacity) {
         await admin.from('rooms').update({ max_capacity: maxCapacity }).eq('id', room.id);

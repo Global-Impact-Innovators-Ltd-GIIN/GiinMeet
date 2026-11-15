@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Users, Plus, Trash2, LogOut, Clock, Play, CheckCircle2, UserPlus, AlertCircle, RefreshCw, Calendar } from 'lucide-react';
 import { giinApi, generateMeetingPasscode, probeTeamsSupport, TEAMS_NOT_SET_UP_MESSAGE } from '../supabaseClient';
 import type { Team, TeamMember, TeamSettings } from '../supabaseClient';
+import { TIER_MAX_DURATION_MINUTES, clampDurationToTier, type PlanTier } from '../utils/tiers';
 
 // Phase 3 (Feature 3) — Team workspaces.
 // A team is a shared space: members, its own meetings, and shared
@@ -28,11 +29,25 @@ interface TeamsProps {
   // handleAddMeeting already alerts on failure, so false means "the
   // caller already told the user").
   onScheduleTeamMeeting: (teamId: string, teamName: string, meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null }) => Promise<boolean>;
+  // Host's plan tier — caps the duration choices. Optional: 'free'.
+  planTier?: PlanTier;
 }
 
-const DURATION_OPTIONS = ['30 minutes', '40m limit', '60 minutes', '90 minutes'];
-
-export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTeamMeeting }) => {
+export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTeamMeeting, planTier = 'free' }) => {
+  // Duration choices for a team default, capped by the admin's tier.
+  // Values stay the historic display strings so settings saved before
+  // tiers existed keep matching the select.
+  const TEAM_DURATION_OPTIONS: { value: string; maxMinutes: number }[] = [
+    { value: '30 minutes', maxMinutes: 30 },
+    { value: '40m limit', maxMinutes: 40 },
+    { value: '60 minutes', maxMinutes: 60 },
+    { value: '90 minutes', maxMinutes: 90 },
+    { value: '2 hours', maxMinutes: 120 },
+    { value: '4 hours', maxMinutes: 240 },
+    { value: '8 hours', maxMinutes: 480 },
+    { value: 'up to 24h', maxMinutes: 1440 },
+  ];
+  const durationOptions = TEAM_DURATION_OPTIONS.filter((o) => o.maxMinutes <= TIER_MAX_DURATION_MINUTES[planTier]).map((o) => o.value);
   const [supported, setSupported] = useState<boolean | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
@@ -216,7 +231,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
       const ok = await onScheduleTeamMeeting(selectedTeam.id, selectedTeam.name, {
         title: schedTitle.trim(),
         time: new Date(schedTime).toISOString(),
-        duration: settings?.default_duration || '40m limit',
+        duration: clampDurationToTier(settings?.default_duration || '40m limit', planTier),
         requireWaitingRoom: settings?.default_require_waiting_room ?? true,
         passcode: schedPasscodeEnabled ? (schedPasscode || generateMeetingPasscode()) : null,
       });
@@ -438,12 +453,12 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                       Default meeting duration
                       <select
                         className="premium-input"
-                        value={settings.default_duration}
+                        value={clampDurationToTier(settings.default_duration, planTier)}
                         disabled={!isAdmin || busy}
                         onChange={(e) => void handleSaveSettings({ default_duration: e.target.value })}
                         style={{ height: '44px' }}
                       >
-                        {DURATION_OPTIONS.map((d) => (
+                        {durationOptions.map((d) => (
                           <option key={d} value={d}>{d}</option>
                         ))}
                       </select>

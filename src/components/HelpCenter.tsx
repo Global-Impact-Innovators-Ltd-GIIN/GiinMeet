@@ -49,7 +49,7 @@ export const HelpCenter: React.FC = () => {
     {
       category: 'General',
       question: 'Is there a limit on meeting durations for free users?',
-      answer: 'Participant limits depend on the host plan: Free meetings support up to 50 participants per room, Pro up to 100, and Enterprise up to 250. Free meetings are up to 40 minutes. Paid Pro and Enterprise tiers are coming soon; no payment is taken yet.'
+      answer: 'Participant limits depend on the host plan: Free meetings support up to 50 participants per room, Pro up to 100, and Enterprise up to 250. Free meetings last up to 40 minutes. Pro and Enterprise meetings can last up to 24 hours, and when you schedule one the duration defaults to 2 hours. The room never cuts a meeting off at its planned length — the duration is the length you plan for, not a timer that ends the call. Paid Pro and Enterprise tiers are coming soon; no payment is taken yet.'
     }
   ];
 

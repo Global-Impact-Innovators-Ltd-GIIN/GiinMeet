@@ -23,6 +23,7 @@ import { giinApi, supabase, getTransparentLogo, isMeetingHost, isMeetingHostForU
 import { applyAccentColor, applyBorderRadius, applyFont, applyUiStyle } from './utils/theme';
 import { loadAndApplySharedBrand } from './utils/brand';
 import { encryptMessage, decryptMessage } from './services/e2ee';
+import { tierForProfile, type PlanTier } from './utils/tiers';
 
 
 interface Meeting {
@@ -136,6 +137,13 @@ function App() {
   });
   const [isPremium, setIsPremium] = useState<boolean>(() => {
     return localStorage.getItem('giin_premium') === 'true';
+  });
+  // Plan tier (Free / Pro / Enterprise) from profiles.plan_tier, with
+  // is_premium as the fallback until that column exists. Drives the
+  // duration picker and the participant limits shown in the UI.
+  const [planTier, setPlanTier] = useState<PlanTier>(() => {
+    const stored = localStorage.getItem('giin_plan_tier');
+    return stored === 'pro' || stored === 'enterprise' ? stored : 'free';
   });
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     return localStorage.getItem('giin_sidebar_collapsed') === 'true';
@@ -882,6 +890,7 @@ function App() {
         setUserName(authenticatedUser.name);
         setUserEmail(authenticatedUser.email);
         setIsPremium(profile?.is_premium || false);
+        setPlanTier(tierForProfile(profile));
 
         // Persist session to localStorage
         localStorage.setItem('giin_user', JSON.stringify(authenticatedUser));
@@ -987,6 +996,7 @@ function App() {
         setUserName(authenticatedUser.name);
         setUserEmail(authenticatedUser.email);
         setIsPremium(profile?.is_premium || false);
+        setPlanTier(tierForProfile(profile));
 
         // Persist session to localStorage
         localStorage.setItem('giin_user', JSON.stringify(authenticatedUser));
@@ -1294,6 +1304,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('giin_premium', String(isPremium));
   }, [isPremium]);
+
+  useEffect(() => {
+    localStorage.setItem('giin_plan_tier', planTier);
+  }, [planTier]);
 
   useEffect(() => {
     localStorage.setItem('giin_meetings', JSON.stringify(meetingHistory));
@@ -2943,6 +2957,7 @@ function App() {
           {currentView === 'dashboard' && (
             <Dashboard 
               isPremium={isPremium}
+              planTier={planTier}
               onNavigate={setCurrentView}
               onStartMeeting={handleStartCall}
               meetingHistory={meetingHistory}
@@ -2958,6 +2973,7 @@ function App() {
           {currentView === 'teams' && (
             <Teams
               user={user}
+              planTier={planTier}
               onStartMeeting={handleStartCall}
               onScheduleTeamMeeting={handleScheduleTeamMeeting}
             />

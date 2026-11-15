@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2 } from 'lucide-react';
 import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
+import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, type PlanTier } from '../utils/tiers';
 
 interface Meeting {
   id: string;
@@ -33,6 +34,9 @@ interface Meeting {
 
 interface DashboardProps {
   isPremium: boolean;
+  // Host's plan tier (Free / Pro / Enterprise) — drives the duration
+  // picker and its default. Optional: 'free' when unknown.
+  planTier?: PlanTier;
   onNavigate: (view: string) => void;
   onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean, passcode?: string | null) => void;
   meetingHistory: Meeting[];
@@ -48,6 +52,7 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({
   isPremium,
+  planTier = 'free',
   onNavigate,
   onStartMeeting,
   meetingHistory,
@@ -101,6 +106,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Round 9 (9C/9D): link expiry + meeting templates.
   const [scheduleLinkExpiry, setScheduleLinkExpiry] = useState('1m');
   const [templateDuration, setTemplateDuration] = useState('40m limit');
+  // Duration defaults to the tier's default (Free: 40 minutes; Pro and
+  // Enterprise: 2 hours) once the tier is known from the profile.
+  useEffect(() => {
+    setTemplateDuration(DEFAULT_DURATION_FOR_TIER[planTier]);
+  }, [planTier]);
   const [linkExpiries, setLinkExpiries] = useState<Record<string, { mode: string; expiresAt: string | null }>>({});
   const linkExpiryFetchedRef = useRef<Record<string, boolean>>({});
 
@@ -149,13 +159,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setSchedulePasscodeEnabled(false);
     } else if (kind === 'client') {
       setMeetingTitle('Client call');
-      setTemplateDuration('60m');
+      setTemplateDuration(clampDurationToTier('60m', planTier));
       setRequireWaitingRoom(true);
       if (!schedulePasscode) setSchedulePasscode(generateMeetingPasscode());
       setSchedulePasscodeEnabled(true);
     } else {
       setMeetingTitle('Interview');
-      setTemplateDuration('60m');
+      setTemplateDuration(clampDurationToTier('60m', planTier));
       setRequireWaitingRoom(true);
       if (!schedulePasscode) setSchedulePasscode(generateMeetingPasscode());
       setSchedulePasscodeEnabled(true);
@@ -413,7 +423,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const saved = await onAddMeeting({
         title: meetingTitle,
         time: t.toISOString(),
-        duration: templateDuration,
+        // Clamp to the tier's cap, so a stale choice can never promise
+        // a Free host more than 40 minutes.
+        duration: clampDurationToTier(templateDuration, planTier),
         requireWaitingRoom,
         passcode,
         linkExpiry: { mode: scheduleLinkExpiry, expiresAt: computeLinkExpiry(scheduleLinkExpiry, t.toISOString()) },
@@ -1188,6 +1200,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   onChange={(e) => setMeetingTime(e.target.value)}
                   required
                 />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Duration</label>
+                <select value={templateDuration} onChange={(e) => setTemplateDuration(e.target.value)} className="premium-input" style={{ height: '44px' }}>
+                  {DURATION_OPTIONS_FOR_TIER[planTier].map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Longest meeting on your {TIER_LABELS[planTier]} plan: {planTier === 'free' ? '40 minutes' : '24 hours'}. The room never ends a meeting at this length — it is the length you plan for.</span>
               </div>
 
               <div>
