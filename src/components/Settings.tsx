@@ -1191,7 +1191,7 @@ export const Settings: React.FC<SettingsProps> = ({
               </SectionCard>
 
               {/* UI Theme Style Effect */}
-              <SectionCard icon={Zap} title="UI Styling Theme Effect" subtitle="Choose the visual language of the whole app.">
+              <SectionCard icon={Zap} title="UI Styling Theme Effect" subtitle="Choose the visual language of the whole app — tap a theme to preview it live.">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                   {[
                     { id: 'glassmorphism', label: 'Glassmorphism' },
@@ -1210,9 +1210,10 @@ export const Settings: React.FC<SettingsProps> = ({
                       type="button"
                       onClick={() => handleUpdateUiStyle(style.id)}
                       className={`premium-btn ${uiStyle === style.id ? 'premium-btn-primary' : 'premium-btn-secondary'}`}
-                      style={{ padding: '0.4rem', fontSize: '0.75rem', justifyContent: 'center' }}
+                      style={{ padding: '0.5rem', fontSize: '0.75rem', justifyContent: 'center', flexDirection: 'column', alignItems: 'stretch', gap: 0 }}
                     >
-                      {style.label}
+                      <span className={`theme-swatch theme-swatch-${style.id}`} aria-hidden="true" />
+                      <span style={{ textAlign: 'center' }}>{style.label}</span>
                     </button>
                   ))}
                 </div>
@@ -1242,14 +1243,18 @@ export const Settings: React.FC<SettingsProps> = ({
               )}
 
               {/* Premium Typography (Fonts) */}
-              <SectionCard icon={Type} title="Premium Typography (Fonts)" subtitle="Heading and body fonts for the whole app.">
+              <SectionCard icon={Type} title="Premium Typography (Fonts)" subtitle="Heading and body fonts for the whole app — including the sidebar.">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {[
                     { id: 'sleek', label: 'Sleek Sans (Outfit / Inter)', heading: 'Outfit', body: 'Inter' },
                     { id: 'classic', label: 'Classic Serif (Playfair Display / Georgia)', heading: 'Playfair Display', body: 'Georgia' },
                     { id: 'tech', label: 'Monospace Tech (Fira Code)', heading: 'Fira Code', body: 'Fira Code' },
                     { id: 'modern', label: 'Elegant Modern (Montserrat)', heading: 'Montserrat', body: 'Montserrat' },
-                    { id: 'futuristic', label: 'Futuristic Glow (Orbitron / Rajdhani)', heading: 'Orbitron', body: 'Rajdhani' }
+                    { id: 'futuristic', label: 'Futuristic Glow (Orbitron / Rajdhani)', heading: 'Orbitron', body: 'Rajdhani' },
+                    { id: 'geometric', label: 'Geometric Pop (Poppins)', heading: 'Poppins', body: 'Poppins' },
+                    { id: 'grotesk', label: 'Modern Grotesk (Space Grotesk)', heading: 'Space Grotesk', body: 'Space Grotesk' },
+                    { id: 'literary', label: 'Literary Serif (Lora / Merriweather)', heading: 'Lora', body: 'Merriweather' },
+                    { id: 'rounded', label: 'Soft Rounded (Quicksand / Nunito)', heading: 'Quicksand', body: 'Nunito' }
                   ].map((font) => {
                     const isSelected = fontHeading === font.heading && fontBody === font.body;
                     return (

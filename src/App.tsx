@@ -2063,7 +2063,7 @@ function App() {
   // of the dashboard while the slug is resolved to its session meeting.
   if (resolvingPersonalRoom) {
     return (
-      <div style={{ width: '100vw', height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-app)', padding: '1.5rem' }}>
+      <div style={{ width: '100vw', height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-app)', padding: '1.5rem' }}>
         <div className="glass-panel" style={{ padding: '2rem', maxWidth: '420px', width: '100%', textAlign: 'center' }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', fontFamily: 'var(--font-heading)' }}>Opening your personal room…</h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Finding the room and starting your session. This takes a moment.</p>
@@ -2127,7 +2127,7 @@ function App() {
   // Outer routing bypass: Render meeting room for unauthenticated guest users
   if (currentView === 'meeting' && activeMeetingId && !user && guestUser) {
     return (
-      <div style={{ width: '100vw', height: '100dvh', backgroundColor: 'var(--bg-app)' }}>
+      <div style={{ width: '100vw', height: '100dvh', background: 'var(--bg-app)' }}>
         <MeetingRoom 
           meetingId={activeMeetingId}
           meetingTitle={activeCallTitle || 'GIIN MEET Video Room'}
@@ -2167,13 +2167,13 @@ function App() {
       width: '100vw',
       height: '100dvh',
       overflow: 'hidden',
-      backgroundColor: 'var(--bg-app)'
+      background: 'var(--bg-app)'
     }}>
       
       {/* Sidebar Navigation — only in the left-docked layout; the
           header-only layout renders the top navbar below instead. */}
       {currentView !== 'meeting' && layoutStyle === 'left-docked' && (
-        <aside className="sidebar-desktop" style={{
+        <aside className="sidebar-desktop app-sidebar" style={{
         width: isSidebarCollapsed ? '72px' : '260px',
         backgroundColor: 'var(--bg-sidebar)',
         display: 'flex',
@@ -2282,7 +2282,7 @@ function App() {
                   fontSize: '0.65rem',
                   letterSpacing: '0.05em',
                   whiteSpace: 'nowrap',
-                  color: 'var(--color-secondary)'
+                  color: 'rgba(255,255,255,0.55)'
                 }}>
                   {brandSlogan}
                 </span>
@@ -2307,8 +2307,6 @@ function App() {
                 padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
-                background: currentView === 'dashboard' ? 'var(--color-secondary)' : 'transparent',
-                color: currentView === 'dashboard' ? 'white' : 'rgba(255,255,255,0.7)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontWeight: currentView === 'dashboard' ? 600 : 400,
@@ -2334,8 +2332,6 @@ function App() {
                 padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
-                background: currentView === 'teams' ? 'var(--color-secondary)' : 'transparent',
-                color: currentView === 'teams' ? 'white' : 'rgba(255,255,255,0.7)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontWeight: currentView === 'teams' ? 600 : 400,
@@ -2360,8 +2356,6 @@ function App() {
                 padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
-                background: currentView === 'chats' ? 'var(--color-secondary)' : 'transparent',
-                color: currentView === 'chats' ? 'white' : 'rgba(255,255,255,0.7)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontWeight: currentView === 'chats' ? 600 : 400,
@@ -2420,8 +2414,6 @@ function App() {
                 padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
-                background: currentView === 'contacts' ? 'var(--color-secondary)' : 'transparent',
-                color: currentView === 'contacts' ? 'white' : 'rgba(255,255,255,0.7)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontWeight: currentView === 'contacts' ? 600 : 400,
@@ -2447,8 +2439,6 @@ function App() {
                 padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
-                background: currentView === 'private' ? 'var(--color-secondary)' : 'transparent',
-                color: currentView === 'private' ? 'white' : 'rgba(255,255,255,0.7)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontWeight: currentView === 'private' ? 600 : 400,
@@ -2474,8 +2464,6 @@ function App() {
                 padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
-                background: currentView === 'help' ? 'var(--color-secondary)' : 'transparent',
-                color: currentView === 'help' ? 'white' : 'rgba(255,255,255,0.7)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontWeight: currentView === 'help' ? 600 : 400,
@@ -2502,7 +2490,7 @@ function App() {
                   padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                   borderRadius: 'var(--radius-md)',
                   border: currentView === 'superadmin' ? '1px solid var(--color-accent)' : 'none',
-                  background: currentView === 'superadmin' ? 'rgba(250, 189, 2, 0.15)' : 'transparent',
+                  background: currentView === 'superadmin' ? 'rgba(var(--color-accent-rgb), 0.15)' : 'transparent',
                   color: currentView === 'superadmin' ? 'var(--color-accent)' : 'rgba(255,255,255,0.7)',
                   cursor: 'pointer',
                   textAlign: 'left',
@@ -2529,8 +2517,6 @@ function App() {
                 padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
-                background: currentView === 'settings' ? 'var(--color-secondary)' : 'transparent',
-                color: currentView === 'settings' ? 'white' : 'rgba(255,255,255,0.7)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontWeight: currentView === 'settings' ? 600 : 400,

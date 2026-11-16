@@ -176,6 +176,7 @@ export const applyUiStyle = (style: string, isDark: boolean) => {
 
 const GOOGLE_FONT_FAMILIES = new Set([
   'Outfit', 'Inter', 'Playfair Display', 'Fira Code', 'Montserrat', 'Orbitron', 'Rajdhani',
+  'Poppins', 'Space Grotesk', 'Lora', 'Merriweather', 'Quicksand', 'Nunito',
 ]);
 
 const FONT_STACKS: Record<string, string> = {
@@ -187,6 +188,20 @@ const FONT_STACKS: Record<string, string> = {
   'Montserrat': `'Montserrat', system-ui, -apple-system, 'Segoe UI', sans-serif`,
   'Orbitron': `'Orbitron', 'Rajdhani', system-ui, sans-serif`,
   'Rajdhani': `'Rajdhani', system-ui, -apple-system, 'Segoe UI', sans-serif`,
+  'Poppins': `'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif`,
+  'Space Grotesk': `'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif`,
+  'Lora': `'Lora', Georgia, 'Times New Roman', serif`,
+  'Merriweather': `'Merriweather', Georgia, 'Times New Roman', serif`,
+  'Quicksand': `'Quicksand', system-ui, -apple-system, 'Segoe UI', sans-serif`,
+  'Nunito': `'Nunito', system-ui, -apple-system, 'Segoe UI', sans-serif`,
+};
+
+/** Weights each family actually ships. A weight a family does not ship
+    (e.g. 500/600 for Merriweather, which only has 300/400/700/900) makes
+    Google Fonts reject the WHOLE css2 request, so each family requests
+    only the weights it has — see applyFont below. */
+const FONT_WEIGHTS: Record<string, string> = {
+  'Merriweather': '400;700',
 };
 
 const fontStack = (name: string): string =>
@@ -206,7 +221,7 @@ export const applyFont = (fontFamilyHeading: string, fontFamilyBody: string) => 
     link.id = fontId;
     link.rel = 'stylesheet';
     const families = [...new Set(webfonts)]
-      .map((f) => `family=${f.replace(/\s+/g, '+')}:wght@400;500;600;700`)
+      .map((f) => `family=${f.replace(/\s+/g, '+')}:wght@${FONT_WEIGHTS[f] || '400;500;600;700'}`)
       .join('&');
     link.href = `https://fonts.googleapis.com/css2?${families}&display=swap`;
     document.head.appendChild(link);

@@ -104,7 +104,7 @@
 [data-ui-style="liquid-glass"] .premium-btn:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: var(--color-accent);
-  box-shadow: 0 0 15px rgba(250, 189, 2, 0.4);
+  box-shadow: 0 0 15px rgba(var(--color-accent-rgb), 0.4);
 }
 
 /* Bento Grid Theme */
@@ -216,7 +216,7 @@
    active nav pill keeps its blue background with white text. */
 [data-ui-style="minimalism"] .app-sidebar .sidebar-btn { color: #525252 !important; }
 [data-ui-style="minimalism"] .app-sidebar .sidebar-btn:hover { background: #f4f4f5 !important; color: #171717 !important; }
-[data-ui-style="minimalism"] .app-sidebar .sidebar-btn.active { background: var(--color-secondary) !important; color: #ffffff !important; }
+[data-ui-style="minimalism"] .app-sidebar .sidebar-btn.active { background: var(--color-accent) !important; color: #ffffff !important; }
 [data-ui-style="minimalism"] .app-sidebar .sidebar-btn.active span { color: #ffffff !important; }
 [data-ui-style="minimalism"] .app-sidebar span { color: #171717 !important; }
 [data-ui-style="minimalism"] .app-sidebar .sidebar-upgrade-card { background: #f4f4f5 !important; border-color: #e5e5e5 !important; }
@@ -273,6 +273,172 @@
   transform: translate(2px, 2px);
   box-shadow: 2px 2px 0px #0f0a24 !important;
 }
+
+
+/* ==========================================================================
+   Fix 8 — Branding polish: accent + fonts reach the sidebar, and the
+   theme effects become real visual languages.
+   --------------------------------------------------------------------------
+   Root causes found:
+   - The sidebar's active pill was hardcoded --color-secondary, so changing
+     the accent never touched it. It is now driven by --color-accent.
+   - NO element carried the class "app-sidebar" (the <aside> is
+     .sidebar-desktop), so every [data-ui-style="..."] .app-sidebar rule in
+     this file was dead code — the themes never touched the sidebar at all.
+     App.tsx now adds the class, and these rules come alive.
+   - The DEFAULT theme (glassmorphism) had no [data-ui-style] rule set at
+     all, so it looked like plain flat white: frosted panels need a
+     colourful backdrop to blur against.
+   ========================================================================== */
+
+/* --- Sidebar: accent colour + typography ---------------------------------
+   The sidebar follows the chosen accent: a faint accent wash at the top,
+   accent-tinted hover, and the active pill in the accent itself with
+   readable on-accent text (black on light accents, white on dark ones).
+   Nav labels, tier card and brand text use the heading font, so a font
+   change is unmistakable in the sidebar too. */
+.app-sidebar {
+  background: linear-gradient(180deg, rgba(var(--color-accent-rgb), 0.16), rgba(var(--color-accent-rgb), 0.03) 280px, transparent 420px), var(--bg-sidebar);
+  font-family: var(--font-heading);
+}
+.app-sidebar .sidebar-btn {
+  font-family: var(--font-heading);
+  color: rgba(255, 255, 255, 0.7);
+  background: transparent;
+}
+.app-sidebar .sidebar-btn:hover {
+  background: rgba(var(--color-accent-rgb), 0.14);
+  color: #ffffff;
+}
+.app-sidebar .sidebar-btn.active {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  box-shadow: 0 4px 16px rgba(var(--color-accent-rgb), 0.45);
+}
+.app-sidebar .sidebar-btn.active svg { color: var(--color-on-accent); }
+/* Tier card picks up the accent as a tinted border + badge. */
+.app-sidebar .sidebar-upgrade-card {
+  border-color: rgba(var(--color-accent-rgb), 0.35) !important;
+}
+.app-sidebar .sidebar-upgrade-card .badge,
+.app-sidebar .sidebar-upgrade-card .badge-premium {
+  background-color: rgba(var(--color-accent-rgb), 0.22) !important;
+  border-color: rgba(var(--color-accent-rgb), 0.45) !important;
+  color: #ffffff !important;
+  animation: none;
+}
+/* Top navbar (header-only layout) follows the accent the same way. */
+.top-navbar-btn { font-family: var(--font-heading); }
+.top-navbar-btn.active { background: var(--color-accent); color: var(--color-on-accent); }
+
+/* --- Glassmorphism (the default theme) ------------------------------------
+   Soft pastel gradient backdrop so the frosted panels have something to
+   blur against; translucent sidebar + cards with hairline borders. */
+[data-ui-style="glassmorphism"] {
+  --bg-app: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 35%, #ede9fe 60%, #fce7f3 100%);
+  --bg-sidebar: rgba(0, 32, 91, 0.72);
+  --bg-card: rgba(255, 255, 255, 0.55);
+  --border-color: rgba(255, 255, 255, 0.6);
+}
+[data-ui-style="glassmorphism"][data-theme="dark"] {
+  --bg-app: linear-gradient(135deg, #0b1020 0%, #1e1b4b 55%, #0f172a 100%);
+  --bg-sidebar: rgba(6, 9, 17, 0.6);
+  --bg-card: rgba(18, 24, 38, 0.55);
+  --border-color: rgba(255, 255, 255, 0.12);
+}
+[data-ui-style="glassmorphism"] .glass-panel,
+[data-ui-style="glassmorphism"] .main-content-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-premium);
+}
+[data-ui-style="glassmorphism"] .app-sidebar {
+  background: linear-gradient(180deg, rgba(var(--color-accent-rgb), 0.18), rgba(var(--color-accent-rgb), 0.04) 280px, transparent 420px), var(--bg-sidebar);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  border-right: 1px solid var(--glass-border);
+}
+[data-ui-style="glassmorphism"] .premium-btn:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent), var(--shadow-md);
+}
+
+/* --- Cyberpunk Glow (extended) ---------------------------------------------
+   Dark neon world: a deep gradient backdrop with an accent glow at the top,
+   neon-edged sidebar and panels, glowing active pill. */
+[data-ui-style="cyberpunk-glow"] {
+  --bg-app: radial-gradient(1200px 600px at 50% -10%, rgba(var(--color-accent-rgb), 0.22), transparent 60%), linear-gradient(180deg, #05070f 0%, #0a0618 100%);
+  --bg-sidebar: rgba(6, 9, 17, 0.88);
+  --bg-card: rgba(10, 14, 26, 0.92);
+  --border-color: rgba(var(--color-accent-rgb), 0.35);
+  --text-main: #e6edf7;
+  --text-muted: #8b98ad;
+}
+[data-ui-style="cyberpunk-glow"] .app-sidebar {
+  border-right: 1px solid rgba(var(--color-accent-rgb), 0.45);
+  box-shadow: 6px 0 28px rgba(var(--color-accent-rgb), 0.14);
+}
+[data-ui-style="cyberpunk-glow"] .main-content-panel,
+[data-ui-style="cyberpunk-glow"] .glass-panel {
+  border: 1px solid rgba(var(--color-accent-rgb), 0.35);
+  box-shadow: 0 0 18px rgba(var(--color-accent-rgb), 0.16);
+}
+[data-ui-style="cyberpunk-glow"] .sidebar-btn.active {
+  box-shadow: 0 0 18px rgba(var(--color-accent-rgb), 0.65) !important;
+}
+[data-ui-style="cyberpunk-glow"] .premium-btn-primary {
+  box-shadow: 0 0 14px rgba(var(--color-accent-rgb), 0.5);
+}
+
+/* --- Flat Minimal (extended) ------------------------------------------------
+   Crisp flat surfaces: no shadows anywhere, hairline borders, tight radius.
+   The sidebar stays dark navy (flat) so its white text stays readable. */
+[data-ui-style="flat-minimal"] {
+  --bg-app: #fafafa;
+  --bg-card: #ffffff;
+  --border-color: #e5e7eb;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+[data-ui-style="flat-minimal"] .glass-panel,
+[data-ui-style="flat-minimal"] .main-content-panel,
+[data-ui-style="flat-minimal"] .meeting-card {
+  box-shadow: none !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 6px !important;
+}
+[data-ui-style="flat-minimal"] .app-sidebar {
+  box-shadow: none;
+  border-right: 1px solid var(--border-color);
+}
+[data-ui-style="flat-minimal"] .premium-btn {
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+/* --- Theme picker swatches --------------------------------------------------
+   Each theme option in Settings shows a miniature preview of its look, so
+   choosing a theme feels like picking a finish, not a label. */
+.theme-swatch {
+  display: block;
+  height: 34px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  margin-bottom: 0.4rem;
+}
+.theme-swatch-glassmorphism { background: linear-gradient(135deg, rgba(255,255,255,.95), rgba(219,234,254,.75) 55%, rgba(237,233,254,.85)); box-shadow: inset 0 0 0 1px rgba(255,255,255,.7), 0 4px 12px rgba(0,32,91,.12); }
+.theme-swatch-neumorphism { background: #e0e5ec; border-color: transparent; box-shadow: 4px 4px 8px #b8c2d0, -4px -4px 8px #ffffff; }
+.theme-swatch-cyberpunk-glow { background: linear-gradient(135deg, #05070f, #1a0b2e 60%, #0a0618); border-color: transparent; box-shadow: 0 0 12px rgba(255,0,127,.45), inset 0 0 0 1px rgba(255,0,127,.5); }
+.theme-swatch-flat-minimal { background: #ffffff; box-shadow: none; }
+.theme-swatch-liquid-glass { background: linear-gradient(135deg, rgba(15,23,42,.9), rgba(49,16,66,.85) 60%, rgba(15,23,42,.9)); border-color: transparent; box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
+.theme-swatch-bento-grid { background: #0f141f; border-color: transparent; box-shadow: 4px 4px 0 rgba(250,189,2,.6); }
+.theme-swatch-spatial-ui { background: radial-gradient(circle at 50% 30%, #334155, #0f172a 75%); border-color: transparent; box-shadow: 0 8px 16px rgba(0,0,0,.5); }
+.theme-swatch-skeuomorphism { background: linear-gradient(145deg, #2b303b, #242832); border-color: #343a46; box-shadow: 3px 3px 6px #15181e, -3px -3px 6px #2d323e; }
+.theme-swatch-minimalism { background: #ffffff; box-shadow: none; }
+.theme-swatch-maximalism { background: linear-gradient(135deg, #7c3aed, #f472b6 55%, #22d3ee); border-color: transparent; box-shadow: 3px 3px 0 #0f0a24; }
 
 /* Top Navbar Menu — the header-only layout (Branding & Layout > Navbar
    Scaffolding). The same navigation items as the left sidebar, rendered
@@ -338,7 +504,7 @@ html, body {
 
 body {
   font-family: var(--font-sans);
-  background-color: var(--bg-app);
+  background: var(--bg-app);
   color: var(--text-main);
   line-height: 1.5;
   transition: background-color var(--transition-normal), color var(--transition-normal);
@@ -1294,7 +1460,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 [data-ui-style="neumorphism"] .sidebar-btn.active {
-  background: rgba(var(--color-primary-rgb), 0.08) !important;
+  background: rgba(var(--color-accent-rgb), 0.18) !important;
   box-shadow: var(--shadow-neumorphic-in) !important;
   color: white !important;
   border-radius: var(--radius-md) !important;
@@ -1302,7 +1468,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 [data-ui-style="neumorphism"] .sidebar-btn.active svg {
-  filter: drop-shadow(0 0 3px white);
+  filter: drop-shadow(0 0 3px var(--color-accent));
 }
 
 [data-ui-style="neumorphism"] .sidebar-upgrade-card {
@@ -1399,8 +1565,8 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 [data-ui-style="cyberpunk-glow"] .premium-btn-secondary {
-  border: 1px solid var(--color-secondary) !important;
-  box-shadow: 0 0 5px rgba(var(--color-secondary-rgb), 0.2) !important;
+  border: 1px solid var(--color-accent) !important;
+  box-shadow: 0 0 5px rgba(var(--color-accent-rgb), 0.25) !important;
 }
 
 [data-ui-style="cyberpunk-glow"] h1,
