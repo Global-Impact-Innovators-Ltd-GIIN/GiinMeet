@@ -1204,6 +1204,11 @@ function App() {
       document.documentElement.style.removeProperty('--color-accent-rgb');
       document.documentElement.style.removeProperty('--color-accent-hover');
       document.documentElement.style.removeProperty('--color-on-accent');
+      // No saved accent: drop the derived sidebar shades too, so the
+      // per-theme --bg-sidebar values in the stylesheet apply again.
+      document.documentElement.style.removeProperty('--bg-sidebar');
+      document.documentElement.style.removeProperty('--sidebar-deep');
+      document.documentElement.style.removeProperty('--sidebar-deeper');
     }
 
     // 2. UI Style — the shared applier re-applies the SAVED glass level
@@ -2175,7 +2180,15 @@ function App() {
       {currentView !== 'meeting' && layoutStyle === 'left-docked' && (
         <aside className="sidebar-desktop app-sidebar" style={{
         width: isSidebarCollapsed ? '72px' : '260px',
-        backgroundColor: 'var(--bg-sidebar)',
+        /* Fix 9 — the sidebar itself follows the selected accent: a deep
+           gradient of the derived shades (theme.ts deriveSidebarShades,
+           applied by applyAccentColor). The old
+           backgroundColor: 'var(--bg-sidebar)' painted flat navy and
+           silently overrode the .app-sidebar class gradient. The var()
+           fallbacks keep the old navy when no accent is saved. (Themes
+           that force their own sidebar background with !important —
+           minimalism white, maximalism violet — still win, by design.) */
+        background: 'linear-gradient(180deg, var(--sidebar-deep, var(--bg-sidebar)), var(--sidebar-deeper, var(--bg-sidebar)))',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',

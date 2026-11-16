@@ -220,8 +220,8 @@
 [data-ui-style="minimalism"] .app-sidebar .sidebar-btn.active span { color: #ffffff !important; }
 [data-ui-style="minimalism"] .app-sidebar span { color: #171717 !important; }
 [data-ui-style="minimalism"] .app-sidebar .sidebar-upgrade-card { background: #f4f4f5 !important; border-color: #e5e5e5 !important; }
-[data-ui-style="minimalism"] .app-sidebar .sidebar-upgrade-card .badge { color: #171717 !important; }
-[data-ui-style="minimalism"] .app-sidebar .sidebar-upgrade-card .badge-premium { color: #171717 !important; }
+[data-ui-style="minimalism"] .app-sidebar .sidebar-upgrade-card .badge { color: var(--color-on-accent) !important; }
+[data-ui-style="minimalism"] .app-sidebar .sidebar-upgrade-card .badge-premium { color: var(--color-on-accent) !important; }
 /* Minimalism top navbar (header-only layout): same dark-on-white fix. */
 [data-ui-style="minimalism"] .top-navbar { background: #ffffff !important; color: #171717 !important; }
 [data-ui-style="minimalism"] .top-navbar-btn { color: #525252 !important; }
@@ -292,13 +292,18 @@
    ========================================================================== */
 
 /* --- Sidebar: accent colour + typography ---------------------------------
-   The sidebar follows the chosen accent: a faint accent wash at the top,
-   accent-tinted hover, and the active pill in the accent itself with
-   readable on-accent text (black on light accents, white on dark ones).
+   The sidebar follows the chosen accent: its whole background is the DEEP
+   shade derived from the accent in theme.ts (deriveSidebarShades, applied
+   by applyAccentColor as --sidebar-deep / --sidebar-deeper / --bg-sidebar),
+   with the fallbacks below keeping the old navy when no accent is saved.
+   The <aside> in App.tsx carries the same gradient inline — it beats this
+   class rule, so the two agree. Accent-tinted hover, and the active pill
+   in the accent itself with readable on-accent text (black on light
+   accents, white on dark ones).
    Nav labels, tier card and brand text use the heading font, so a font
    change is unmistakable in the sidebar too. */
 .app-sidebar {
-  background: linear-gradient(180deg, rgba(var(--color-accent-rgb), 0.16), rgba(var(--color-accent-rgb), 0.03) 280px, transparent 420px), var(--bg-sidebar);
+  background: linear-gradient(180deg, var(--sidebar-deep, var(--bg-sidebar)), var(--sidebar-deeper, var(--bg-sidebar)));
   font-family: var(--font-heading);
 }
 .app-sidebar .sidebar-btn {
@@ -316,15 +321,19 @@
   box-shadow: 0 4px 16px rgba(var(--color-accent-rgb), 0.45);
 }
 .app-sidebar .sidebar-btn.active svg { color: var(--color-on-accent); }
-/* Tier card picks up the accent as a tinted border + badge. */
+/* Tier card picks up the accent as a solid badge.
+   Fix 9 — the badge was a 22% translucent accent wash with forced white
+   text: on light accents (gold) white text on a pale wash was unreadable.
+   Solid accent + on-accent text reads in every theme and matches the
+   active pill exactly. */
 .app-sidebar .sidebar-upgrade-card {
   border-color: rgba(var(--color-accent-rgb), 0.35) !important;
 }
 .app-sidebar .sidebar-upgrade-card .badge,
 .app-sidebar .sidebar-upgrade-card .badge-premium {
-  background-color: rgba(var(--color-accent-rgb), 0.22) !important;
-  border-color: rgba(var(--color-accent-rgb), 0.45) !important;
-  color: #ffffff !important;
+  background-color: var(--color-accent) !important;
+  border-color: transparent !important;
+  color: var(--color-on-accent) !important;
   animation: none;
 }
 /* Top navbar (header-only layout) follows the accent the same way. */
@@ -488,7 +497,10 @@
   transition: all var(--transition-fast);
 }
 .top-navbar-btn:hover { color: white; background: rgba(255, 255, 255, 0.08); }
-.top-navbar-btn.active { background: var(--color-secondary); color: white; font-weight: 600; }
+/* Fix 9 — this was var(--color-secondary): it sits AFTER the Fix 8 accent
+   rule above at the same specificity, so the hardcoded secondary won and
+   the top-navbar active pill never matched the selected accent. */
+.top-navbar-btn.active { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
 
 /* Global Reset & Base Styling */
 html, body {
@@ -1460,14 +1472,22 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 [data-ui-style="neumorphism"] .sidebar-btn.active {
-  background: rgba(var(--color-accent-rgb), 0.18) !important;
-  box-shadow: var(--shadow-neumorphic-in) !important;
-  color: white !important;
+  /* Fix 9 — this was an 18% translucent accent wash (!important) over the
+     navy sidebar, which rendered as a muted light blue-grey instead of
+     the selected accent (Suku's screenshot: teal button / hub item vs a
+     grey "Settings" pill). The pill is now the SOLID selected accent with
+     readable on-accent text, exactly like every other theme. The
+     neumorphic inset shadow is dropped here on purpose: on a solid vivid
+     pill it muddies the colour — colour fidelity is the point. */
+  background: var(--color-accent) !important;
+  color: var(--color-on-accent) !important;
+  box-shadow: 0 4px 16px rgba(var(--color-accent-rgb), 0.45) !important;
   border-radius: var(--radius-md) !important;
   border: none !important;
 }
 
 [data-ui-style="neumorphism"] .sidebar-btn.active svg {
+  color: var(--color-on-accent);
   filter: drop-shadow(0 0 3px var(--color-accent));
 }
 

@@ -44,6 +44,62 @@ export const isLightColor = (hex: string): boolean => {
 };
 
 // ---------------------------------------------------------------------------
+// Sidebar shades derived from the accent — the sidebar itself follows the
+// chosen accent as a DEEP, rich, dark shade of the same hue (deep teal for
+// teal, deep violet for purple, deep crimson for red), the way the old
+// navy sidebar was a deep shade of blue. NOT a flat bright slab: lightness
+// is pinned to a dark band (~14% / ~9%) while hue is untouched and
+// saturation is floored at 55% so the shade stays rich and clearly of the
+// accent family — including for LIGHT accents (gold #FABD02 becomes a deep
+// bronze-gold, never a bright yellow slab), so soft-white nav text stays
+// readable on every accent.
+// ---------------------------------------------------------------------------
+
+export const hexToHsl = (hex: string): { h: number; s: number; l: number } | null => {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  const r = rgb.r / 255, g = rgb.g / 255, b = rgb.b / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l: l * 100 };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+  else if (max === g) h = ((b - r) / d + 2) * 60;
+  else h = ((r - g) / d + 4) * 60;
+  return { h, s: s * 100, l: l * 100 };
+};
+
+export const hslToHex = (h: number, s: number, l: number): string => {
+  const sN = s / 100, lN = l / 100;
+  const c = (1 - Math.abs(2 * lN - 1)) * sN;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = lN - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
+/** Deep sidebar shades for an accent hex: { deep, deeper }.
+    Falls back to the old navy for an unparseable value. */
+export const deriveSidebarShades = (hex: string): { deep: string; deeper: string } => {
+  const hsl = hexToHsl(hex);
+  if (!hsl) return { deep: '#00205B', deeper: '#00153D' };
+  const s = Math.max(hsl.s, 55);
+  return {
+    deep: hslToHex(hsl.h, s, 14),
+    deeper: hslToHex(hsl.h, s, 9),
+  };
+};
+
+// ---------------------------------------------------------------------------
 // Accent colour — re-themes the ENTIRE platform.
 //
 // Previously only --color-primary / --color-primary-hover /
@@ -67,6 +123,15 @@ export const applyAccentColor = (primary: string, hover: string) => {
     root.style.setProperty('--color-primary-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
     root.style.setProperty('--color-accent-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
   }
+  // Sidebar follows the accent: the whole sidebar — and the top navbar,
+  // which reads --bg-sidebar — takes a DEEP shade of the chosen colour.
+  // Inline vars beat the per-theme --bg-sidebar values in the stylesheet;
+  // applyUiStyle must NOT clear --bg-sidebar (see its note below), or
+  // every theme switch / reload would wipe the derived shade back to navy.
+  const shades = deriveSidebarShades(primary);
+  root.style.setProperty('--bg-sidebar', shades.deep);
+  root.style.setProperty('--sidebar-deep', shades.deep);
+  root.style.setProperty('--sidebar-deeper', shades.deeper);
 };
 
 // ---------------------------------------------------------------------------
@@ -111,9 +176,14 @@ export const applyGlassOpacity = (level: string, isDark: boolean) => {
 
 export const applyUiStyle = (style: string, isDark: boolean) => {
   document.documentElement.setAttribute('data-ui-style', style);
-  // Remove temporary inline properties to avoid clashing with the stylesheet rule sets
+  // Remove temporary inline properties to avoid clashing with the stylesheet rule sets.
+  // NOTE: --bg-sidebar is deliberately NOT cleared here. It is an
+  // accent-derived var (set by applyAccentColor from the chosen colour),
+  // not a theme var — clearing it on every theme switch / mount wiped the
+  // derived deep sidebar shade back to the stylesheet navy. The per-theme
+  // --bg-sidebar values in index.css still apply when no accent is saved
+  // (nothing inline to override them).
   document.documentElement.style.removeProperty('--bg-app');
-  document.documentElement.style.removeProperty('--bg-sidebar');
   document.documentElement.style.removeProperty('--bg-card');
   document.documentElement.style.removeProperty('--border-color');
   document.documentElement.style.removeProperty('--radius-md');
