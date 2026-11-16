@@ -122,6 +122,21 @@ const btnDanger: React.CSSProperties = {
   color: '#DC2626',
 };
 
+// Phone layout: below 860px the sidebar becomes a top bar with a
+// horizontally scrollable nav, so the content keeps the full width.
+function useIsNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => {
+    try { return window.matchMedia('(max-width: 860px)').matches; } catch { return false; }
+  });
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 860px)');
+    const onChange = () => setNarrow(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return narrow;
+}
+
 export const SuperadminPortal: React.FC = () => {
   const [gate, setGate] = useState<'loading' | 'signin' | 'denied' | 'portal'>('loading');
   const [gateError, setGateError] = useState('');
@@ -132,6 +147,14 @@ export const SuperadminPortal: React.FC = () => {
   const [adminEmail, setAdminEmail] = useState('');
   const [section, setSection] = useState<Section>('overview');
   const [toast, setToast] = useState('');
+  const narrow = useIsNarrow();
+  const mainRef = React.useRef<HTMLElement>(null);
+  // Every section starts at its top — otherwise a tall section leaves
+  // the next one scrolled half-way down.
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+    try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
+  }, [section]);
 
   // Apply the saved app theme so the portal feels like GiinMeet, with
   // its own dark-navy portal identity on the sidebar.
@@ -306,7 +329,7 @@ export const SuperadminPortal: React.FC = () => {
 
   if (gate === 'loading') {
     return (
-      <div style={{ minHeight: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-app)', color: 'var(--text-muted)' }}>
+      <div style={{ height: '100dvh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-app)', color: 'var(--text-muted)', overflowY: 'auto' }}>
         Checking your session…
       </div>
     );
@@ -315,7 +338,8 @@ export const SuperadminPortal: React.FC = () => {
   // ---- Sign-in page (separate from the user sign-in screen) ----------
   if (gate === 'signin') {
     return (
-      <div style={{ minHeight: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#060911', padding: '1rem' }}>
+      <div className="sa-portal" style={{ height: '100dvh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#060911', padding: '1rem', overflowY: 'auto' }}>
+      <style>{`.sa-portal button:disabled, .sa-portal input:disabled, .sa-portal select:disabled, .sa-portal textarea:disabled { opacity: 0.55; cursor: not-allowed; }`}</style>
         <div style={{ width: '100%', maxWidth: '420px', background: '#0E1628', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', padding: '2rem', color: '#fff' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
             <span style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#FABD02', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0B0F19' }}>
@@ -412,7 +436,7 @@ export const SuperadminPortal: React.FC = () => {
   // ---- Access denied (signed in, but not a superadmin) ---------------
   if (gate === 'denied') {
     return (
-      <div style={{ minHeight: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-app)', padding: '1rem' }}>
+      <div style={{ height: '100dvh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-app)', padding: '1rem', overflowY: 'auto' }}>
         <div style={{ ...cardStyle, maxWidth: '480px', textAlign: 'center' }}>
           <Shield size={40} color="#DC2626" style={{ margin: '0 auto 0.75rem' }} />
           <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.4rem', color: 'var(--text-main)' }}>Access denied</h1>
@@ -431,7 +455,8 @@ export const SuperadminPortal: React.FC = () => {
 
   // ---- Portal shell ----------------------------------------------------
   return (
-    <div style={{ minHeight: '100vh', width: '100%', background: 'var(--bg-app)', color: 'var(--text-main)', fontFamily: 'var(--font-sans)', display: 'flex' }}>
+    <div className="sa-portal" style={{ height: '100dvh', width: '100%', background: 'var(--bg-app)', color: 'var(--text-main)', fontFamily: 'var(--font-sans)', display: 'flex', flexDirection: narrow ? 'column' : 'row', overflow: 'hidden' }}>
+      <style>{`.sa-portal button:disabled, .sa-portal input:disabled, .sa-portal select:disabled, .sa-portal textarea:disabled { opacity: 0.55; cursor: not-allowed; }`}</style>
       {toast && (
         <div style={{ position: 'fixed', top: '20px', right: '20px', background: 'var(--color-primary)', color: '#fff', padding: '0.8rem 1.1rem', borderRadius: 'var(--radius-md)', zIndex: 1000, boxShadow: '0 8px 24px rgba(0,0,0,0.25)', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <CheckCircle2 size={18} /> {toast}
@@ -439,7 +464,9 @@ export const SuperadminPortal: React.FC = () => {
       )}
 
       {/* Portal sidebar — dark navy, distinct from the user dashboard */}
-      <aside style={{ width: '248px', minHeight: '100vh', background: '#060911', color: '#fff', display: 'flex', flexDirection: 'column', padding: '1.25rem 0.9rem', gap: '0.35rem', position: 'sticky', top: 0, height: '100vh', overflowY: 'auto', flexShrink: 0 }}>
+      <aside style={narrow
+        ? { width: '100%', background: '#060911', color: '#fff', display: 'flex', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', padding: '0.6rem 0.75rem', gap: '0.35rem', flexShrink: 0, overflowX: 'auto' }
+        : { width: '248px', background: '#060911', color: '#fff', display: 'flex', flexDirection: 'column', padding: '1.25rem 0.9rem', gap: '0.35rem', height: '100dvh', overflowY: 'auto', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.4rem 1rem' }}>
           <span style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#FABD02', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0B0F19', flexShrink: 0 }}>
             <Shield size={20} />
@@ -454,7 +481,8 @@ export const SuperadminPortal: React.FC = () => {
             key={n.id}
             onClick={() => setSection(n.id)}
             style={{
-              display: 'flex', alignItems: 'center', gap: '0.7rem', width: '100%',
+              display: 'flex', alignItems: 'center', gap: '0.7rem', width: narrow ? 'auto' : '100%',
+              whiteSpace: 'nowrap', flexShrink: 0,
               padding: '0.65rem 0.8rem', borderRadius: '0.6rem', border: 'none', cursor: 'pointer',
               background: section === n.id ? '#FABD02' : 'transparent',
               color: section === n.id ? '#0B0F19' : 'rgba(255,255,255,0.75)',
@@ -464,8 +492,8 @@ export const SuperadminPortal: React.FC = () => {
             {n.icon} {n.label}
           </button>
         ))}
-        <div style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.12)', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-          <div style={{ padding: '0 0.4rem', fontSize: '0.8rem', color: 'rgba(255,255,255,0.65)', wordBreak: 'break-all' }}>
+        <div style={{ marginTop: narrow ? 0 : 'auto', paddingTop: narrow ? '0.5rem' : '1rem', borderTop: '1px solid rgba(255,255,255,0.12)', display: 'flex', flexDirection: narrow ? 'row' : 'column', gap: '0.6rem', width: narrow ? '100%' : undefined, alignItems: narrow ? 'center' : undefined }}>
+          <div style={{ display: narrow ? 'none' : 'block', padding: '0 0.4rem', fontSize: '0.8rem', color: 'rgba(255,255,255,0.65)', wordBreak: 'break-all' }}>
             Signed in as<br /><strong style={{ color: '#fff' }}>{adminEmail}</strong>
           </div>
           <button onClick={() => { window.location.href = '/'; }} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'none', border: 'none', color: 'rgba(255,255,255,0.75)', cursor: 'pointer', fontSize: '0.9rem', padding: '0.5rem 0.8rem', textAlign: 'left' }}>
@@ -478,7 +506,7 @@ export const SuperadminPortal: React.FC = () => {
       </aside>
 
       {/* Main content */}
-      <main style={{ flex: 1, minWidth: 0, padding: '1.5rem 2rem 3rem' }}>
+      <main ref={mainRef} className="scroll-refined" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: narrow ? '1rem 1rem 2.5rem' : '1.5rem 2rem 3rem' }}>
         <PortalBody section={section} callAdmin={callAdmin} showToast={showToast} adminEmail={adminEmail} />
       </main>
     </div>
@@ -1021,6 +1049,21 @@ function MeetingsSection({ callAdmin, showToast }: {
 }
 
 // ---- Configuration ----------------------------------------------------------
+// Grouped settings: General, Security, Branding. Every control below
+// is wired to a real backend effect — a setting reads from and writes
+// to system_settings (or the workspace_brand table) and the app reads
+// the same key where the behaviour lives. Nothing here is decorative:
+// a toggle with no backend does not get a place in this section.
+function ConfigGroup({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.15rem', fontWeight: 800, margin: '0 0 0.2rem' }}>{title}</h2>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0 0.9rem' }}>{sub}</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1rem' }}>{children}</div>
+    </section>
+  );
+}
+
 function ConfigSection({ callAdmin, showToast }: {
   callAdmin: (path: string, body?: Record<string, unknown>) => Promise<any>;
   showToast: (msg: string) => void;
@@ -1030,6 +1073,9 @@ function ConfigSection({ callAdmin, showToast }: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [savingKey, setSavingKey] = useState('');
+  const [brand, setBrand] = useState<any>(null);
+  const [brandNotSetUp, setBrandNotSetUp] = useState(false);
+  const [brandSaving, setBrandSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1040,6 +1086,14 @@ function ConfigSection({ callAdmin, showToast }: {
       setNotSetUp(!!d.notSetUp);
     } catch (e: any) {
       setError(e?.message || 'Could not load settings.');
+    }
+    try {
+      const b = await callAdmin('brand');
+      setBrand(b.brand || null);
+      setBrandNotSetUp(!!b.notSetUp);
+    } catch (e) {
+      setBrand(null);
+      setBrandNotSetUp(true);
     } finally {
       setLoading(false);
     }
@@ -1060,19 +1114,66 @@ function ConfigSection({ callAdmin, showToast }: {
     }
   };
 
+  const clearSetting = async (key: string) => {
+    setSavingKey(key);
+    try {
+      await callAdmin('settings', { action: 'clear', key });
+      setSettings((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      showToast('Setting cleared — the built-in default applies again.');
+    } catch (e: any) {
+      window.alert(e?.message || 'Could not clear the setting.');
+    } finally {
+      setSavingKey('');
+    }
+  };
+
+  const saveBrand = async (b: { brand_name: string; slogan: string; logo_url: string | null; accent_color: string; accent_hover: string }) => {
+    setBrandSaving(true);
+    try {
+      await callAdmin('brand', { action: 'set', brand: b });
+      setBrand(b);
+      showToast('Brand saved — every user sees it on their next load.');
+    } catch (e: any) {
+      window.alert(e?.message || 'Could not save the brand.');
+    } finally {
+      setBrandSaving(false);
+    }
+  };
+
+  const resetBrand = async () => {
+    if (!window.confirm('Reset the shared brand to the default GiinMeet name, slogan, logo and accent?')) return;
+    setBrandSaving(true);
+    try {
+      await callAdmin('brand', { action: 'reset' });
+      setBrand(null);
+      showToast('Brand reset to the GiinMeet default.');
+    } catch (e: any) {
+      window.alert(e?.message || 'Could not reset the brand.');
+    } finally {
+      setBrandSaving(false);
+    }
+  };
+
   if (loading) return <div style={{ color: 'var(--text-muted)' }}>Loading configuration…</div>;
   if (error) return <Notice kind="error">{error}</Notice>;
 
   const guestsCanChat = settings.guests_can_chat?.enabled === true;
+  const waitingRoomDefault = settings.default_require_waiting_room?.enabled !== false;
   const limits = settings.tier_limits || { free: 50, pro: 100, enterprise: 250 };
   const durations = settings.tier_max_duration_minutes || { free: 40, pro: 1440, enterprise: 1440 };
+  const defaultDuration = typeof settings.default_meeting_duration_minutes?.minutes === 'number'
+    ? settings.default_meeting_duration_minutes.minutes : null;
   const accent = settings.default_accent?.color || '#3B82F6';
   const theme = settings.default_theme || { ui_style: 'glassmorphism', glass_opacity: 'frosted' };
   const font = settings.default_font || { heading: 'Outfit', body: 'Inter' };
   const banner = settings.announcement_banner || { enabled: false, message: '' };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <SectionTitle title="Configuration" sub="System-wide settings. Every change is written to the audit log." onRefresh={load} refreshing={loading} />
       {notSetUp && (
         <Notice kind="warn">
@@ -1080,18 +1181,45 @@ function ConfigSection({ callAdmin, showToast }: {
         </Notice>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1rem' }}>
+      <ConfigGroup title="General" sub="Limits, defaults and announcements for the whole system.">
         {/* Tier limits */}
         <div style={cardStyle}>
           <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Tier limits</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Maximum participants per meeting and longest meeting per tier. The video server enforces these.</p>
-          <TierLimitsForm limits={limits} durations={durations} disabled={notSetUp} saving={savingKey !== ''} onSave={(l, d) => { save('tier_limits', l); save('tier_max_duration_minutes', d); }} />
+          <TierLimitsForm limits={limits} durations={durations} disabled={notSetUp} saving={savingKey !== ''} onSave={async (l, d) => { await save('tier_limits', l); await save('tier_max_duration_minutes', d); }} />
         </div>
 
+        {/* Default meeting duration */}
+        <div style={cardStyle}>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Default meeting duration</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>The duration the dashboard pre-selects when someone schedules a new meeting.</p>
+          <DurationDefaultForm
+            minutes={defaultDuration}
+            disabled={notSetUp}
+            saving={savingKey === 'default_meeting_duration_minutes'}
+            onSave={(m) => save('default_meeting_duration_minutes', { minutes: m })}
+            onClear={() => clearSetting('default_meeting_duration_minutes')}
+          />
+        </div>
+
+        {/* Announcement banner */}
+        <div style={cardStyle}>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Announcement / maintenance banner</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Shown at the top of the dashboard for every user while it is on.</p>
+          <BannerForm
+            banner={{ enabled: banner.enabled === true, message: banner.message || '' }}
+            disabled={notSetUp}
+            saving={savingKey === 'announcement_banner'}
+            onSave={(v) => save('announcement_banner', v)}
+          />
+        </div>
+      </ConfigGroup>
+
+      <ConfigGroup title="Security" sub="Who can do what in meetings — enforced by the app and the video server.">
         {/* Feature flags */}
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Feature flags</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Switch behaviour for the whole system.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Guest chat</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Whether people without an account can write in a meeting.</p>
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: notSetUp ? 'not-allowed' : 'pointer', opacity: notSetUp ? 0.6 : 1 }}>
             <input
               type="checkbox"
@@ -1109,6 +1237,42 @@ function ConfigSection({ callAdmin, showToast }: {
               </span>
             </span>
           </label>
+        </div>
+
+        {/* Waiting-room default */}
+        <div style={cardStyle}>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Waiting room default</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Whether new meetings admit guests through the waiting room unless the host changes it for that meeting.</p>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: notSetUp ? 'not-allowed' : 'pointer', opacity: notSetUp ? 0.6 : 1 }}>
+            <input
+              type="checkbox"
+              checked={waitingRoomDefault}
+              disabled={notSetUp || savingKey === 'default_require_waiting_room'}
+              onChange={(e) => save('default_require_waiting_room', { enabled: e.target.checked })}
+              style={{ width: '18px', height: '18px', marginTop: '2px' }}
+            />
+            <span>
+              <strong>Waiting room on for new meetings</strong>
+              <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.2rem' }}>
+                {waitingRoomDefault
+                  ? 'ON — guests wait to be admitted. The host can still switch it off per meeting.'
+                  : 'OFF — guests join new meetings directly. The host can still switch the waiting room on per meeting.'}
+              </span>
+            </span>
+          </label>
+        </div>
+      </ConfigGroup>
+
+      <ConfigGroup title="Branding" sub="What every user sees — the shared brand, and the defaults a brand-new workspace starts with.">
+        {/* Shared workspace brand */}
+        <div style={cardStyle}>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Shared workspace brand</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>The name, slogan, logo and accent every user sees — on the sign-in screen, in meetings and in the app header. Saved to the shared brand; the app loads it on start.</p>
+          {brandNotSetUp ? (
+            <Notice kind="warn">Shared branding is not set up yet — run <strong>giinmeet_phase3_brand.sql</strong> in the Supabase SQL Editor once.</Notice>
+          ) : (
+            <BrandForm brand={brand} disabled={notSetUp} saving={brandSaving} onSave={saveBrand} onReset={resetBrand} />
+          )}
         </div>
 
         {/* Workspace defaults */}
@@ -1155,36 +1319,7 @@ function ConfigSection({ callAdmin, showToast }: {
             </label>
           </div>
         </div>
-
-        {/* Announcement banner */}
-        <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Announcement / maintenance banner</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Shown at the top of the dashboard for every user while it is on.</p>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: notSetUp ? 'not-allowed' : 'pointer', opacity: notSetUp ? 0.6 : 1, fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-            <input
-              type="checkbox"
-              checked={banner.enabled === true}
-              disabled={notSetUp}
-              onChange={(e) => save('announcement_banner', { enabled: e.target.checked, message: banner.message || '' })}
-              style={{ width: '18px', height: '18px' }}
-            />
-            <strong>Show the banner</strong>
-          </label>
-          <textarea
-            value={banner.message || ''}
-            disabled={notSetUp}
-            maxLength={300}
-            rows={3}
-            placeholder="e.g. Scheduled maintenance on Sunday 02:00–03:00 SAST — meetings may be briefly interrupted."
-            onChange={(e) => setSettings((prev) => ({ ...prev, announcement_banner: { enabled: banner.enabled, message: e.target.value } }))}
-            onBlur={(e) => {
-              if (e.target.value !== (settings.announcement_banner?.message || '')) save('announcement_banner', { enabled: banner.enabled, message: e.target.value });
-            }}
-            style={{ ...inputStyle, height: 'auto', minHeight: '72px', padding: '0.6rem 0.75rem', resize: 'vertical' }}
-          />
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '0.5rem 0 0' }}>The message saves when you click away from the box. 300 characters maximum.</p>
-        </div>
-      </div>
+      </ConfigGroup>
     </div>
   );
 }
@@ -1194,7 +1329,7 @@ function TierLimitsForm({ limits, durations, disabled, saving, onSave }: {
   durations: Record<string, number>;
   disabled: boolean;
   saving: boolean;
-  onSave: (limits: Record<string, number>, durations: Record<string, number>) => void;
+  onSave: (limits: Record<string, number>, durations: Record<string, number>) => Promise<void>;
 }) {
   const [l, setL] = useState<Record<string, number>>({ ...limits });
   const [d, setD] = useState<Record<string, number>>({ ...durations });
@@ -1221,9 +1356,213 @@ function TierLimitsForm({ limits, durations, disabled, saving, onSave }: {
         </div>
       ))}
       <div>
-        <button onClick={() => onSave(l, d)} disabled={disabled || saving} style={btnPrimary}>Save tier limits</button>
+        <button onClick={() => void onSave(l, d)} disabled={disabled || saving} style={btnPrimary}>Save tier limits</button>
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>Limits must grow with the tier (Free ≤ Pro ≤ Enterprise). Durations are capped at 24 hours (1440 min).</p>
+    </div>
+  );
+}
+
+function DurationDefaultForm({ minutes, disabled, saving, onSave, onClear }: {
+  minutes: number | null;
+  disabled: boolean;
+  saving: boolean;
+  onSave: (minutes: number) => Promise<void>;
+  onClear: () => Promise<void>;
+}) {
+  const [value, setValue] = useState<string>(minutes === null ? '' : String(minutes));
+  useEffect(() => { setValue(minutes === null ? '' : String(minutes)); }, [minutes]);
+  const n = Number(value);
+  const valid = value.trim() !== '' && Number.isFinite(n) && n >= 5 && n <= 1440;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}>
+        <input
+          type="number" min={5} max={1440} value={value} disabled={disabled}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="120"
+          style={{ ...inputStyle, width: '96px', height: '36px' }}
+        /> minutes
+      </label>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <button onClick={() => { if (valid) void onSave(Math.round(n)); }} disabled={disabled || saving || !valid} style={btnPrimary}>Save default duration</button>
+        {minutes !== null && (
+          <button onClick={() => void onClear()} disabled={disabled || saving} style={btnGhost}>Clear — use tier default</button>
+        )}
+      </div>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>
+        {minutes === null
+          ? 'Not set — new meetings default to the tier default (Free 40 min, Pro / Enterprise 2 hours).'
+          : `Currently ${minutes} minutes — the dashboard pre-selects the matching duration for new meetings.`} 5–1440 minutes.
+      </p>
+    </div>
+  );
+}
+
+function BannerForm({ banner, disabled, saving, onSave }: {
+  banner: { enabled: boolean; message: string };
+  disabled: boolean;
+  saving: boolean;
+  onSave: (value: { enabled: boolean; message: string }) => Promise<void>;
+}) {
+  const [enabled, setEnabled] = useState<boolean>(banner.enabled === true);
+  const [message, setMessage] = useState<string>(banner.message || '');
+  useEffect(() => {
+    setEnabled(banner.enabled === true);
+    setMessage(banner.message || '');
+  }, [banner.enabled, banner.message]);
+  const dirty = enabled !== (banner.enabled === true) || message !== (banner.message || '');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.9rem', cursor: disabled ? 'not-allowed' : 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={disabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          style={{ width: '18px', height: '18px' }}
+        />
+        <strong>Show the banner</strong>
+      </label>
+      <textarea
+        value={message}
+        disabled={disabled}
+        maxLength={300}
+        rows={3}
+        placeholder="e.g. Scheduled maintenance on Sunday 02:00–03:00 SAST — meetings may be briefly interrupted."
+        onChange={(e) => setMessage(e.target.value)}
+        style={{ ...inputStyle, height: 'auto', minHeight: '72px', padding: '0.6rem 0.75rem', resize: 'vertical' }}
+      />
+      <div>
+        <button onClick={() => void onSave({ enabled, message })} disabled={disabled || saving || !dirty} style={btnPrimary}>Save banner</button>
+      </div>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>The message saves with the button above — typing alone does not save it. 300 characters maximum.</p>
+    </div>
+  );
+}
+
+interface BrandDraft {
+  brand_name: string;
+  slogan: string;
+  logo_url: string | null;
+  accent_color: string;
+  accent_hover: string;
+}
+
+const DEFAULT_BRAND: BrandDraft = {
+  brand_name: 'GiinMeet',
+  slogan: 'Connect, Collaborate, Virtualize',
+  logo_url: null,
+  accent_color: '#3B82F6',
+  accent_hover: '#2563EB',
+};
+
+function BrandForm({ brand, disabled, saving, onSave, onReset }: {
+  brand: BrandDraft | null;
+  disabled: boolean;
+  saving: boolean;
+  onSave: (b: BrandDraft) => Promise<void>;
+  onReset: () => Promise<void>;
+}) {
+  const current: BrandDraft = brand || DEFAULT_BRAND;
+  const [name, setName] = useState(current.brand_name);
+  const [slogan, setSlogan] = useState(current.slogan);
+  const [logo, setLogo] = useState<string | null>(current.logo_url);
+  const [accentColor, setAccentColor] = useState(current.accent_color);
+  const [accentHover, setAccentHover] = useState(current.accent_hover);
+  const [logoError, setLogoError] = useState('');
+  useEffect(() => {
+    setName(current.brand_name);
+    setSlogan(current.slogan);
+    setLogo(current.logo_url);
+    setAccentColor(current.accent_color);
+    setAccentHover(current.accent_hover);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brand]);
+  const dirty =
+    name !== current.brand_name ||
+    slogan !== current.slogan ||
+    logo !== current.logo_url ||
+    accentColor !== current.accent_color ||
+    accentHover !== current.accent_hover;
+  const onLogoFile = (file: File | undefined) => {
+    setLogoError('');
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setLogoError('Choose an image file (PNG, JPG or WebP).');
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      setLogoError('That image is over 1 MB — pick a smaller one. The logo is stored in the database, so keep it small.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setLogo(String(reader.result || ''));
+    reader.onerror = () => setLogoError('Could not read that file.');
+    reader.readAsDataURL(file);
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+      <label style={{ fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+        Brand name
+        <input type="text" value={name} disabled={disabled} maxLength={80} onChange={(e) => setName(e.target.value)} style={inputStyle} />
+      </label>
+      <label style={{ fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+        Slogan
+        <input type="text" value={slogan} disabled={disabled} maxLength={120} onChange={(e) => setSlogan(e.target.value)} style={inputStyle} />
+      </label>
+      <div style={{ fontSize: '0.9rem' }}>
+        <div style={{ marginBottom: '0.35rem' }}>Logo</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {logo ? (
+            <img src={logo} alt="Brand logo preview" style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#fff' }} />
+          ) : (
+            <span style={{ width: '56px', height: '56px', borderRadius: '8px', border: '1px dashed var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.25rem' }}>Default logo</span>
+          )}
+          <input type="file" accept="image/png,image/jpeg,image/webp" disabled={disabled} onChange={(e) => onLogoFile(e.target.files?.[0])} style={{ fontSize: '0.85rem', maxWidth: '220px' }} />
+          {logo && (
+            <button onClick={() => setLogo(null)} disabled={disabled} style={btnGhost}>Remove logo</button>
+          )}
+        </div>
+        {logoError && <p style={{ color: '#DC2626', fontSize: '0.85rem', margin: '0.4rem 0 0' }}>{logoError}</p>}
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', fontSize: '0.9rem' }}>
+        Accent colour
+        <input
+          type="color"
+          value={accentColor}
+          disabled={disabled}
+          onChange={(e) => setAccentColor(e.target.value)}
+          style={{ width: '48px', height: '32px', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'none', cursor: 'pointer' }}
+        />
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', fontSize: '0.9rem' }}>
+        Accent hover colour
+        <input
+          type="color"
+          value={accentHover}
+          disabled={disabled}
+          onChange={(e) => setAccentHover(e.target.value)}
+          style={{ width: '48px', height: '32px', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'none', cursor: 'pointer' }}
+        />
+      </label>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <button
+          onClick={() => void onSave({ brand_name: name.trim() || DEFAULT_BRAND.brand_name, slogan, logo_url: logo, accent_color: accentColor, accent_hover: accentHover })}
+          disabled={disabled || saving || !dirty || name.trim().length === 0}
+          style={btnPrimary}
+        >
+          Save brand
+        </button>
+        {brand !== null && (
+          <button onClick={() => void onReset()} disabled={disabled || saving} style={btnGhost}>Reset to default</button>
+        )}
+      </div>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>
+        {brand === null
+          ? 'No shared brand is set — everyone sees the default GiinMeet brand. Save one to change it.'
+          : 'Saved brands apply when each user next loads the app — sign-in screen, meetings and header included.'}
+      </p>
     </div>
   );
 }

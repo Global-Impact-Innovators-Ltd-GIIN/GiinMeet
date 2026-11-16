@@ -219,6 +219,8 @@ export interface SystemSettings {
   defaultTheme: { ui_style: string; glass_opacity: string } | null;
   defaultFont: { heading: string; body: string } | null;
   banner: { enabled: boolean; message: string } | null;
+  defaultMeetingDurationMinutes: number | null;
+  defaultRequireWaitingRoom: boolean | null;
 }
 
 const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -229,6 +231,8 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   defaultTheme: null,
   defaultFont: null,
   banner: null,
+  defaultMeetingDurationMinutes: null,
+  defaultRequireWaitingRoom: null,
 };
 
 let systemSettingsCache: { at: number; value: SystemSettings } | null = null;
@@ -250,6 +254,8 @@ export async function getSystemSettings(): Promise<SystemSettings> {
         else if (row.key === 'default_theme') value.defaultTheme = v;
         else if (row.key === 'default_font') value.defaultFont = v;
         else if (row.key === 'announcement_banner') value.banner = v;
+        else if (row.key === 'default_meeting_duration_minutes') value.defaultMeetingDurationMinutes = typeof v.minutes === 'number' ? v.minutes : null;
+        else if (row.key === 'default_require_waiting_room') value.defaultRequireWaitingRoom = typeof v.enabled === 'boolean' ? v.enabled : null;
       }
     }
   } catch (e) {
@@ -886,7 +892,9 @@ export const giinApi = {
     // open meeting with no passcode at all (guests join without a code);
     // passing an explicit code uses it.
     const passcode = meeting.passcode === null ? null : (meeting.passcode || generateMeetingPasscode());
-    const requireWaitingRoom = meeting.require_waiting_room ?? true;
+    // System waiting-room default (Superadmin portal): callers that do
+    // not say otherwise inherit it; the built-in default is on.
+    const requireWaitingRoom = meeting.require_waiting_room ?? (await getSystemSettings()).defaultRequireWaitingRoom ?? true;
     localStorage.setItem(`giin_meeting_settings_${meetingId}`, JSON.stringify({ require_waiting_room: requireWaitingRoom }));
 
     const payload: any = {

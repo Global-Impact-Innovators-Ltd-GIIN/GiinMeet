@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2 } from 'lucide-react';
 import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, getSystemSettings, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
-import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, type PlanTier } from '../utils/tiers';
+import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
 interface Meeting {
   id: string;
@@ -72,6 +72,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [instantPasscodeEnabled, setInstantPasscodeEnabled] = useState(true);
   const [instantPasscode, setInstantPasscode] = useState('');
   const [requireWaitingRoom, setRequireWaitingRoom] = useState(true);
+  // System waiting-room default (Superadmin portal) is applied once, on
+  // first load — see the settings effect below. The host's own toggles
+  // afterwards always win.
+  const waitingRoomAppliedRef = useRef(false);
   const [schedulePasscodeEnabled, setSchedulePasscodeEnabled] = useState(true);
   const [schedulePasscode, setSchedulePasscode] = useState('');
   const [scheduledMeetingDetails, setScheduledMeetingDetails] = useState<Meeting | null>(null);
@@ -123,6 +127,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const filtered = typeof max === 'number' ? filterDurationOptionsByMax(DURATION_OPTIONS_FOR_TIER[planTier], max) : DURATION_OPTIONS_FOR_TIER[planTier];
       setDurationOptions(filtered);
       setTemplateDuration((prev) => filtered.some((o) => o.value === prev) ? prev : (filtered[filtered.length - 1]?.value || prev));
+      // System default meeting duration (Superadmin portal): when set,
+      // the dashboard pre-selects the matching duration option.
+      if (typeof s.defaultMeetingDurationMinutes === 'number') {
+        const match = filtered.find((o) => parseDurationMinutes(o.value) === s.defaultMeetingDurationMinutes);
+        if (match) setTemplateDuration(match.value);
+      }
+      // System waiting-room default (Superadmin portal): applied once,
+      // on first load — the host's own toggles afterwards always win.
+      if (!waitingRoomAppliedRef.current) {
+        waitingRoomAppliedRef.current = true;
+        if (s.defaultRequireWaitingRoom === false) {
+          setRequireWaitingRoom(false);
+          setInstantRequireWaitingRoom(false);
+        }
+      }
     }).catch(() => { /* built-in options stand */ });
     return () => { cancelled = true; };
   }, [planTier]);

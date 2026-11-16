@@ -11,6 +11,8 @@ const ALLOWED_KEYS = [
   'default_theme',
   'default_font',
   'announcement_banner',
+  'default_meeting_duration_minutes',
+  'default_require_waiting_room',
 ] as const;
 
 type AllowedKey = (typeof ALLOWED_KEYS)[number];
@@ -56,6 +58,14 @@ function isValidValue(key: AllowedKey, value: unknown): string | null {
       return 'announcement_banner needs { enabled: boolean, message: string }.';
     }
     if (v.message.length > 300) return 'The banner message must be 300 characters or fewer.';
+  }
+  if (key === 'default_meeting_duration_minutes') {
+    if (typeof v.minutes !== 'number' || !Number.isFinite(v.minutes) || v.minutes < 5 || v.minutes > 1440) {
+      return 'default_meeting_duration_minutes needs { minutes: 5–1440 }.';
+    }
+  }
+  if (key === 'default_require_waiting_room') {
+    if (typeof v.enabled !== 'boolean') return 'default_require_waiting_room needs { enabled: boolean }.';
   }
   return null;
 }
@@ -118,6 +128,26 @@ export async function POST(req: NextRequest) {
       await writeAudit(admin, actor, 'update-setting', 'setting', key, { value: body.value });
       return NextResponse.json({ ok: true });
     }
+    if (body.action === 'clear') {
+      const key = body?.key as string | undefined;
+      if (!key || !(ALLOWED_KEYS as readonly string[]).includes(key)) {
+        return NextResponse.json({ error: 'BAD_REQUEST', message: `key must be one of: ${ALLOWED_KEYS.join(', ')}.` }, { status: 400 });
+      }
+      const { error } = await admin.from('system_settings').delete().eq('key', key);
+      if (error) {
+        const msg = String(error.message || '');
+        if (/system_settings/i.test(msg) && /relation|does not exist/i.test(msg)) {
+          return NextResponse.json(
+            { error: 'SETTINGS_NOT_SET_UP', message: 'System settings are not set up yet — run giinmeet_superadmin.sql in the Supabase SQL Editor once, then try again.' },
+            { status: 500 }
+          );
+        }
+        return NextResponse.json({ error: 'DB_ERROR', message: `Could not clear the setting: ${msg}` }, { status: 500 });
+      }
+      await writeAudit(admin, actor, 'clear-setting', 'setting', key, {});
+      return NextResponse.json({ ok: true });
+    }
+
 
     return NextResponse.json({ error: 'BAD_REQUEST', message: `Unknown action: ${body?.action}` }, { status: 400 });
   } catch (err: any) {

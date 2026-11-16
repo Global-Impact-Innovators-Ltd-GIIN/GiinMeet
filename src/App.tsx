@@ -1337,11 +1337,14 @@ function App() {
     setIsDarkMode(!isDarkMode);
   };
 
-  const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true, existingMeetingId?: string, requireWaitingRoom = true, passcode?: string | null) => {
+  const handleStartCall = async (title?: string, dmThreadId?: string, isVideo = true, existingMeetingId?: string, requireWaitingRoom?: boolean, passcode?: string | null) => {
     if (existingMeetingId && activeMeetingId === existingMeetingId) {
       setCurrentView('meeting');
       return;
     }
+    // System waiting-room default (Superadmin portal): callers that do
+    // not say otherwise inherit it; the built-in default is on.
+    const wr = requireWaitingRoom ?? (await getSystemSettings()).defaultRequireWaitingRoom ?? true;
     const finalTitle = title || 'Instant Call';
     setActiveCallTitle(finalTitle);
     setActiveCallVideoState(isVideo);
@@ -1415,7 +1418,7 @@ function App() {
             duration: 'Active now',
             status: 'In Progress',
             host: user.name || 'You',
-            require_waiting_room: requireWaitingRoom,
+            require_waiting_room: wr,
             passcode,
             // Round 9 (9C): instant meetings expire when they end.
             link_expiry_mode: 'on-end',
@@ -1865,7 +1868,7 @@ function App() {
         duration: meet.duration,
         status: 'Scheduled',
         host: user.name || 'You',
-        require_waiting_room: meet.requireWaitingRoom ?? true,
+        require_waiting_room: meet.requireWaitingRoom ?? (await getSystemSettings()).defaultRequireWaitingRoom ?? true,
         passcode: meet.passcode
       };
       // Round 9 (9C): the expiry travels with the meeting. createMeeting
