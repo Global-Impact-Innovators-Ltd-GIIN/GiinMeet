@@ -2224,7 +2224,7 @@ function App() {
         {/* Sidebar scroll region: logo + nav + tier card together are
             taller than short viewports, so this wrapper is the scroll
             container (flex:1 + minHeight:0 + overflow-y:auto). */}
-        <div style={{
+        <div className="scroll-refined-dark" style={{
           flex: 1,
           minHeight: 0,
           overflowY: 'auto',
@@ -2800,7 +2800,7 @@ function App() {
                       </button>
                     </div>
                     <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)' }} />
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '200px', overflowY: 'auto' }}>
+                    <div className="scroll-refined" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '200px', overflowY: 'auto' }}>
                       {notifications.map((n) => (
                         <button
                           key={n.id}
@@ -2964,7 +2964,7 @@ function App() {
         )}
 
         {/* Dynamic Inner Panel viewport */}
-        <main style={{
+        <main className="scroll-refined" style={{
           flex: 1,
           padding: (currentView === 'meeting' || currentView === 'dashboard') && activeMeetingId ? '0' : '2.5rem',
           overflowY: currentView === 'meeting' ? 'hidden' : 'auto',

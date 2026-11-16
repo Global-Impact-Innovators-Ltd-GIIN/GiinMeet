@@ -6490,7 +6490,7 @@ Media encrypted in transit (DTLS-SRTP).`;
         {/* Waiting Room Alert Overlay for Hosts — the full queue, not just
             the first person waiting. */}
         {canAdmit && waitingList.length > 0 && (
-          <div style={{
+          <div className="scroll-refined-dark" style={{
             position: 'absolute',
             top: '20px',
             left: '50%',
@@ -6849,7 +6849,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           </div>
         ) : participants.length === 0 && !isScreenSharing ? (
           /* Professional Fintech boardroom details dashboard when alone in a meeting (and not sharing your screen -- sharing uses the main screen-share layout below) */
-          <div style={{
+          <div className="scroll-refined-dark" style={{
             flex: 1,
             minHeight: 0,
             display: 'flex',
@@ -7633,7 +7633,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </div>
 
                   {/* Participant Sidebar */}
-                  <div className="screenshare-sidebar" style={{
+                  <div className="screenshare-sidebar scroll-refined" style={{
                     width: window.innerWidth < 768 ? '100%' : '260px',
                     display: 'flex',
                     flexDirection: window.innerWidth < 768 ? 'row' : 'column',
@@ -7651,7 +7651,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             // No Screen Share: Normal grid tiling
             return (
-              <div className={`meeting-grid${layoutMode === 'speaker' ? ' speaker-mode' : ''}`} style={{
+              <div className={`meeting-grid scroll-refined${layoutMode === 'speaker' ? ' speaker-mode' : ''}`} style={{
                 flex: 1,
                 minHeight: 0,
                 minWidth: 0,
@@ -7741,7 +7741,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             </div>
             
             {/* Messages Feed */}
-            <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {messages.map((m, idx) => (
                 <div key={idx} style={{
                   alignSelf: m.self ? 'flex-end' : 'flex-start',
@@ -7850,7 +7850,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {/* Speaker Queue (Handraises) */}
               {handRaises.length > 0 && (
                 <div style={{
@@ -8183,7 +8183,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               {/* Host-only settings (lock, waiting room, chat, screen share,
                   mute on entry): the toggles call host-only routes, so they
                   stay hidden from co-hosts and moderators. Global Actions
@@ -8595,7 +8595,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             {/* Content */}
             {!isQAActive ? (
-              <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 {/* Host Poll Creator */}
                 {isAdmin && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
@@ -8761,7 +8761,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 </div>
               </div>
             ) : (
-              <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>SUBMIT A QUESTION</span>
                 <form 
                   onSubmit={(e) => {
@@ -8915,7 +8915,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               
               {/* AI Studio Voice Section */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -9083,7 +9083,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {!isSummaryTabActive ? (
                 <>
                   <div className="flex-between" style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
@@ -9144,7 +9144,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Analyzing transcript audio...</span>
                     </div>
                   ) : aiSummary ? (
-                    <div style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', gap: '1rem', overflowY: 'auto' }}>
+                    <div className="scroll-refined" style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', gap: '1rem', overflowY: 'auto' }}>
                       <div style={{
                         backgroundColor: 'rgba(255,255,255,0.02)',
                         border: '1px solid var(--border-color)',
@@ -9234,7 +9234,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRIGGER SOUND EFFECTS</span>
               <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sounds play for everyone in the room, in real time. Muting only silences them for you.</span>
               <button
@@ -9305,7 +9305,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </button>
             </div>
 
-            <div style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>MEETING TITLE</span>
                 <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'white' }}>{meetingTitle}</span>
@@ -9446,7 +9446,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 onClose={() => setActivePanel('none')}
               />
             ) : (
-              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '0.75rem', overflowY: 'auto' }}>
+              <div className="scroll-refined" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '0.75rem', overflowY: 'auto' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <ListChecks size={16} color="var(--color-accent)" />
                   <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>MEETING AGENDA</span>
@@ -10055,7 +10055,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             )}
             {showHandRaiseMenu && (
                 <div 
-                  className="hand-raise-menu-container"
+                  className="hand-raise-menu-container scroll-refined"
                   style={{
                     position: window.innerWidth < 768 ? 'fixed' : 'absolute',
                     bottom: window.innerWidth < 768 ? 'calc(65px + env(safe-area-inset-bottom))' : '55px',
@@ -10293,7 +10293,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   onClick={() => setShowMoreMenu(false)} 
                   style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 14000 }}
                 />
-                <div style={{
+                <div className="scroll-refined" style={{
                   position: window.innerWidth < 768 ? 'fixed' : 'absolute',
                   bottom: window.innerWidth < 768 ? 'calc(77px + env(safe-area-inset-bottom))' : '55px',
                   left: window.innerWidth < 768 ? '16px' : '50%',
@@ -10642,7 +10642,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>View only — stays in this meeting</span>
               <button onClick={() => setFileViewer(null)} className="panel-close-btn" aria-label="Close viewer">&times;</button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+            <div className="scroll-refined" style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
               {fileViewerGone ? (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.5 }}>This file is no longer available — shared files are removed when the meeting ends.</p>
               ) : fileViewer.kind === 'image' ? (
