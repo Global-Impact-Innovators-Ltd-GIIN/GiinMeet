@@ -182,10 +182,16 @@ export const SuperadminPortal: React.FC = () => {
   );
 
   // Gate check on mount: an existing session enters directly.
+  // Also listens for SIGNED_IN: when Google returns, supabase-js
+  // establishes the session from the URL hash — if that lands a beat
+  // after the first getSession() check, the sign-in page would
+  // otherwise stay up even though the user is now signed in.
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+    const runGateCheck = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled) return;
         if (!session?.access_token) {
           setGate('signin');
           return;
@@ -196,6 +202,7 @@ export const SuperadminPortal: React.FC = () => {
           body: JSON.stringify({ accessToken: session.access_token }),
         });
         const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
         if (!res.ok || data.error) {
           setGate('signin');
           return;
@@ -203,9 +210,17 @@ export const SuperadminPortal: React.FC = () => {
         setAdminEmail(data.email || session.user.email || '');
         setGate(data.isSuperadmin ? 'portal' : 'denied');
       } catch (e) {
-        setGate('signin');
+        if (!cancelled) setGate('signin');
       }
-    })();
+    };
+    runGateCheck();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: any, session: any) => {
+      if (event === 'SIGNED_IN' && session?.access_token) runGateCheck();
+    });
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -234,6 +249,50 @@ export const SuperadminPortal: React.FC = () => {
     } catch (err: any) {
       setGateError(err?.message || 'Sign-in failed.');
     } finally {
+      setSigningIn(false);
+    }
+  };
+
+  // Google sign-in through real Supabase OAuth — same mechanism as the
+  // main app's Auth screen (Auth.tsx handleGoogleSSO). Suku signs in
+  // with Google, so the portal must offer it too: an email/password-only
+  // sign-in is a dead end for him.
+  //
+  // redirectTo is /superadmin (not the plain origin): after Google
+  // completes, the user lands back inside the portal and the gate below
+  // verifies the Google session token exactly like a password session —
+  // the gate only ever checks the token + the DB superadmin role, so a
+  // Google session passes it unchanged.
+  //
+  // Fallback: Supabase only honours a redirectTo that is allowlisted,
+  // and otherwise sends the user to the Site URL (the main dashboard).
+  // The marker below lets the main app (App.tsx onAuthStateChange)
+  // send that tab straight to /superadmin instead of stranding the
+  // user on the dashboard. sessionStorage is per-tab, so no other tab
+  // is affected, and the marker is cleared before any redirect.
+  const handleGoogleSignIn = async () => {
+    setGateError('');
+    setSigningIn(true);
+    try {
+      try { sessionStorage.setItem('giin_superadmin_oauth_return', '1'); } catch (e) { /* storage unavailable — the primary redirect still works */ }
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/superadmin`,
+        },
+      });
+      if (error) throw error;
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('No redirect URL returned from Supabase OAuth.');
+      }
+    } catch (err: any) {
+      console.error('[Superadmin] Google sign-in failed:', err);
+      try { sessionStorage.removeItem('giin_superadmin_oauth_return'); } catch (e) { /* ignore */ }
+      setGateError(
+        err?.message || 'Google sign-in failed. Google may not be enabled for this project yet — use email sign-in instead.'
+      );
       setSigningIn(false);
     }
   };
@@ -306,6 +365,37 @@ export const SuperadminPortal: React.FC = () => {
             )}
             <button type="submit" disabled={signingIn} style={{ ...btnPrimary, background: '#FABD02', color: '#0B0F19', height: '44px' }}>
               {signingIn ? 'Signing in…' : 'Enter Superadmin Portal'}
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.25rem 0' }}>
+              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.15)' }} />
+              <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.5)', letterSpacing: '0.08em' }}>OR CONTINUE WITH</span>
+              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.15)' }} />
+            </div>
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={signingIn}
+              style={{ height: '44px', width: '100%', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', color: '#fff', fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem' }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24">
+                <path
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  fill="#4285F4"
+                />
+                <path
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  fill="#34A853"
+                />
+                <path
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  fill="#FBBC05"
+                />
+                <path
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                  fill="#EA4335"
+                />
+              </svg>
+              Continue with Google
             </button>
           </form>
           <button

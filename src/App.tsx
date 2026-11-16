@@ -920,6 +920,23 @@ function App() {
 
     // Listen to real auth session state updates
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
+      // Superadmin Google OAuth return fallback: the portal's Google
+      // button asks Supabase to return to /superadmin, but Supabase
+      // only honours a redirectTo that is allowlisted and otherwise
+      // sends the user to the Site URL (this dashboard). The portal
+      // leaves a per-tab sessionStorage marker when that happens, so
+      // send this tab straight to the portal instead of stranding the
+      // user here. The marker exists only after the portal's Google
+      // button was used, so normal sign-ins are untouched.
+      if (session?.user) {
+        try {
+          if (sessionStorage.getItem('giin_superadmin_oauth_return') === '1') {
+            sessionStorage.removeItem('giin_superadmin_oauth_return');
+            window.location.href = '/superadmin';
+            return;
+          }
+        } catch (e) { /* storage unavailable - stay on the dashboard */ }
+      }
       if (event === 'PASSWORD_RECOVERY') {
         setPasswordRecovery(true);
       }
