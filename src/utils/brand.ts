@@ -29,10 +29,10 @@
 // asset.)
 //
 // Writes are superadmin-only, enforced server-side by RLS on the
-// email nimdaukus@gmail.com — the same lock App.tsx uses for the
-// superadmin view. The client also gates the publish UI to the
-// superadmin; the RLS policy is the real enforcement, the UI gate is
-// display only.
+// DB role (profiles.is_superadmin — giinmeet_superadmin.sql replaced
+// the old hardcoded-email policy). The client also gates the publish
+// UI to the superadmin; the RLS policy is the real enforcement, the
+// UI gate is display only.
 //
 // The DB client is passed in (browser `supabase` from supabaseClient,
 // or a service-role admin client from a Next.js route) so this module

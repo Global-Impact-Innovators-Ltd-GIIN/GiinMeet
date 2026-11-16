@@ -206,6 +206,63 @@ export async function probeTeamMeetingSupport(): Promise<boolean> {
 export const TEAMS_NOT_SET_UP_MESSAGE =
   'Team workspaces are not set up yet — run giinmeet_phase3_teams.sql in the Supabase SQL Editor first.';
 
+// ---- System settings (Superadmin portal) ---------------------------
+// Public read of the system_settings table (giinmeet_superadmin.sql).
+// Every field falls back to the built-in default when the table or
+// the key is missing — the app then behaves exactly as before, and
+// the portal reports "not set up yet" instead of crashing.
+export interface SystemSettings {
+  guestsCanChat: boolean;
+  tierLimits: Record<string, number> | null;
+  tierMaxDurationMinutes: Record<string, number> | null;
+  defaultAccent: string | null;
+  defaultTheme: { ui_style: string; glass_opacity: string } | null;
+  defaultFont: { heading: string; body: string } | null;
+  banner: { enabled: boolean; message: string } | null;
+}
+
+const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  guestsCanChat: false,
+  tierLimits: null,
+  tierMaxDurationMinutes: null,
+  defaultAccent: null,
+  defaultTheme: null,
+  defaultFont: null,
+  banner: null,
+};
+
+let systemSettingsCache: { at: number; value: SystemSettings } | null = null;
+
+export async function getSystemSettings(): Promise<SystemSettings> {
+  if (systemSettingsCache && Date.now() - systemSettingsCache.at < 60000) {
+    return systemSettingsCache.value;
+  }
+  const value: SystemSettings = { ...DEFAULT_SYSTEM_SETTINGS };
+  try {
+    const { data, error } = await supabase.from('system_settings').select('key,value');
+    if (!error && data) {
+      for (const row of data as any[]) {
+        const v = (row as any).value || {};
+        if (row.key === 'guests_can_chat') value.guestsCanChat = v.enabled === true;
+        else if (row.key === 'tier_limits') value.tierLimits = v;
+        else if (row.key === 'tier_max_duration_minutes') value.tierMaxDurationMinutes = v;
+        else if (row.key === 'default_accent') value.defaultAccent = typeof v.color === 'string' ? v.color : null;
+        else if (row.key === 'default_theme') value.defaultTheme = v;
+        else if (row.key === 'default_font') value.defaultFont = v;
+        else if (row.key === 'announcement_banner') value.banner = v;
+      }
+    }
+  } catch (e) {
+    /* table missing (SQL not run) — defaults stand */
+  }
+  systemSettingsCache = { at: Date.now(), value };
+  return value;
+}
+
+export function clearSystemSettingsCache(): void {
+  systemSettingsCache = null;
+}
+
 // Phase 3 (Feature 3) — team workspaces. A team has members, its own
 // meetings (meetings.team_id), and shared settings. `myRole` is the
 // signed-in user's role in that team ('admin' | 'member' | null).
@@ -490,7 +547,7 @@ export const giinApi = {
       name: name || email.split('@')[0],
       workspaceName,
       domain,
-      is_superadmin: email.toLowerCase() === 'nimdaukus@gmail.com',
+      is_superadmin: false,
       avatar_url: ''
     };
 
@@ -522,7 +579,7 @@ export const giinApi = {
       domain: profile?.domain || domain,
       workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
       is_premium: profile?.is_premium || false,
-      is_superadmin: email.toLowerCase() === 'nimdaukus@gmail.com',
+      is_superadmin: profile?.is_superadmin === true,
       avatar_url: profile?.avatar_url || ''
     };
 
@@ -627,7 +684,7 @@ export const giinApi = {
       workspaceName: profile?.workspace_name || customWorkspaceName || 'Personal Workspace',
       domain: profile?.domain || (email.split('@')[1] || 'personal'),
       is_premium: profile?.is_premium || false,
-      is_superadmin: email.toLowerCase() === 'nimdaukus@gmail.com',
+      is_superadmin: profile?.is_superadmin === true,
       avatar_url: profile?.avatar_url || ''
     };
 
@@ -1316,7 +1373,14 @@ export const giinApi = {
   sendMessage: async (message: { thread_id: string; sender_name: string; text: string; user_id?: string }) => {
     const { data: sessionData } = await supabase.auth.getSession();
     if (!sessionData?.session) {
-      throw new Error('Sign in to send messages. Guests can read and join, but messaging requires an account.');
+      // Guests may send only when the superadmin turned the flag on
+      // (system_settings.guests_can_chat). Default off — guests can
+      // read chat but cannot send, exactly as before. The matching
+      // RLS policy enforces the same rule in the database.
+      const settings = await getSystemSettings();
+      if (!settings.guestsCanChat) {
+        throw new Error('Sign in to send messages. Guests can read and join, but messaging requires an account.');
+      }
     }
 
     const { data, error } = await supabase
@@ -1767,14 +1831,6 @@ export const giinApi = {
     return data || [];
   },
 
-  // Update profile superadmin designation
-  updateProfileSuperadmin: async (userId: string, isSuperadmin: boolean) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({ is_superadmin: isSuperadmin })
-      .eq('id', userId);
-    return { data, error };
-  },
 
   // Delete a user profile/account
   deleteProfile: async (userId: string) => {

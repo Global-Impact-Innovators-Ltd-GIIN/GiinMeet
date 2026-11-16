@@ -173,7 +173,7 @@ export const getWebRTCScreenshareConstraints = () => {
   };
 };
 
-import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink, buildWhatsAppInviteUrl, isMeetingHostForUser } from '../supabaseClient';
+import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink, buildWhatsAppInviteUrl, isMeetingHostForUser, getSystemSettings } from '../supabaseClient';
 
 // Helper functions defined outside the component to satisfy purity rules
 const generateRandomId = () => {
@@ -415,6 +415,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Host Meeting Settings States
   const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
   const [isChatLocked, setIsChatLocked] = useState(false);
+  // Superadmin portal flag (system_settings.guests_can_chat): when ON,
+  // guests without an account may send chat. Default OFF — guests can
+  // read chat but cannot send, exactly as before.
+  const [guestsCanChat, setGuestsCanChat] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getSystemSettings().then((s) => { if (!cancelled) setGuestsCanChat(s.guestsCanChat); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const canSendChat = !!currentUser || guestsCanChat;
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [shortcutsExpanded, setShortcutsExpanded] = useState(false);
 
@@ -5848,8 +5858,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (err) {
       // Never silently drop a failed send: take the optimistic message
       // back, put the text back in the box, and say why. (Guests hit this
-      // by design — sending needs a signed-in session, see giinApi
-      // .sendMessage — so the failure is honest, not a phantom send.)
+      // when the superadmin flag is off — sending needs a signed-in
+      // session unless guests_can_chat is on, see giinApi.sendMessage —
+      // so the failure is honest, not a phantom send.)
       console.error('Failed to send chat message:', err);
       setMessages(prev => prev.filter(m => m.id !== optimistic.id));
       setChatInput(text);
@@ -7791,26 +7802,26 @@ Media encrypted in transit (DTLS-SRTP).`;
               </label>
               <input 
                 type="text" 
-                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !currentUser ? "Sign in to send messages — guests can read chat" : "Send message to everyone..."} 
+                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !canSendChat ? "Sign in to send messages — guests can read chat" : "Send message to everyone..."} 
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                disabled={(!currentUser || (isChatLocked && !isAdmin))}
+                disabled={(!canSendChat || (isChatLocked && !isAdmin))}
                 style={{
                   flex: 1,
                   padding: '0.5rem 0.75rem',
                   borderRadius: '4px',
-                  backgroundColor: (!currentUser || (isChatLocked && !isAdmin)) ? '#1E293B' : '#090D16',
+                  backgroundColor: (!canSendChat || (isChatLocked && !isAdmin)) ? '#1E293B' : '#090D16',
                   border: '1px solid #1E293B',
                   color: 'white',
                   fontSize: '0.85rem',
-                  cursor: (!currentUser || (isChatLocked && !isAdmin)) ? 'not-allowed' : 'text'
+                  cursor: (!canSendChat || (isChatLocked && !isAdmin)) ? 'not-allowed' : 'text'
                 }}
               />
               <button 
                 type="submit" 
-                disabled={(!currentUser || (isChatLocked && !isAdmin))}
+                disabled={(!canSendChat || (isChatLocked && !isAdmin))}
                 style={{
-                  background: (!currentUser || (isChatLocked && !isAdmin)) ? '#475569' : 'var(--color-primary)',
+                  background: (!canSendChat || (isChatLocked && !isAdmin)) ? '#475569' : 'var(--color-primary)',
                   border: 'none',
                   borderRadius: '4px',
                   width: '34px',
@@ -7819,8 +7830,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: 'white',
-                  cursor: (!currentUser || (isChatLocked && !isAdmin)) ? 'not-allowed' : 'pointer',
-                  opacity: (!currentUser || (isChatLocked && !isAdmin)) ? 0.6 : 1
+                  cursor: (!canSendChat || (isChatLocked && !isAdmin)) ? 'not-allowed' : 'pointer',
+                  opacity: (!canSendChat || (isChatLocked && !isAdmin)) ? 0.6 : 1
                 }}
               >
                 <SendHorizontal size={16} />

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2 } from 'lucide-react';
-import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
+import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, getSystemSettings, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
-import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, type PlanTier } from '../utils/tiers';
+import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, type PlanTier } from '../utils/tiers';
 
 interface Meeting {
   id: string;
@@ -110,6 +110,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Enterprise: 2 hours) once the tier is known from the profile.
   useEffect(() => {
     setTemplateDuration(DEFAULT_DURATION_FOR_TIER[planTier]);
+  }, [planTier]);
+  // Superadmin portal: the stored max duration
+  // (system_settings.tier_max_duration_minutes) narrows the duration
+  // picker. Without the settings table the built-in options stand.
+  const [durationOptions, setDurationOptions] = useState(DURATION_OPTIONS_FOR_TIER[planTier]);
+  useEffect(() => {
+    let cancelled = false;
+    getSystemSettings().then((s) => {
+      if (cancelled) return;
+      const max = s.tierMaxDurationMinutes?.[planTier];
+      const filtered = typeof max === 'number' ? filterDurationOptionsByMax(DURATION_OPTIONS_FOR_TIER[planTier], max) : DURATION_OPTIONS_FOR_TIER[planTier];
+      setDurationOptions(filtered);
+      setTemplateDuration((prev) => filtered.some((o) => o.value === prev) ? prev : (filtered[filtered.length - 1]?.value || prev));
+    }).catch(() => { /* built-in options stand */ });
+    return () => { cancelled = true; };
   }, [planTier]);
   const [linkExpiries, setLinkExpiries] = useState<Record<string, { mode: string; expiresAt: string | null }>>({});
   const linkExpiryFetchedRef = useRef<Record<string, boolean>>({});
@@ -1205,11 +1220,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Duration</label>
                 <select value={templateDuration} onChange={(e) => setTemplateDuration(e.target.value)} className="premium-input" style={{ height: '44px' }}>
-                  {DURATION_OPTIONS_FOR_TIER[planTier].map((o) => (
+                  {durationOptions.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Longest meeting on your {TIER_LABELS[planTier]} plan: {planTier === 'free' ? '40 minutes' : '24 hours'}. The room never ends a meeting at this length — it is the length you plan for.</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Longest meeting on your {TIER_LABELS[planTier]} plan: {durationOptions[durationOptions.length - 1]?.label || '40 minutes'}. The room never ends a meeting at this length — it is the length you plan for.</span>
               </div>
 
               <div>

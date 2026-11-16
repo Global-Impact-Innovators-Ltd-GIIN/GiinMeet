@@ -94,6 +94,19 @@ export const tierLimitForProfile = (profile: { is_premium?: boolean | null; plan
 export const tierLimitForPremium = (isPremium: boolean | null | undefined): number =>
   TIER_LIMITS[tierForPremium(isPremium)];
 
+/** Filter the scheduling options for a tier by a stored maximum
+ * (system_settings.tier_max_duration_minutes, set in the Superadmin
+ * portal). Pass null to keep the built-in options untouched. */
+export const filterDurationOptionsByMax = (
+  tier: PlanTier,
+  maxMinutes: number | null | undefined
+): { value: string; label: string }[] => {
+  const options = DURATION_OPTIONS_FOR_TIER[tier];
+  if (!maxMinutes || !Number.isFinite(maxMinutes)) return options;
+  const kept = options.filter((o) => parseDurationMinutes(o.value) <= maxMinutes);
+  return kept.length > 0 ? kept : [options[0]];
+};
+
 /** Clamp a duration choice to what a tier may schedule. A value
  * above the tier's cap falls back to that tier's default, so a
  * stale or template-picked duration can never promise a Free host

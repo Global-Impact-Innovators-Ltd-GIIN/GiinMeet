@@ -17,9 +17,8 @@ import { Auth } from './components/Auth';
 import { PrivateSpace } from './components/PrivateSpace';
 import { Waitroom } from './components/Waitroom';
 import { PreJoinCheck } from './components/PreJoinCheck';
-import { Superadmin } from './components/Superadmin';
 import { MeetingLobby } from './components/MeetingLobby';
-import { giinApi, supabase, getTransparentLogo, isMeetingHost, isMeetingHostForUser } from './supabaseClient';
+import { giinApi, supabase, getTransparentLogo, getSystemSettings, isMeetingHost, isMeetingHostForUser } from './supabaseClient';
 import { applyAccentColor, applyBorderRadius, applyFont, applyUiStyle } from './utils/theme';
 import { loadAndApplySharedBrand } from './utils/brand';
 import { encryptMessage, decryptMessage } from './services/e2ee';
@@ -122,7 +121,7 @@ function App() {
     }
     if (hash.startsWith('#/')) {
       const view = hash.substring(2).split('?')[0];
-      if (['dashboard', 'chats', 'contacts', 'private', 'help', 'settings', 'billing', 'superadmin', 'teams'].includes(view)) {
+      if (['dashboard', 'chats', 'contacts', 'private', 'help', 'settings', 'billing', 'teams'].includes(view)) {
         return view;
       }
     }
@@ -130,7 +129,9 @@ function App() {
     // lobby data and the live meeting state are not persisted, so the
     // lobby would render a blank panel. Fall back to the dashboard.
     const storedView = localStorage.getItem('giin_view');
-    return storedView && !['lobby', 'meeting'].includes(storedView) ? storedView : 'dashboard';
+    // 'superadmin' is no longer a dashboard view — the portal lives
+    // at /superadmin, so a stale stored view falls back to dashboard.
+    return storedView && !['lobby', 'meeting', 'superadmin'].includes(storedView) ? storedView : 'dashboard';
   });
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('giin_theme') === 'dark';
@@ -833,7 +834,6 @@ function App() {
         }
 
         const domain = session.user.email?.split('@')[1] || 'personal';
-        const isSuperAdminEmail = session.user.email?.toLowerCase() === 'nimdaukus@gmail.com';
 
         // Self-healing check: if profile is not found in database, insert it
         if (!profile) {
@@ -849,7 +849,7 @@ function App() {
             domain: domain,
             phone: session.user.phone || null,
             is_premium: false,
-            is_superadmin: isSuperAdminEmail
+            is_superadmin: false
           };
 
           try {
@@ -861,15 +861,12 @@ function App() {
           }
         }
 
-        // Strictly lock superadmin to nimdaukus@gmail.com
-        const isSuperadmin = isSuperAdminEmail;
-
-        if (isSuperAdminEmail && profile && !profile.is_superadmin) {
-          giinApi.updateProfileSuperadmin(session.user.id, true);
-        } else if (!isSuperAdminEmail && profile?.is_superadmin) {
-          // Reset database role if unauthorized user has superadmin flag
-          giinApi.updateProfileSuperadmin(session.user.id, false);
-        }
+        // Superadmin is a DB role (profiles.is_superadmin), never an
+        // email check: the portal at /superadmin is the single source
+        // of truth, seeded by giinmeet_superadmin.sql. No auto-grant
+        // and no auto-reset here — only a superadmin (via the portal)
+        // may change the flag.
+        const isSuperadmin = profile?.is_superadmin === true;
 
         const authenticatedUser = {
           id: session.user.id,
@@ -897,15 +894,12 @@ function App() {
         localStorage.setItem('giin_name', authenticatedUser.name);
         localStorage.setItem('giin_email', authenticatedUser.email);
 
-        if (isSuperadmin) {
-          setCurrentView('superadmin');
-          localStorage.setItem('giin_view', 'superadmin');
-        } else {
-          // Guard routing if they previously had superadmin in localStorage view
-          if (localStorage.getItem('giin_view') === 'superadmin') {
-            setCurrentView('dashboard');
-            localStorage.setItem('giin_view', 'dashboard');
-          }
+        // The old in-dashboard superadmin view is gone — the portal
+        // lives at /superadmin. A stale stored view still points
+        // there, so reset it to the dashboard.
+        if (localStorage.getItem('giin_view') === 'superadmin') {
+          setCurrentView('dashboard');
+          localStorage.setItem('giin_view', 'dashboard');
         }
       } else {
         // No live Supabase session: the cached giin_user (if any) is
@@ -939,7 +933,6 @@ function App() {
         }
 
         const domain = session.user.email?.split('@')[1] || 'personal';
-        const isSuperAdminEmail = session.user.email?.toLowerCase() === 'nimdaukus@gmail.com';
 
         // Self-healing check: if profile is not found in database, insert it
         if (!profile) {
@@ -955,7 +948,7 @@ function App() {
             domain: domain,
             phone: session.user.phone || null,
             is_premium: false,
-            is_superadmin: isSuperAdminEmail
+            is_superadmin: false
           };
 
           try {
@@ -967,15 +960,12 @@ function App() {
           }
         }
 
-        // Strictly lock superadmin to nimdaukus@gmail.com
-        const isSuperadmin = isSuperAdminEmail;
-
-        if (isSuperAdminEmail && profile && !profile.is_superadmin) {
-          giinApi.updateProfileSuperadmin(session.user.id, true);
-        } else if (!isSuperAdminEmail && profile?.is_superadmin) {
-          // Reset database role if unauthorized user has superadmin flag
-          giinApi.updateProfileSuperadmin(session.user.id, false);
-        }
+        // Superadmin is a DB role (profiles.is_superadmin), never an
+        // email check: the portal at /superadmin is the single source
+        // of truth, seeded by giinmeet_superadmin.sql. No auto-grant
+        // and no auto-reset here — only a superadmin (via the portal)
+        // may change the flag.
+        const isSuperadmin = profile?.is_superadmin === true;
 
         const authenticatedUser = {
           id: session.user.id,
@@ -1003,15 +993,12 @@ function App() {
         localStorage.setItem('giin_name', authenticatedUser.name);
         localStorage.setItem('giin_email', authenticatedUser.email);
 
-        if (isSuperadmin) {
-          setCurrentView('superadmin');
-          localStorage.setItem('giin_view', 'superadmin');
-        } else {
-          // Guard routing if they previously had superadmin in localStorage view
-          if (localStorage.getItem('giin_view') === 'superadmin') {
-            setCurrentView('dashboard');
-            localStorage.setItem('giin_view', 'dashboard');
-          }
+        // The old in-dashboard superadmin view is gone — the portal
+        // lives at /superadmin. A stale stored view still points
+        // there, so reset it to the dashboard.
+        if (localStorage.getItem('giin_view') === 'superadmin') {
+          setCurrentView('dashboard');
+          localStorage.setItem('giin_view', 'dashboard');
         }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
@@ -1186,6 +1173,17 @@ function App() {
       localStorage.setItem('giin_theme', 'light');
     }
   }, [isDarkMode]);
+
+  // Announcement banner (Superadmin portal): the stored banner
+  // (system_settings.announcement_banner) shows at the top of the
+  // dashboard while enabled. Missing table (SQL not run) means no
+  // banner — the app behaves exactly as before.
+  const [announcementBanner, setAnnouncementBanner] = useState<{ enabled: boolean; message: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getSystemSettings().then((s) => { if (!cancelled && s.banner?.enabled) setAnnouncementBanner(s.banner); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Effect to apply custom accent colors, glassmorphism, fonts, border-radii & UI styles dynamically
   useEffect(() => {
@@ -1957,12 +1955,9 @@ function App() {
     };
     setNotifications(prev => [newNotif, ...prev]);
     
-    if (authenticatedUser.is_superadmin) {
-      setCurrentView('superadmin');
-      localStorage.setItem('giin_view', 'superadmin');
-    } else {
-      setCurrentView('dashboard');
-    }
+    // Superadmins land on the dashboard like everyone else; the
+    // portal is a separate route at /superadmin.
+    setCurrentView('dashboard');
   };
 
   const handleSaveWorkspaceData = async (notes: string, actionItemsCount: number) => {
@@ -2493,8 +2488,8 @@ function App() {
             {/* Superadmin Portal Link */}
             {user?.is_superadmin && (
               <button 
-                onClick={() => setCurrentView('superadmin')}
-                className={`sidebar-btn ${currentView === 'superadmin' ? 'active' : ''}`}
+                onClick={() => { window.location.href = '/superadmin'; }}
+                className="sidebar-btn"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -2502,18 +2497,18 @@ function App() {
                   gap: isSidebarCollapsed ? '0' : '0.75rem',
                   padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
                   borderRadius: 'var(--radius-md)',
-                  border: currentView === 'superadmin' ? '1px solid var(--color-accent)' : 'none',
-                  background: currentView === 'superadmin' ? 'rgba(var(--color-accent-rgb), 0.15)' : 'transparent',
-                  color: currentView === 'superadmin' ? 'var(--color-accent)' : 'rgba(255,255,255,0.7)',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'rgba(255,255,255,0.7)',
                   cursor: 'pointer',
                   textAlign: 'left',
-                  fontWeight: currentView === 'superadmin' ? 700 : 400,
+                  fontWeight: 400,
                   fontSize: '0.95rem',
                   width: '100%',
                   transition: 'all var(--transition-fast)'
                 }}
               >
-                <Shield size={18} color={currentView === 'superadmin' ? 'var(--color-accent)' : 'rgba(255,255,255,0.6)'} />
+                <Shield size={18} color="rgba(255,255,255,0.6)" />
                 {!isSidebarCollapsed && <span>Superadmin Portal</span>}
               </button>
             )}
@@ -2639,7 +2634,7 @@ function App() {
                 <HelpCircle size={16} /> Help &amp; Support
               </button>
               {user?.is_superadmin && (
-                <button onClick={() => setCurrentView('superadmin')} className={`top-navbar-btn ${currentView === 'superadmin' ? 'active' : ''}`}>
+                <button onClick={() => { window.location.href = '/superadmin'; }} className="top-navbar-btn">
                   <Shield size={16} /> Superadmin Portal
                 </button>
               )}
@@ -2969,6 +2964,19 @@ function App() {
           overflowY: currentView === 'meeting' ? 'hidden' : 'auto',
           backgroundColor: 'transparent'
         }}>
+          {announcementBanner && currentView !== 'meeting' && (
+            <div style={{
+              background: 'var(--color-accent)',
+              color: 'var(--color-on-accent, #ffffff)',
+              borderRadius: 'var(--radius-md)',
+              padding: '0.75rem 1rem',
+              marginBottom: '1.25rem',
+              fontSize: '0.92rem',
+              fontWeight: 600,
+            }}>
+              {announcementBanner.message}
+            </div>
+          )}
           {currentView === 'dashboard' && (
             <Dashboard 
               isPremium={isPremium}
@@ -3106,10 +3114,6 @@ function App() {
               isPremium={isPremium}
               onDowngrade={handleDowngrade}
             />
-          )}
-
-          {currentView === 'superadmin' && (
-            <Superadmin />
           )}
 
           {currentView === 'help' && (

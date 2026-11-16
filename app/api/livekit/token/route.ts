@@ -215,6 +215,20 @@ export async function POST(req: NextRequest) {
         }, { status: 401 });
       }
 
+      // Superadmin portal: a suspended account cannot join any
+      // meeting. Best-effort — the column only exists once
+      // giinmeet_superadmin.sql has run, so a missing column means
+      // "not suspended", never a failure.
+      try {
+        const { data: suspRow } = await admin.from('profiles').select('is_suspended').eq('id', user.id).maybeSingle();
+        if ((suspRow as any)?.is_suspended) {
+          return NextResponse.json({
+            error: 'ACCOUNT_SUSPENDED',
+            message: 'This account has been suspended. Contact the administrator.',
+          }, { status: 403 });
+        }
+      } catch (e) { /* not suspended */ }
+
       identity = user.id;
       if (meetingTeamId && !isHostUser(user.id)) {
         const { data: memberRow } = await admin
@@ -349,11 +363,12 @@ export async function POST(req: NextRequest) {
     // Pro host to Free.
     let hostIsPremium = false;
     let hostPlanTier: string | null = null;
+    let hostIsSuspended = false;
     if (hostUserId) {
       try {
         const { data: hostProfile, error: profileError } = await admin
           .from('profiles')
-          .select('is_premium, plan_tier')
+          .select('is_premium, plan_tier, is_suspended')
           .eq('id', hostUserId)
           .maybeSingle();
         if (profileError) {
@@ -366,11 +381,32 @@ export async function POST(req: NextRequest) {
         } else if (hostProfile) {
           hostIsPremium = !!(hostProfile as any)?.is_premium;
           hostPlanTier = (hostProfile as any)?.plan_tier ?? null;
+          hostIsSuspended = !!(hostProfile as any)?.is_suspended;
         }
       } catch (e) { /* profile unreadable: Free tier */ }
     }
     const hostTier = tierForProfile({ is_premium: hostIsPremium, plan_tier: hostPlanTier });
-    const maxCapacity = TIER_LIMITS[hostTier];
+    // Superadmin portal: a suspended host's meetings are frozen — no
+    // token is minted for them or their guests. (A missing column —
+    // SQL not run yet — reads as not suspended.)
+    if (hostIsSuspended) {
+      return NextResponse.json({
+        error: 'ACCOUNT_SUSPENDED',
+        message: 'The host account for this meeting has been suspended. Contact the administrator.',
+      }, { status: 403 });
+    }
+    // Superadmin portal: stored tier limits
+    // (system_settings.tier_limits) override the built-in constants.
+    // Best-effort — a missing table or key means the built-in limits
+    // stand.
+    let maxCapacity = TIER_LIMITS[hostTier];
+    try {
+      const { data: limitRow } = await admin.from('system_settings').select('value').eq('key', 'tier_limits').maybeSingle();
+      const stored = (limitRow as any)?.value?.[hostTier];
+      if (typeof stored === 'number' && Number.isFinite(stored) && stored >= 1 && stored <= 10000) {
+        maxCapacity = stored;
+      }
+    } catch (e) { /* built-in limits stand */ }
     try {
       if (room.max_capacity !== maxCapacity) {
         await admin.from('rooms').update({ max_capacity: maxCapacity }).eq('id', room.id);
