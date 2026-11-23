@@ -36,7 +36,7 @@ export interface GiinUser {
 }
 
 // Random 6-character meeting passcode, generated with crypto randomness and
-// stored on the meeting row — never derived from the meeting ID, so it cannot
+// stored on the meeting row, never derived from the meeting ID, so it cannot
 // be guessed by anyone who knows the meeting ID.
 export const generateMeetingPasscode = (): string => {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -56,7 +56,7 @@ export const getMeetingRoomSlug = (meetingId: string): string => `meet-${meeting
 // Find the LiveKit room for a meeting, creating it when it does not exist yet.
 // Returns the room row, or null when it cannot be ensured (for example a
 // guest with no signed-in session, or the rooms INSERT policy has not been
-// applied yet — see rooms_insert_policy_patch.sql). Never throws: callers
+// applied yet, see rooms_insert_policy_patch.sql). Never throws: callers
 // surface the missing room through the token error UI instead.
 // Build the shareable invite link for a meeting. The passcode is only
 // included when the meeting actually has one - an open meeting (no
@@ -69,7 +69,7 @@ export const buildJoinLink = (meetingId: string, passcode?: string | null): stri
 };
 
 // Personal rooms (Phase 1): one permanent room per user, addressed by a
-// stable slug under the user's name — the link never changes, so it can be
+// stable slug under the user's name, the link never changes, so it can be
 // printed on a card, put in an email signature, or shared once in a group.
 // The slug is URL-safe, lowercase, and unique across all users.
 export const slugifyPersonalRoom = (source: string): string => {
@@ -88,7 +88,7 @@ export const buildPersonalRoomLink = (slug: string): string => {
   return `${origin}/#/room/${slug}`;
 };
 
-// Phase C1 (25) — the short, memorable link: giinmeet.../<handle>.
+// Phase C1 (25), the short, memorable link: giinmeet.../<handle>.
 // It redirects to the room link above, so the same join rules apply.
 export const buildShortPersonalRoomLink = (slug: string): string => {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -107,14 +107,14 @@ export interface PersonalRoom {
 // Columns of `meetings` the browser is allowed to read. The `passcode`
 // column is deliberately NOT in this list: it is hidden from anon reads
 // by giinmeet_passcode_lockdown.sql, so every client-side meetings query
-// must use this list instead of select('*') — a select('*') would fail
+// must use this list instead of select('*'), a select('*') would fail
 // once the column is revoked. The passcode is only ever read server-side
 // (verify-passcode route, host-only passcode route).
 // Round 9 (9C): meeting link expiry. Modes: 'on-end' (the link dies when
-// the meeting ends — the default for instant meetings) or '1m' / '2m' /
+// the meeting ends, the default for instant meetings) or '1m' / '2m' /
 // '3m' / '6m' / '12m' (the link lives that many months from the
 // meeting's scheduled time). The columns only exist once
-// giinmeet_link_expiry.sql has been run — the probe below keeps every
+// giinmeet_link_expiry.sql has been run, the probe below keeps every
 // read/write working until then.
 export const LINK_EXPIRY_OPTIONS = [
   { mode: 'on-end', label: 'Expires when the meeting ends' },
@@ -140,7 +140,7 @@ export const formatLinkExpiry = (mode?: string | null, expiresAt?: string | null
 };
 
 // Probe once per session whether the link-expiry columns exist. A missing
-// column errors the select, which is the signal — never a failure.
+// column errors the select, which is the signal, never a failure.
 let linkExpirySupportedCache: boolean | null = null;
 export async function probeLinkExpirySupport(): Promise<boolean> {
   if (linkExpirySupportedCache !== null) return linkExpirySupportedCache;
@@ -153,7 +153,7 @@ export async function probeLinkExpirySupport(): Promise<boolean> {
   return linkExpirySupportedCache;
 }
 
-// Phase 1 — same probe for the reminder columns (giinmeet_phase1.sql):
+// Phase 1, same probe for the reminder columns (giinmeet_phase1.sql):
 // reminder_enabled / reminder_minutes_before / reminder_sent_at.
 let reminderSupportedCache: boolean | null = null;
 export async function probeReminderSupport(): Promise<boolean> {
@@ -167,7 +167,7 @@ export async function probeReminderSupport(): Promise<boolean> {
   return reminderSupportedCache;
 }
 
-// Phase 1 — same probe for the recurring-series columns
+// Phase 1, same probe for the recurring-series columns
 // (series_id / recurrence_rule / recurrence_count).
 let seriesSupportedCache: boolean | null = null;
 export async function probeSeriesSupport(): Promise<boolean> {
@@ -181,9 +181,9 @@ export async function probeSeriesSupport(): Promise<boolean> {
   return seriesSupportedCache;
 }
 
-// Phase 3 (Feature 3) — team workspaces: same probe for the teams
+// Phase 3 (Feature 3), team workspaces: same probe for the teams
 // tables (giinmeet_phase3_teams.sql) and for the meetings.team_id
-// column. A missing table/column is "not set up yet", never a crash —
+// column. A missing table/column is "not set up yet", never a crash ,
 // every team read returns an empty list and every team write throws
 // an honest error until the SQL runs.
 let teamsSupportedCache: boolean | null = null;
@@ -211,12 +211,12 @@ export async function probeTeamMeetingSupport(): Promise<boolean> {
 }
 
 export const TEAMS_NOT_SET_UP_MESSAGE =
-  'Team workspaces are not set up yet — run giinmeet_phase3_teams.sql in the Supabase SQL Editor first.';
+  'Team workspaces are not set up yet, run giinmeet_phase3_teams.sql in the Supabase SQL Editor first.';
 
 // ---- System settings (Superadmin portal) ---------------------------
 // Public read of the system_settings table (giinmeet_superadmin.sql).
 // Every field falls back to the built-in default when the table or
-// the key is missing — the app then behaves exactly as before, and
+// the key is missing, the app then behaves exactly as before, and
 // the portal reports "not set up yet" instead of crashing.
 export interface SystemSettings {
   guestsCanChat: boolean;
@@ -266,7 +266,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
       }
     }
   } catch (e) {
-    /* table missing (SQL not run) — defaults stand */
+    /* table missing (SQL not run), defaults stand */
   }
   systemSettingsCache = { at: Date.now(), value };
   return value;
@@ -276,7 +276,7 @@ export function clearSystemSettingsCache(): void {
   systemSettingsCache = null;
 }
 
-// Phase 3 (Feature 3) — team workspaces. A team has members, its own
+// Phase 3 (Feature 3), team workspaces. A team has members, its own
 // meetings (meetings.team_id), and shared settings. `myRole` is the
 // signed-in user's role in that team ('admin' | 'member' | null).
 export interface Team {
@@ -305,7 +305,7 @@ export interface TeamSettings {
 // Series columns are part of the public read: the history list needs
 // series_id to group a recurring series into one row (without them the
 // dashboard could only group via the same-device localStorage
-// fallback). They are not sensitive — the meetings RLS still governs
+// fallback). They are not sensitive, the meetings RLS still governs
 // which rows a caller can see.
 export const MEETING_PUBLIC_COLUMNS =
   'id,user_id,title,time,duration,status,host,notes,action_items_count,created_at,admin_id,require_waiting_room,series_id,recurrence_rule,recurrence_count';
@@ -313,7 +313,7 @@ export const MEETING_PUBLIC_COLUMNS =
 // Delete-from-history: the deleted_at column only exists once
 // giinmeet_delete_history.sql has run. A query that asks for it
 // before then fails with "column meetings.deleted_at does not
-// exist" — the history readers below catch exactly that and retry
+// exist", the history readers below catch exactly that and retry
 // without the column, so the app keeps working before the SQL runs.
 const isMissingDeletedAtColumn = (err: any): boolean => {
   const msg = String(err?.message || err || '');
@@ -323,7 +323,7 @@ const isMissingDeletedAtColumn = (err: any): boolean => {
 // The delete scope, shared by the history UI and the server route:
 // a Completed meeting, or a Scheduled meeting whose start time has
 // already passed ("expired"). In Progress and upcoming Scheduled
-// meetings are never deletable here — an upcoming meeting is
+// meetings are never deletable here, an upcoming meeting is
 // cancelled, not deleted.
 export const isDeletableFromHistory = (m: { status?: string | null; time?: string | null }): boolean => {
   if (m.status === 'Completed') return true;
@@ -333,7 +333,7 @@ export const isDeletableFromHistory = (m: { status?: string | null; time?: strin
 };
 
 // Build a calendar (.ics) file for a meeting, for download or import into
-// Google/Outlook/Apple Calendar. Pure client-side generation — no provider.
+// Google/Outlook/Apple Calendar. Pure client-side generation, no provider.
 export const buildICS = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }, brandName: string = 'GiinMeet'): string => {
   const start = new Date(meeting.time);
   // parseDurationMinutes understands hours ("2 hours" is 120, not 2).
@@ -369,7 +369,7 @@ export const downloadICS = (meeting: { id: string; title: string; time: string; 
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
 
-// Phase 2 (#2) — WhatsApp / SMS invites. The invite words are built
+// Phase 2 (#2), WhatsApp / SMS invites. The invite words are built
 // once here so the copy button, the mailto: invite, the WhatsApp share
 // and the SMS invite all send the same text; only the channel differs.
 export const buildInviteText = (meeting: { id: string; title: string; time?: string | null; passcode?: string | null }, link: string, brandName: string = 'GiinMeet'): string => {
@@ -386,7 +386,7 @@ export const buildInviteText = (meeting: { id: string; title: string; time?: str
   ].join('\n');
 };
 
-// WhatsApp invite: a wa.me / api.whatsapp.com share link — no provider,
+// WhatsApp invite: a wa.me / api.whatsapp.com share link, no provider,
 // no account, no cost. With a phone number it opens a chat with that
 // person; without one it opens WhatsApp's share sheet so the host picks
 // the contact there. The number is digits only (country code + number);
@@ -397,13 +397,13 @@ export const buildWhatsAppInviteUrl = (meeting: { id: string; title: string; tim
   return digits ? `https://wa.me/${digits}?text=${text}` : `https://api.whatsapp.com/send?text=${text}`;
 };
 
-// Phase 2 (#5) — Google Calendar booking, no-OAuth path: a
+// Phase 2 (#5), Google Calendar booking, no-OAuth path: a
 // calendar.google.com template link with the meeting pre-filled
 // (title, start/end, join link as details + location). The host or
-// guest just saves it in their own Google Calendar — no OAuth client,
+// guest just saves it in their own Google Calendar, no OAuth client,
 // no keys, no account needed. The full two-way sync (creating the
 // event in the host's calendar from GiinMeet) still needs a Google
-// Cloud OAuth client — see docs/phase2-setup.md.
+// Cloud OAuth client, see docs/phase2-setup.md.
 export const buildGoogleCalendarUrl = (meeting: { id: string; title: string; time: string; duration?: string | null; passcode?: string | null }, brandName: string = 'GiinMeet'): string => {
   const start = new Date(meeting.time);
   // parseDurationMinutes understands hours ("2 hours" is 120, not 2).
@@ -437,7 +437,7 @@ export const isMeetingHost = (
 // Host check that survives a split identity: Supabase does not link a
 // Google sign-in to an existing email/password user, so the same person
 // (same email) can hold TWO auth UUIDs. A meeting created under one UUID
-// is then invisible to, and unjoinable as host by, the other — the host
+// is then invisible to, and unjoinable as host by, the other, the host
 // lands in their own waiting room and the meeting is missing from their
 // log (seen live 2026-11-14, meeting af6e9313). The verified account
 // email is the same human either way (only the email owner can hold a
@@ -484,7 +484,7 @@ export const ensureMeetingRoom = async (
     if (existing) return existing as { id: string; slug: string };
     // Fix Round 6 (Phase 6): never resurrect a room for an ended
     // meeting. After an end, rooms.is_active is false, so this used to
-    // INSERT a fresh active room on the next reconnect attempt — the
+    // INSERT a fresh active room on the next reconnect attempt, the
     // token route still refused (meeting Completed), but the dead
     // meeting's room row came back to life.
     try {
@@ -599,7 +599,7 @@ export const giinApi = {
     return { data: { user }, error: null };
   },
 
-  // Passwordless OTP Phone Sign-In — real Supabase SMS OTP only. Phone auth
+  // Passwordless OTP Phone Sign-In, real Supabase SMS OTP only. Phone auth
   // must be enabled in the Supabase dashboard; when it is not, this throws
   // with a clear message instead of pretending a sign-in succeeded.
   signInWithPhone: async (phone: string, customWorkspaceName?: string) => {
@@ -616,7 +616,7 @@ export const giinApi = {
     return { data: { success: true }, error: null };
   },
 
-  // Validate Phone OTP — real Supabase verification only. Any code is never
+  // Validate Phone OTP, real Supabase verification only. Any code is never
   // accepted: an invalid or expired code throws and the user stays signed out.
   verifyOTP: async (phone: string, code: string, name?: string, customWorkspaceName?: string) => {
     const { data, error } = await supabase.auth.verifyOtp({
@@ -648,12 +648,12 @@ export const giinApi = {
     return { data: { user }, error: null };
   },
 
-  // Passwordless OTP Email Sign-In — real Supabase email OTP only. The code
+  // Passwordless OTP Email Sign-In, real Supabase email OTP only. The code
   // is generated and verified by Supabase and delivered by the project's
   // configured email sender (Resend SMTP once configured in the Supabase
   // dashboard; until then Supabase's built-in mailer). It is never
   // generated here and never shown on screen.
-  // shouldCreateUser: false — email codes are a sign-in method for
+  // shouldCreateUser: false, email codes are a sign-in method for
   // EXISTING accounts only (for example when the password is forgotten).
   // Supabase would otherwise silently create a passwordless account for
   // any email that can receive a code; a new user must register through
@@ -672,7 +672,7 @@ export const giinApi = {
     return { data: { success: true }, error: null };
   },
 
-  // Validate Email OTP — real Supabase verification only. Any code is never
+  // Validate Email OTP, real Supabase verification only. Any code is never
   // accepted: an invalid or expired code throws and the user stays signed out.
   verifyEmailCode: async (email: string, code: string, name?: string, customWorkspaceName?: string) => {
     const { data, error } = await supabase.auth.verifyOtp({
@@ -755,11 +755,11 @@ export const giinApi = {
   },
 
   // Fetch all meetings linked to user_id. Throws when the database cannot be
-  // reached — the caller keeps any previously loaded list and shows the error
+  // reached, the caller keeps any previously loaded list and shows the error
   // instead of silently inventing meetings.
   // Round 9 (9B): leave a meeting server-side (marks the row 'Left' and
   // completes the meeting when the last person leaves). Best-effort and
-  // never throws — the tab may be closing when this runs.
+  // never throws, the tab may be closing when this runs.
   leaveMeeting: async (meetingId: string, participantRowId?: string) => {
     try {
       let accessToken: string | undefined;
@@ -795,7 +795,7 @@ export const giinApi = {
   },
 
   // Round 9 (9C): a meeting's link expiry, best-effort. Null when the
-  // columns do not exist yet (giinmeet_link_expiry.sql not run) — the
+  // columns do not exist yet (giinmeet_link_expiry.sql not run), the
   // link is then treated as 'on-end' (live until the meeting ends).
   getMeetingLinkExpiry: async (meetingId: string) => {
     try {
@@ -814,7 +814,7 @@ export const giinApi = {
     }
   },
 
-  // Round 9 (9C): change a meeting's link expiry (host only — RLS
+  // Round 9 (9C): change a meeting's link expiry (host only, RLS
   // requires the caller to own the meeting). Throws when the columns
   // do not exist yet, so the caller can say so honestly.
   updateMeetingExpiry: async (meetingId: string, mode: string, expiresAt: string | null) => {
@@ -885,7 +885,7 @@ export const giinApi = {
 
   // Save a new meeting with a random stored passcode, and create the LiveKit
   // room the meeting's video call will use. Throws when the meeting itself
-  // cannot be saved — a meeting is never faked locally. The rooms row is
+  // cannot be saved, a meeting is never faked locally. The rooms row is
   // best-effort here (it is retried when the meeting is joined); if it
   // fails, a clear warning is logged and the video call will surface the
   // missing room instead of silently dropping to a peer-to-peer call.
@@ -913,7 +913,7 @@ export const giinApi = {
     };
 
     // Round 9 (9C): link expiry. The spread above may have carried the
-    // expiry fields in — strip them, then re-add only when the probe
+    // expiry fields in, strip them, then re-add only when the probe
     // says the columns exist, so the insert never fails on an unknown
     // column. When the columns do not exist yet, the chosen expiry is
     // kept in localStorage so the dashboard can still show it.
@@ -930,7 +930,7 @@ export const giinApi = {
       }
     }
 
-    // Phase 1 — meeting reminder (same probe pattern as link expiry):
+    // Phase 1, meeting reminder (same probe pattern as link expiry):
     // the reminder settings ride in the spread, so strip them and re-add
     // only when the columns exist. Until giinmeet_phase1.sql runs, the
     // choice is kept in localStorage so the dashboard can still show it.
@@ -947,7 +947,7 @@ export const giinApi = {
       }
     }
 
-    // Phase 1 — recurring series (same probe pattern): the series id,
+    // Phase 1, recurring series (same probe pattern): the series id,
     // rule and count ride in the spread, so strip them and re-add only
     // when the columns exist. Until giinmeet_phase1.sql runs, the series
     // link is kept in localStorage so the dashboard can still group and
@@ -968,10 +968,10 @@ export const giinApi = {
       }
     }
 
-    // Phase 3 (Feature 3) — team meeting (same probe pattern): the
+    // Phase 3 (Feature 3), team meeting (same probe pattern): the
     // team_id rides in the spread, so strip it and re-add only when
     // the column exists. When it does not exist, NEVER silently save
-    // the meeting as a personal one — throw honestly instead.
+    // the meeting as a personal one, throw honestly instead.
     delete payload.team_id;
     const teamId = (meeting as any).team_id as string | undefined;
     if (teamId) {
@@ -993,7 +993,7 @@ export const giinApi = {
     // The created row is returned from the local payload, not re-read from
     // the database: the passcode column is hidden from anon reads, so a
     // re-read would come back without it (and the passcode is already
-    // known here — it was generated just above).
+    // known here, it was generated just above).
     const data: any = { ...payload, created_at: new Date().toISOString() };
 
     // Set fields so the frontend code handles permissions and waitroom checks correctly
@@ -1034,7 +1034,7 @@ export const giinApi = {
 
   // Delete a meeting from Meeting Logs & History (soft delete, owner
   // only, completed/expired only). Server-verified via POST
-  // /api/meetings/delete — the route marks the row deleted_at and
+  // /api/meetings/delete, the route marks the row deleted_at and
   // writes the audit row. Throws with the server's plain message.
   deleteMeetingFromHistory: async (meetingId: string) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -1053,7 +1053,7 @@ export const giinApi = {
     return data;
   },
 
-  // Phase 1 — cancel a whole recurring series: every still-Scheduled
+  // Phase 1, cancel a whole recurring series: every still-Scheduled
   // instance in the series becomes Cancelled (past and completed
   // instances are untouched). Returns how many were cancelled. Uses the
   // same "update own meetings" RLS policy as updateMeetingStatus, so
@@ -1078,7 +1078,7 @@ export const giinApi = {
   // meeting Completed WITHOUT touching notes, deactivates the video room,
   // deletes the LiveKit room and frees every capacity slot. Returns the
   // server payload ({ ok, livekitRoomDeleted, livekitWarning? }). Throws
-  // when the server cannot end it — there is NO client-side fallback
+  // when the server cannot end it, there is NO client-side fallback
   // that marks the meeting ended, because that was a silent partial end
   // (Fix Round 6 / Phase 6).
   endMeeting: async (meetingId: string) => {
@@ -1098,9 +1098,9 @@ export const giinApi = {
     return data;
   },
 
-  // Phase 1 — attendance auto-report: store the local attendance record
+  // Phase 1, attendance auto-report: store the local attendance record
   // server-side and queue the report email to the host. The route is
-  // host-verified (same check as endMeeting). Never throws — the caller
+  // host-verified (same check as endMeeting). Never throws, the caller
   // (MeetingRoom end-for-all) is fire-and-forget, so a report failure
   // must never look like an end failure. Returns the route's answer so
   // the caller can log it.
@@ -1120,10 +1120,10 @@ export const giinApi = {
     }
   },
 
-  // Phase B (9 + 10) — meeting record: transcript save / read and AI
+  // Phase B (9 + 10), meeting record: transcript save / read and AI
   // summary generation. All three go through the server routes, which
   // verify the caller server-side (host for save/generate; host or an
-  // admitted participant for read). Never throws — callers are
+  // admitted participant for read). Never throws, callers are
   // fire-and-forget at the end of a meeting, so a record failure must
   // never look like an end failure. Returns the route's answer so the
   // caller can log it or show the honest reason (e.g. NO_LLM_KEY).
@@ -1171,10 +1171,10 @@ export const giinApi = {
     }
   },
 
-  // Phase C1 (23) — calendar sync (Google + Outlook, two-way). All calls
+  // Phase C1 (23), calendar sync (Google + Outlook, two-way). All calls
   // go through the server routes: the OAuth tokens never reach the
   // browser, and the status answer only says which calendars are
-  // connected. Never throws — callers show the honest reason instead.
+  // connected. Never throws, callers show the honest reason instead.
   getCalendarStatus: async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -1462,7 +1462,7 @@ export const giinApi = {
     }
   },
 
-  // Phase C1 (24) — meeting templates. Server-verified, owner-only.
+  // Phase C1 (24), meeting templates. Server-verified, owner-only.
   // Never throws: callers show the honest reason instead.
   getTemplates: async () => {
     try {
@@ -1504,7 +1504,7 @@ export const giinApi = {
     }
   },
 
-  // Phase C1 (28) — recordings and notes library. Server-verified,
+  // Phase C1 (28), recordings and notes library. Server-verified,
   // host-or-admitted reads; never throws.
   getMeetingNotes: async (meetingId: string) => {
     try {
@@ -1598,7 +1598,113 @@ export const giinApi = {
     }
   },
 
-  // Phase C1 (29) — post-meeting follow-up. Host-only, server-sent.
+  // Phase C2a (1), short meeting links. Host only, server-verified.
+  // Returns the existing link for the meeting, or creates one.
+  getOrCreateShortLink: async (meetingId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/short-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  // Phase C2a (4), saved meeting agenda (host saves, host or admitted
+  // participant reads). Never throws, callers show the honest reason.
+  getAgenda: async (meetingId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const params = new URLSearchParams({ meetingId, accessToken: session.access_token });
+      const res = await fetch(`/api/meetings/agenda?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  saveAgenda: async (meetingId: string, items: { id: string; text: string; startTime?: string; endTime?: string; durationMinutes?: number }[]) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/meetings/agenda', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, items, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  // Phase C2a (5), attendance certificate list for one meeting.
+  getCertificateAttendees: async (meetingId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const params = new URLSearchParams({ meetingId, accessToken: session.access_token });
+      const res = await fetch(`/api/meetings/certificates?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  // Phase C2a (5 + 9), register a downloaded certificate in the
+  // library so it is downloadable from the library afterwards.
+  registerCertificateFile: async (meetingId: string, name: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/library/files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, kind: 'certificate', name, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  // Phase C2a (9), library home lists: certificates and recent files.
+  listCertificates: async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch(`/api/library/certificates?accessToken=${encodeURIComponent(session.access_token)}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  listRecentLibraryFiles: async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch(`/api/library/recent?accessToken=${encodeURIComponent(session.access_token)}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  // Phase C1 (29), post-meeting follow-up. Host-only, server-sent.
   // Never throws: the caller shows the honest reason instead.
   sendFollowUp: async (meetingId: string, extraEmails?: string[]) => {
     try {
@@ -1619,7 +1725,7 @@ export const giinApi = {
   // Transfer the host role, server-verified (Fix Round 6 / Phase 6).
   // POST /api/meetings/transfer-host checks the caller is the current
   // host and the new host is a signed-in participant in the meeting.
-  // Throws with the server's honest message on any failure — callers
+  // Throws with the server's honest message on any failure, callers
   // must NOT leave on failure.
   transferHost: async (meetingId: string, newHostUserId: string) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -1653,7 +1759,7 @@ export const giinApi = {
       throw new Error('Only the host, a co-host or a moderator can control the room.');
     }
     // Fix Round 8 (#10): a control call (mute/kick) must never hang
-    // forever on a degraded connection — 15 s, then an honest error
+    // forever on a degraded connection, 15 s, then an honest error
     // the button can report instead of a frozen tab.
     const controller = new AbortController();
     const controlTimer = setTimeout(() => controller.abort(), 15000);
@@ -1666,7 +1772,7 @@ export const giinApi = {
         signal: controller.signal,
       });
     } catch (e: any) {
-      if (e?.name === 'AbortError') throw new Error('The room did not answer in time — check your connection and try again.');
+      if (e?.name === 'AbortError') throw new Error('The room did not answer in time, check your connection and try again.');
       throw e;
     } finally {
       clearTimeout(controlTimer);
@@ -1681,7 +1787,7 @@ export const giinApi = {
   // Breakout-room control, host-verified server-side (Phase 3,
   // Feature 2). POST /api/meetings/breakout verifies the caller is the
   // host, a co-host or a moderator and the SERVER broadcasts the event
-  // with a server marker on the meeting-events channel — receivers
+  // with a server marker on the meeting-events channel, receivers
   // ignore breakout events without it. Same dual credential and 15 s
   // timeout as controlMeeting. Throws with the server's honest message.
   breakoutControl: async (meetingId: string, event: string, payload?: { assignments?: Record<string, number>; durationSeconds?: number; peerKey?: string; roomNumber?: number | null; message?: string; roomsCount?: number }) => {
@@ -1702,7 +1808,7 @@ export const giinApi = {
         signal: controller.signal,
       });
     } catch (e: any) {
-      if (e?.name === 'AbortError') throw new Error('The rooms did not answer in time — check your connection and try again.');
+      if (e?.name === 'AbortError') throw new Error('The rooms did not answer in time, check your connection and try again.');
       throw e;
     } finally {
       clearTimeout(controlTimer);
@@ -1790,7 +1896,7 @@ export const giinApi = {
     return data as { hasPasscode: boolean; valid: boolean };
   },
 
-  // Fetch a meeting's passcode — host only, server-verified. Used for the
+  // Fetch a meeting's passcode, host only, server-verified. Used for the
   // in-room invite panel and the dashboard Copy Link, now that the
   // passcode column is hidden from anon reads.
   getMeetingPasscode: async (meetingId: string) => {
@@ -1810,7 +1916,7 @@ export const giinApi = {
   // reset itself happens on the recovery screen in Auth.tsx. Email
   // delivery depends on Supabase SMTP being configured in the dashboard.
   //
-  // redirectTo MUST be the plain site origin — NOT a hash route such as
+  // redirectTo MUST be the plain site origin, NOT a hash route such as
   // /#/reset-password. Supabase appends the recovery tokens as a hash
   // fragment (#access_token=...&type=recovery); with a hash route in the
   // URL the tokens land after a SECOND '#', and supabase-js parses only
@@ -1885,7 +1991,7 @@ export const giinApi = {
     const { data: sessionData } = await supabase.auth.getSession();
     if (!sessionData?.session) {
       // Guests may send only when the superadmin turned the flag on
-      // (system_settings.guests_can_chat). Default off — guests can
+      // (system_settings.guests_can_chat). Default off, guests can
       // read chat but cannot send, exactly as before. The matching
       // RLS policy enforces the same rule in the database.
       const settings = await getSystemSettings();
@@ -1932,8 +2038,8 @@ export const giinApi = {
     return data || [];
   },
 
-  // Fetch meeting details. Unknown or malformed meeting IDs return an error —
-  // never a virtual meeting — so the waitroom and the call can tell the user
+  // Fetch meeting details. Unknown or malformed meeting IDs return an error ,
+  // never a virtual meeting, so the waitroom and the call can tell the user
   // the meeting does not exist.
   getMeetingDetails: async (meetingId: string) => {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1956,7 +2062,7 @@ export const giinApi = {
     // The passcode is never read here any more (hidden from anon reads):
     // callers verify it via giinApi.verifyPasscode (server-side) and the
     // host fetches it via giinApi.getMeetingPasscode. `data.passcode` is
-    // therefore always undefined for client callers — never rely on it.
+    // therefore always undefined for client callers, never rely on it.
     (data as any).passcode = undefined;
 
     if (!data.admin_id) {
@@ -1975,7 +2081,7 @@ export const giinApi = {
 
   // ---- Personal rooms (Phase 1) -------------------------------------------
   // Fetch the signed-in user's personal room row, or null when there is
-  // none yet (or when the Phase 1 SQL has not been run — the table simply
+  // none yet (or when the Phase 1 SQL has not been run, the table simply
   // does not exist, and that is a null, never a crash).
   getMyPersonalRoom: async (): Promise<PersonalRoom | null> => {
     try {
@@ -1996,7 +2102,7 @@ export const giinApi = {
   // Create the signed-in user's personal room. The slug comes from their
   // name (email prefix as fallback); on a collision the next free suffix
   // wins (name-2, name-3, ...). Returns the row, or null when it cannot be
-  // created — for example the Phase 1 SQL has not been run yet.
+  // created, for example the Phase 1 SQL has not been run yet.
   createPersonalRoom: async (): Promise<PersonalRoom | null> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -2037,7 +2143,7 @@ export const giinApi = {
     }
   },
 
-  // Phase C1 (25) — set or rename the caller's personal-room handle
+  // Phase C1 (25), set or rename the caller's personal-room handle
   // (server-verified, collision-safe). Returns the room row, or an
   // object with `message` when the handle is taken or invalid.
   updatePersonalRoomSlug: async (slug: string): Promise<any> => {
@@ -2075,8 +2181,8 @@ export const giinApi = {
   },
 
   // Add a participant to the waiting room. Always writes the real
-  // meeting_participants row — guests included (the table allows public
-  // inserts) — and throws when the write fails, so a join is never faked.
+  // meeting_participants row, guests included (the table allows public
+  // inserts), and throws when the write fails, so a join is never faked.
   joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant', status?: 'Waiting' | 'Admitted' | 'Declined') => {
     const finalStatus = status || (role === 'Admin' ? 'Admitted' : 'Waiting');
 
@@ -2085,7 +2191,7 @@ export const giinApi = {
     // admission lockdown blocks client status writes); it refuses
     // removed participants and only re-admits someone who proves they
     // were in the room before. When the route is unreachable the old
-    // insert runs instead — the token route still refuses anyone who
+    // insert runs instead, the token route still refuses anyone who
     // is not Admitted, so a removed guest can never get media.
     try {
       const rowId = (() => { try { return localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { return null; } })();
@@ -2134,7 +2240,7 @@ export const giinApi = {
   },
 
   // Check waiting status for a participant. On any database error the
-  // participant stays 'Waiting' (fail closed) — never auto-admitted.
+  // participant stays 'Waiting' (fail closed), never auto-admitted.
   checkParticipantStatus: async (participantId: string) => {
     try {
       const { data, error } = await supabase
@@ -2256,7 +2362,7 @@ export const giinApi = {
     }
   },
 
-  // Grant or revoke a role on a meeting_participants row — host-only,
+  // Grant or revoke a role on a meeting_participants row, host-only,
   // server-side (Phase 3, Feature 2). POST /api/meetings/role verifies
   // the caller is the current host and writes with the service-role
   // key. The old direct client-side update is gone on purpose: the
@@ -2318,10 +2424,10 @@ export const giinApi = {
   // Upload a file shared in meeting chat. Uses the 'chat-files' storage
   // bucket (public read, authenticated upload). The bucket is created by
   // giinmeet_phase2_chat_files_bucket.sql (run once in the Supabase SQL
-  // Editor) — until then this throws an honest error and the UI says
+  // Editor), until then this throws an honest error and the UI says
   // file sharing is not set up yet instead of faking it.
   uploadChatFile: async (meetingId: string, file: File) => {
-    // Executable / script types are never shared in chat — a download
+    // Executable / script types are never shared in chat, a download
     // link in a meeting must not become a malware drop. (Size is
     // checked by the caller: 25 MB, in handleAttachFile.)
     const ext = (file.name.split('.').pop() || '').toLowerCase();
@@ -2344,7 +2450,7 @@ export const giinApi = {
   },
 
   // Public view URL for a chat file stored under <meetingId>/<file>.
-  // Viewing only: the app never renders this as a download link — the
+  // Viewing only: the app never renders this as a download link, the
   // file opens in the in-app viewer, and the server deletes it when
   // the host ends the meeting.
   getChatFileUrl: (storagePath: string) => {
@@ -2380,11 +2486,11 @@ export const giinApi = {
     return { data, error };
   },
 
-  // Set a user's plan tier (Superadmin assigns tiers — there is no
+  // Set a user's plan tier (Superadmin assigns tiers, there is no
   // payment processor yet, so assignment is manual). is_premium is
   // kept in sync: Pro and Enterprise are premium, Free is not, so
   // every older is_premium-only reader keeps agreeing with the tier.
-  // Throws when profiles.plan_tier does not exist yet — run
+  // Throws when profiles.plan_tier does not exist yet, run
   // giinmeet_plan_tier.sql in Supabase first.
   setProfileTier: async (userId: string, tier: 'free' | 'pro' | 'enterprise') => {
     const { data, error } = await supabase
@@ -2478,7 +2584,7 @@ export const giinApi = {
   // ---- Team workspaces (Phase 3, Feature 3) ---------------------------
   // A team has members, its own meetings (meetings.team_id) and shared
   // settings. Every method below fails honestly when the teams SQL has
-  // not been run yet (probeTeamsSupport / probeTeamMeetingSupport) —
+  // not been run yet (probeTeamsSupport / probeTeamMeetingSupport) ,
   // never a silent personal meeting, never a faked team.
   // Membership truth lives in team_members; RLS (see
   // giinmeet_phase3_teams.sql) only lets a team admin add/remove
@@ -2548,7 +2654,7 @@ export const giinApi = {
       .from('team_members')
       .insert([{ team_id: (team as any).id, user_id: user.id, role: 'admin' }]);
     if (mErr) throw new Error(`The team was created but you could not be made its admin: ${mErr.message}`);
-    // Default settings row (best-effort: the team works without it —
+    // Default settings row (best-effort: the team works without it ,
     // getTeamSettings falls back to the same defaults).
     try {
       await supabase.from('team_settings').insert([{ team_id: (team as any).id }]);
@@ -2597,7 +2703,7 @@ export const giinApi = {
   },
 
   // Find a GiinMeet account by email (profiles are publicly readable).
-  // Returns null when no account uses that email — the caller must say
+  // Returns null when no account uses that email, the caller must say
   // so honestly, never pretend the invite went through.
   findProfileByEmail: async (email: string): Promise<{ id: string; name?: string; email?: string } | null> => {
     const clean = (email || '').trim().toLowerCase();
@@ -2612,7 +2718,7 @@ export const giinApi = {
   },
 
   // Add a member by email. The person MUST already have a GiinMeet
-  // account — inviting a non-user fails honestly ("no account uses
+  // account, inviting a non-user fails honestly ("no account uses
   // that email yet"), it never silently drops the invite. Only a team
   // admin can add members (checked here for the message, enforced by
   // RLS in giinmeet_phase3_teams.sql).
@@ -2622,7 +2728,7 @@ export const giinApi = {
     if (!me) throw new Error('You are not a member of this team.');
     if (me.role !== 'admin') throw new Error('Only a team admin can add members.');
     const profile = await giinApi.findProfileByEmail(email);
-    if (!profile) throw new Error(`No GiinMeet account uses ${email.trim()} yet — ask them to sign up first, then add them.`);
+    if (!profile) throw new Error(`No GiinMeet account uses ${email.trim()} yet, ask them to sign up first, then add them.`);
     const existing = await supabase.from('team_members').select('user_id').eq('team_id', teamId).eq('user_id', profile.id).maybeSingle();
     if (existing.data) throw new Error(`${profile.name || profile.email} is already a member of this team.`);
     const { error } = await supabase
@@ -2633,7 +2739,7 @@ export const giinApi = {
   },
 
   // Remove a member (admin only). The creator cannot be removed and
-  // nobody removes themselves this way — leaving is leaveTeam.
+  // nobody removes themselves this way, leaving is leaveTeam.
   removeTeamMember: async (teamId: string, userId: string): Promise<void> => {
     if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
     const me = await giinApi.getMyTeamMembership(teamId);
@@ -2648,14 +2754,14 @@ export const giinApi = {
   },
 
   // Leave a team. The creator cannot leave their own team (they own
-  // it — delete it instead); any other member, admin included, can.
+  // it, delete it instead); any other member, admin included, can.
   leaveTeam: async (teamId: string): Promise<void> => {
     if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Sign in to leave a team.');
     const { data: team } = await supabase.from('teams').select('created_by').eq('id', teamId).maybeSingle();
     if (!team) throw new Error('That team no longer exists.');
-    if ((team as any).created_by === user.id) throw new Error('The team creator cannot leave the team — delete the team instead.');
+    if ((team as any).created_by === user.id) throw new Error('The team creator cannot leave the team, delete the team instead.');
     const { error } = await supabase.from('team_members').delete().eq('team_id', teamId).eq('user_id', user.id);
     if (error) throw new Error(`Could not leave the team: ${error.message}`);
   },
@@ -2696,7 +2802,7 @@ export const giinApi = {
   },
 
   // Meetings of ONE team, newest first. Only returns rows for teams
-  // the signed-in user belongs to — the caller checks membership
+  // the signed-in user belongs to, the caller checks membership
   // first, and the list the user sees comes from getMyTeamMeetings.
   getMeetingsForTeam: async (teamId: string): Promise<any[]> => {
     try {
@@ -2756,7 +2862,7 @@ export const giinApi = {
   // plain member honestly), and the team's defaults fill in the
   // waiting-room and duration choices the caller did not set. The
   // meeting itself is created by the same createMeeting engine as a
-  // personal meeting — same LiveKit room, same passcode rules.
+  // personal meeting, same LiveKit room, same passcode rules.
   createTeamMeeting: async (teamId: string, meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null; reminder_enabled?: boolean; reminder_minutes_before?: number; series_id?: string; recurrence_rule?: string; recurrence_count?: number }) => {
     if (!(await probeTeamsSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
     if (!(await probeTeamMeetingSupport())) throw new Error(TEAMS_NOT_SET_UP_MESSAGE);

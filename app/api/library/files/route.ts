@@ -70,7 +70,9 @@ export async function POST(req: NextRequest) {
     if (limited) return limited;
     const body = await readJsonBody(req);
     const meetingId = body.meetingId as string | undefined;
-    const kind = body.kind === 'file' ? 'file' : 'local-recording';
+    // Phase C2a (5): 'certificate' is a library kind too, for the
+    // attendance certificates a download registers in the library.
+    const kind = body.kind === 'file' ? 'file' : body.kind === 'certificate' ? 'certificate' : 'local-recording';
     const name = cleanText(body.name, 300);
     if (!isUuid(meetingId)) {
       return errorWithSecurity('BAD_REQUEST', 'A valid meeting is required.', 400);

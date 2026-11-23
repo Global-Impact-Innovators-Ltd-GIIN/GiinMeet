@@ -3,6 +3,7 @@ import {
   Video, VideoOff, Mic, MicOff, Volume2, CheckCircle2, XCircle, AlertTriangle,
   ArrowLeft, ArrowRight, RefreshCw, Wifi, WifiOff, User, ShieldCheck, Loader2,
 } from 'lucide-react';
+import { t, useUiLanguage } from '../i18n';
 
 // Pre-join prerequisite check. Runs BEFORE the passcode gate and the
 // waiting room for everyone who follows a join link (guests and signed-in
@@ -112,6 +113,8 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   const [joinWithoutDevices, setJoinWithoutDevices] = useState(false);
   // Fix Round 7 (#11): the guest chose to proceed despite a failed
   // network probe - the probe can fail while the meeting works fine.
+  // Phase C2a (3): re-render when the UI language changes.
+  useUiLanguage();
   const [proceedDespiteNetwork, setProceedDespiteNetwork] = useState(false);
   const [runId, setRunId] = useState(0);
 
@@ -551,7 +554,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
 
         <div>
           <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', margin: 0 }}>
-            Check your setup, {meetingTitle}
+            {t('prejoin.title')}, {meetingTitle}
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0.35rem 0 0' }}>
             A quick check so you join with working camera, microphone and sound. Nothing here joins the meeting yet.
@@ -584,7 +587,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
         <div id="pjc-name-field" style={highlightKey === 'name' ? { outline: '2px solid #EF4444', outlineOffset: '2px', borderRadius: '10px', padding: '0.25rem' } : undefined}>
           <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
             <User size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} />
-            Your display name
+            {t('prejoin.displayName')}
           </label>
           <input
             type="text"
@@ -670,7 +673,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-main)' }}>
           <input type="checkbox" checked={joinWithoutDevices} onChange={() => setJoinWithoutDevices(!joinWithoutDevices)} style={{ marginTop: '3px' }} />
           <span>
-            <strong>Join without camera / microphone</strong>
+            <strong>{t('prejoin.joinWithoutDevices')}</strong>
             <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>You will join with video and audio off. You can turn them on later from inside the meeting if the device starts working.</span>
           </span>
         </label>
@@ -704,7 +707,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             onClick={handleContinueClick}
             title={canProceed ? 'Continue to the meeting' : 'Tap to see what is still blocking you'}
           >
-            <span>Continue</span>
+            <span>{t('common.continue')}</span>
             <ArrowRight size={18} />
           </button>
         </div>

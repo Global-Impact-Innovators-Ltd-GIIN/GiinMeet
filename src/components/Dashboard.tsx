@@ -10,6 +10,11 @@ import SchedulingAssistant from './SchedulingAssistant';
 import MeetingInsights from './MeetingInsights';
 import ActionItemsPanel from './ActionItemsPanel';
 import { MeetingRecordExtras } from './MeetingRecordExtras';
+import { ShortLinkBox } from './ShortLinkBox';
+import { CertificatesPanel } from './CertificatesPanel';
+import { NotesExport } from './NotesExport';
+import { MeetingPrepBrief } from './MeetingPrepBrief';
+import { t, useUiLanguage } from '../i18n';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
 interface Meeting {
@@ -25,7 +30,7 @@ interface Meeting {
   passcode?: string | null;
   link_expires_at?: string | null;
   link_expiry_mode?: string | null;
-  // Phase 1 — all optional: the columns only exist once
+  // Phase 1, all optional: the columns only exist once
   // giinmeet_phase1.sql runs, so every reader must tolerate absence.
   reminder_enabled?: boolean;
   reminder_minutes_before?: number;
@@ -33,7 +38,7 @@ interface Meeting {
   recurrence_rule?: string | null;
   recurrence_count?: number | null;
   personal_room_slug?: string | null;
-  // Phase 3 (Feature 3) — team workspaces: a meeting scheduled inside
+  // Phase 3 (Feature 3), team workspaces: a meeting scheduled inside
   // a team carries its team_id (and the team name for the badge).
   // Both are optional: personal meetings have neither.
   team_id?: string | null;
@@ -42,7 +47,7 @@ interface Meeting {
 
 interface DashboardProps {
   isPremium: boolean;
-  // Host's plan tier (Free / Pro / Enterprise) — drives the duration
+  // Host's plan tier (Free / Pro / Enterprise), drives the duration
   // picker and its default. Optional: 'free' when unknown.
   planTier?: PlanTier;
   onNavigate: (view: string) => void;
@@ -52,7 +57,7 @@ interface DashboardProps {
   onCancelMeeting?: (meetingId: string, title: string) => void;
   // Delete from history (soft delete, owner only, completed/expired only).
   onDeleteMeeting?: (meetingId: string, title: string) => void;
-  // Phase 1 — cancel every upcoming meeting in a recurring series.
+  // Phase 1, cancel every upcoming meeting in a recurring series.
   onCancelSeries?: (seriesId: string, title: string) => void;
   userName: string;
   userDomain?: string;
@@ -71,6 +76,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   userName,
   userDomain,
 }) => {
+  // Phase C2a (3): re-render when the UI language changes.
+  useUiLanguage();
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -81,7 +88,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [instantPasscode, setInstantPasscode] = useState('');
   const [requireWaitingRoom, setRequireWaitingRoom] = useState(true);
   // System waiting-room default (Superadmin portal) is applied once, on
-  // first load — see the settings effect below. The host's own toggles
+  // first load, see the settings effect below. The host's own toggles
   // afterwards always win.
   const waitingRoomAppliedRef = useRef(false);
   const [schedulePasscodeEnabled, setSchedulePasscodeEnabled] = useState(true);
@@ -142,7 +149,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         if (match) setTemplateDuration(match.value);
       }
       // System waiting-room default (Superadmin portal): applied once,
-      // on first load — the host's own toggles afterwards always win.
+      // on first load, the host's own toggles afterwards always win.
       if (!waitingRoomAppliedRef.current) {
         waitingRoomAppliedRef.current = true;
         if (s.defaultRequireWaitingRoom === false) {
@@ -156,7 +163,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [linkExpiries, setLinkExpiries] = useState<Record<string, { mode: string; expiresAt: string | null }>>({});
   const linkExpiryFetchedRef = useRef<Record<string, boolean>>({});
 
-  // Lazy expiry read for live/scheduled rows (best-effort — null
+  // Lazy expiry read for live/scheduled rows (best-effort, null
   // until giinmeet_link_expiry.sql runs; the creation intent in
   // localStorage is the fallback so the row still shows something).
   useEffect(() => {
@@ -189,7 +196,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await giinApi.updateMeetingExpiry(meeting.id, mode, expiresAt);
       setLinkExpiries((prev) => ({ ...prev, [meeting.id]: { mode, expiresAt } }));
     } catch (err: any) {
-      window.alert('Could not save the link expiry — run giinmeet_link_expiry.sql in Supabase first, then try again.');
+      window.alert('Could not save the link expiry, run giinmeet_link_expiry.sql in Supabase first, then try again.');
     }
   };
 
@@ -258,11 +265,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // its own join link and waiting room.
   const [scheduleRecurrence, setScheduleRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none');
   const [scheduleRecurrenceCount, setScheduleRecurrenceCount] = useState(4);
-  // Phase 1 — recurring series end: after N meetings (count) or on a date.
+  // Phase 1, recurring series end: after N meetings (count) or on a date.
   const [scheduleEndMode, setScheduleEndMode] = useState<'count' | 'date'>('count');
   const [scheduleEndDate, setScheduleEndDate] = useState('');
 
-  // Phase 1 — how many instances the current Repeat settings create
+  // Phase 1, how many instances the current Repeat settings create
   // (cap 12, so a daily series can never run away).
   const countRecurrences = (base: Date): number => {
     if (scheduleRecurrence === 'none') return 1;
@@ -282,7 +289,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return Math.max(2, Math.min(12, scheduleRecurrenceCount));
   };
 
-  // Phase 1 — the series id for one meeting: from the row when present
+  // Phase 1, the series id for one meeting: from the row when present
   // (the columns only exist once giinmeet_phase1.sql runs), else the
   // localStorage fallback kept at creation time. Used both by the
   // history grouping below and by seriesInfoFor.
@@ -290,7 +297,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if ((meeting as any).series_id) return (meeting as any).series_id as string;
     try { const r = localStorage.getItem(`giin_series_${meeting.id}`); return r ? JSON.parse(r).seriesId : null; } catch (e) { return null; }
   };
-  // Phase 1 — series info for one meeting: rule label, position
+  // Phase 1, series info for one meeting: rule label, position
   // (1-based, by start time) and total, or null when it is not part
   // of a series.
   const seriesInfoFor = (meeting: Meeting): { seriesId: string; rule: string; position: number; total: number } | null => {
@@ -305,7 +312,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return { seriesId: sid, rule, position: position || 1, total: count || siblings.length };
   };
   // A recurring series is N real meetings (one row per occurrence) that
-  // share one series_id — listing them flat is why one "Weekly Executive
+  // share one series_id, listing them flat is why one "Weekly Executive
   // Meeting" filled the whole history. Group them: one top-level entry
   // per series, expandable to its occurrences. A meeting with no series
   // id (created before the Phase 1 columns existed, with no
@@ -350,7 +357,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meetingHistory, expandedSeries]);
   // Top-level entries for the history count: one per series plus one per
-  // single meeting — so the header reads "3 entries · 23 total meetings"
+  // single meeting, so the header reads "3 entries · 23 total meetings"
   // instead of pretending 23 separate meetings were scheduled.
   const historyTopLevelCount = useMemo(() => {
     const ids = new Set<string>();
@@ -363,9 +370,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return n;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meetingHistory]);
-  // Phase 1 — meeting reminder: emailed to the host before the meeting.
+  // Phase 1, meeting reminder: emailed to the host before the meeting.
   // Default on, 15 minutes before (the reminder itself only sends once
-  // the Resend API key is configured — see src/utils/mailer.ts).
+  // the Resend API key is configured, see src/utils/mailer.ts).
   const [scheduleReminderEnabled, setScheduleReminderEnabled] = useState(true);
   const [scheduleReminderMinutes, setScheduleReminderMinutes] = useState(15);
   const [seriesCreated, setSeriesCreated] = useState(0);
@@ -375,14 +382,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [inviteContacts, setInviteContacts] = useState<any[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteNote, setInviteNote] = useState('');
-  // Phase 2 (#2) — WhatsApp + SMS invites from the same modal.
+  // Phase 2 (#2), WhatsApp + SMS invites from the same modal.
   const [invitePhone, setInvitePhone] = useState('');
   const [smsConfigured, setSmsConfigured] = useState<boolean | null>(null);
   const [smsNote, setSmsNote] = useState('');
   const [smsSending, setSmsSending] = useState(false);
   // Attendance (recorded in this browser during the meeting).
   const [attendanceMeetingId, setAttendanceMeetingId] = useState<string | null>(null);
-  // Phase B (9 + 10) — meeting record: saved transcript + AI summary,
+  // Phase B (9 + 10), meeting record: saved transcript + AI summary,
   // fetched from the server routes (host or admitted participant only).
   const [recordMeetingId, setRecordMeetingId] = useState<string | null>(null);
   const [meetingRecords, setMeetingRecords] = useState<Record<string, { transcript: any; summary: any; loading: boolean; note: string | null }>>({});
@@ -405,7 +412,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  // Phase C1 (29) — manual follow-up send from the Record panel (the
+  // Phase C1 (29), manual follow-up send from the Record panel (the
   // automatic send happens when the host ends the meeting).
   const [followUpEmails, setFollowUpEmails] = useState('');
   const [followUpStatus, setFollowUpStatus] = useState<Record<string, string>>({});
@@ -422,7 +429,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  // Phase C1 (32) — installable PWA: the browser offers the install
+  // Phase C1 (32), installable PWA: the browser offers the install
   // prompt once (beforeinstallprompt); iPhones have no prompt, so they
   // get the one-line Add to Home Screen hint instead. Nothing shows
   // when the app is already installed (standalone).
@@ -489,14 +496,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setShowSchedulingAssistant(false);
   };
 
-  // Phase 1 — personal room: one permanent link for this user. Fetched on
-  // mount (never auto-created — the user creates it with one click).
+  // Phase 1, personal room: one permanent link for this user. Fetched on
+  // mount (never auto-created, the user creates it with one click).
   const [personalRoom, setPersonalRoom] = useState<{ slug: string; title: string } | null>(null);
   const [personalRoomLoading, setPersonalRoomLoading] = useState(true);
   const [personalRoomCreating, setPersonalRoomCreating] = useState(false);
   const [personalRoomUnavailable, setPersonalRoomUnavailable] = useState(false);
   const [copiedPersonalLink, setCopiedPersonalLink] = useState(false);
-  // Phase C1 (25) — the memorable handle (the part after giinmeet.../).
+  // Phase C1 (25), the memorable handle (the part after giinmeet.../).
   const [handleInput, setHandleInput] = useState('');
   const [handleSaving, setHandleSaving] = useState(false);
   const [handleNote, setHandleNote] = useState<string | null>(null);
@@ -536,7 +543,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  // Phase C1 (25) — rename the handle. The server checks the format and
+  // Phase C1 (25), rename the handle. The server checks the format and
   // that nobody else already has it; the old link stops working, the new
   // one works at once. Passcode and waiting-room rules are untouched.
   const handleSaveHandle = async () => {
@@ -575,7 +582,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return { ...meeting, passcode: passcode ?? null };
   };
 
-  // Phase C1 (24) — templates: one tap starts the saved setup, or it
+  // Phase C1 (24), templates: one tap starts the saved setup, or it
   // opens pre-filled in the schedule form.
   const handleStartTemplate = (t: MeetingTemplate) => {
     onStartMeeting(t.title, undefined, true, undefined, t.require_waiting_room, t.passcode ?? null);
@@ -597,7 +604,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const baseTime = new Date(meetingTime);
     const passcode = schedulePasscodeEnabled ? schedulePasscode : null;
     const occurrences = countRecurrences(baseTime);
-    // Phase 1 — one series id links every instance (client-generated UUID;
+    // Phase 1, one series id links every instance (client-generated UUID;
     // the series columns only exist once giinmeet_phase1.sql runs, and
     // createMeeting keeps the link in localStorage until then).
     const seriesId = scheduleRecurrence === 'none'
@@ -644,7 +651,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setScheduleRecurrenceCount(4);
       setShowScheduleModal(false);
       setShowSuccessModal(true);
-      // Phase C1 (23) — push every created meeting to the connected
+      // Phase C1 (23), push every created meeting to the connected
       // calendars. Fire-and-forget: a calendar failure must never look
       // like a scheduling failure, and the meeting is already saved.
       savedIds.forEach((id) => { void giinApi.syncMeetingToCalendar(id); });
@@ -676,7 +683,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const contacts = await giinApi.getContacts(userDomain);
       setInviteContacts(contacts || []);
     }
-    // Phase 2 (#2) — is SMS wired up? The server answers from env vars
+    // Phase 2 (#2), is SMS wired up? The server answers from env vars
     // only (no secrets cross the wire); the SMS button stays off until
     // a Twilio account is connected.
     try {
@@ -707,13 +714,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       display: 'flex',
       flexDirection: 'column'
     }}>
-      {/* Welcome Banner — animated in code: laptop opens, a meeting plays on
-          its screen, it closes, then the GiinMeet lockup displays — After Effects
+      {/* Welcome Banner, animated in code: laptop opens, a meeting plays on
+          its screen, it closes, then the GiinMeet lockup displays, After Effects
           style, looping every 10s. Text stays exactly as it was (static,
           white, name gold). No video file: the video budget is exhausted,
           so this motion is pure CSS built live in the banner. */}
       <div style={{ position: 'relative', overflow: 'hidden', borderRadius: '16px', marginBottom: '1.5rem', minHeight: '190px', display: 'flex', alignItems: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', background: 'linear-gradient(115deg, #020617 0%, #001a4c 55%, #0a2a6b 100%)' }}>
-        {/* Static fallback image — only shown when the user prefers reduced motion. */}
+        {/* Static fallback image, only shown when the user prefers reduced motion. */}
         <img className="welcome-banner-static-fallback" src="/welcome-banner-bg.webp" alt="" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'none' }} />
         {/* Animated scene (decorative, aria-hidden) */}
         <div className="bl-anim" aria-hidden="true">
@@ -762,7 +769,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <p className="welcome-subtext" style={{ color: 'rgba(255,255,255,0.85)' }}>
             Connect, collaborate, and virtualize with HD audio and video.
           </p>
-          {/* Phase C1 (32) — install GiinMeet on the home screen. Only
+          {/* Phase C1 (32), install GiinMeet on the home screen. Only
               shown when it can actually be installed, and hidden once it is. */}
           {!isStandalone && installPrompt && (
             <button
@@ -781,17 +788,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* Phase 1 — Your personal room: one permanent link. */}
+      {/* Phase 1, Your personal room: one permanent link. */}
       <div className="glass-panel" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
           <Link2 size={18} color="var(--color-accent)" />
-          <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)' }}>Your personal room</h3>
+          <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)' }}>{t('dash.personalRoom')}</h3>
         </div>
         {personalRoomLoading ? (
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Loading your room…</p>
         ) : personalRoom ? (
           <>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>One link, always the same. Share it once — anyone with it can join your room.</p>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('dash.personalRoomHint')}</p>
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <code style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>{buildShortPersonalRoomLink(personalRoom.slug)}</code>
               <button className="premium-btn premium-btn-secondary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleCopyPersonalLink}>{copiedPersonalLink ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy link</>}</button>
@@ -818,21 +825,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </>
         ) : (
           <>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Get one permanent link for your room — it never changes, so you only ever share it once.</p>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Get one permanent link for your room, it never changes, so you only ever share it once.</p>
             <div>
               <button className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleCreatePersonalRoom} disabled={personalRoomCreating}>{personalRoomCreating ? 'Creating…' : 'Create my personal room'}</button>
             </div>
             {personalRoomUnavailable && (
-              <p style={{ fontSize: '0.8rem', color: '#F59E0B' }}>Personal rooms need the Phase 1 database setup — run giinmeet_phase1.sql in the Supabase SQL Editor first.</p>
+              <p style={{ fontSize: '0.8rem', color: '#F59E0B' }}>Personal rooms need the Phase 1 database setup, run giinmeet_phase1.sql in the Supabase SQL Editor first.</p>
             )}
           </>
         )}
       </div>
 
-      {/* Phase C1 (23) — calendar sync: one grouped section, two provider rows. */}
+      {/* Phase C1 (23), calendar sync: one grouped section, two provider rows. */}
       <CalendarSyncPanel meetings={meetingHistory} />
 
-      {/* Phase C1 (24) — meeting templates: one grouped section. */}
+      {/* Phase C1 (24), meeting templates: one grouped section. */}
       <TemplatesPanel
         currentTitle={meetingTitle}
         currentDurationMinutes={parseDurationMinutes(templateDuration) || 60}
@@ -842,10 +849,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         onScheduleTemplate={handleScheduleTemplate}
       />
 
-      {/* Phase C1 (26) — recent meetings, one-tap rejoin. */}
+      {/* Phase C1 (26), recent meetings, one-tap rejoin. */}
       <RecentMeetings meetings={meetingHistory} />
 
-      {/* Phase C1 (28) — recordings and notes library, search. */}
+      {/* Phase C1 (28), recordings and notes library, search. */}
       <LibraryPanel
         onOpenRecord={(id) => {
           setRecordMeetingId(id);
@@ -855,6 +862,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
           } catch (e) { /* scrolling is best effort */ }
         }}
       />
+
+      {/* Phase C2a (6): prep brief for the next upcoming meeting. */}
+      {(() => {
+        const now = Date.now();
+        const next = [...(meetingHistory || [])]
+          .filter((m: any) => new Date(m.time).getTime() >= now - 60 * 60 * 1000)
+          .sort((a: any, b: any) => new Date(a.time).getTime() - new Date(b.time).getTime())[0];
+        return next ? <MeetingPrepBrief meetingId={next.id} meetingTitle={next.title} meetingTime={next.time} /> : null;
+      })()}
 
       {/* Quick Action Grid */}
       <div style={{
@@ -1005,7 +1021,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 const label = entry.rule === 'daily' ? 'Daily' : entry.rule === 'weekly' ? 'Weekly' : 'Monthly';
                 return (
                   <div key={entry.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>🔁 {entry.title} — {label} series · {entry.size} meetings</span>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>🔁 {entry.title}, {label} series · {entry.size} meetings</span>
                     <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <button onClick={() => setExpandedSeries((prev) => ({ ...prev, [`series:${entry.seriesId}`]: false }))} className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px' }} title="Collapse this series back to one row">Hide ▴</button>
                       <button onClick={() => onCancelSeries?.(entry.seriesId, entry.title)} className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444' }} title="Cancel every upcoming meeting in this series">Cancel series</button>
@@ -1069,7 +1085,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </p>
                     {isRepresentative && (
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.25rem 0 0', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                        <span>🔁 {repLabel} series · {repSize} meetings — this row is the next one</span>
+                        <span>🔁 {repLabel} series · {repSize} meetings, this row is the next one</span>
                         <button onClick={() => setExpandedSeries((prev) => ({ ...prev, [`series:${repSeriesId}`]: true }))} className="premium-btn premium-btn-secondary" style={{ padding: '0.15rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px' }} title="Show every meeting in this series">Show all {repSize} ▾</button>
                       </p>
                     )}
@@ -1077,7 +1093,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.25rem 0 0', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                         <span>{linkExpiryLabel(meeting)}</span>
                         {(() => {
-                          // Phase 1 — reminder, from the row when present, else
+                          // Phase 1, reminder, from the row when present, else
                           // the localStorage fallback kept at creation time.
                           let rem: { enabled: boolean; minutesBefore: number } | null = null;
                           if (meeting.reminder_enabled !== undefined) {
@@ -1092,7 +1108,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           return <span>🔔 Reminder {rem.minutesBefore} min before</span>;
                         })()}
                         {(() => {
-                          // Phase 1 — series badge (e.g. "🔁 Weekly • 2 of 5").
+                          // Phase 1, series badge (e.g. "🔁 Weekly • 2 of 5").
                           // Hidden on the collapsed series row: its summary
                           // line already says how many meetings the series has.
                           const info = seriesInfoFor(meeting);
@@ -1198,7 +1214,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         Cancel
                       </button>
                       {(() => {
-                        // Phase 1 — cancel the whole series from one button.
+                        // Phase 1, cancel the whole series from one button.
                         // Shown once per series: on the collapsed row, or on
                         // the first occurrence when the series is expanded.
                         const info = seriesInfoFor(meeting);
@@ -1267,7 +1283,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               {attendanceMeetingId === meeting.id && (
                 <div style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.5rem' }}>Attendance — {meeting.title}</h4>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.5rem' }}>Attendance, {meeting.title}</h4>
                   {(() => {
                     try {
                       const raw = localStorage.getItem(`giin_attendance_${meeting.id}`);
@@ -1307,7 +1323,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               )}
               {recordMeetingId === meeting.id && (
                 <div style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.5rem' }}>Transcript & Summary — {meeting.title}</h4>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.5rem' }}>Transcript & Summary, {meeting.title}</h4>
                   {(() => {
                     const rec = meetingRecords[meeting.id];
                     if (!rec || rec.loading) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Loading the meeting record…</p>;
@@ -1338,14 +1354,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           </div>
                         ) : (
                           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-                            No summary yet{lines.length === 0 ? ' — there is no saved transcript for this meeting (captions were off or the meeting ended before transcripts were saved).' : ' — the summary provider key is not configured, or generation has not run.'}
+                            No summary yet{lines.length === 0 ? ', there is no saved transcript for this meeting (captions were off or the meeting ended before transcripts were saved).' : ', the summary provider key is not configured, or generation has not run.'}
                           </p>
                         )}
                         {rec.note && <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>{rec.note}</p>}
                         <button type="button" className="premium-btn premium-btn-secondary" style={{ alignSelf: 'flex-start', padding: '0.35rem 0.75rem', fontSize: '0.75rem' }} onClick={() => void regenerateSummary(meeting.id)}>
                           {summary ? 'Regenerate summary' : 'Generate summary'}
                         </button>
-                        {/* Phase C1 (29) — post-meeting follow-up: summary, decisions
+                        {/* Phase C1 (29), post-meeting follow-up: summary, decisions
                             and action items by email. Also sent automatically when
                             the host ends the meeting. */}
                         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1384,10 +1400,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             ))}
                           </div>
                         )}
-                        {/* Phase C1 (28) — notes and recordings/files for this meeting. */}
+                        {/* Phase C1 (28), notes and recordings/files for this meeting. */}
                         <MeetingRecordExtras meetingId={meeting.id} />
                         {/* Phase C1 (34), attendance and engagement insights. */}
                         <MeetingInsights meetingId={meeting.id} />
+                        {/* Phase C2a (5), attendance certificates for this meeting. */}
+                        <CertificatesPanel meetingId={meeting.id} meetingTitle={meeting.title} meetingDate={meeting.time} />
+                        {/* Phase C2a (7), download the summary and notes as PDF or Word. */}
+                        <NotesExport meetingId={meeting.id} meetingTitle={meeting.title} meetingDate={meeting.time} />
+                        {/* Phase C2a (1 + 2), short link and QR code for this meeting. */}
+                        <ShortLinkBox meetingId={meeting.id} />
                       </div>
                     );
                   })()}
@@ -1558,7 +1580,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   ))}
                 </div>
               )}
-              {/* Round 9 (9C): link expiry — a duration counts from the meeting date. */}
+              {/* Round 9 (9C): link expiry, a duration counts from the meeting date. */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Meeting link expires</label>
                 <select value={scheduleLinkExpiry} onChange={(e) => setScheduleLinkExpiry(e.target.value)} className="premium-input" style={{ height: '44px' }}>
@@ -1608,7 +1630,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Longest meeting on your {TIER_LABELS[planTier]} plan: {durationOptions[durationOptions.length - 1]?.label || '40 minutes'}. The room never ends a meeting at this length — it is the length you plan for.</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Longest meeting on your {TIER_LABELS[planTier]} plan: {durationOptions[durationOptions.length - 1]?.label || '40 minutes'}. The room never ends a meeting at this length, it is the length you plan for.</span>
               </div>
 
               <div>
@@ -1665,7 +1687,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 )}
               </div>
 
-              {/* Phase 1 — meeting reminder (emailed to the host). */}
+              {/* Phase 1, meeting reminder (emailed to the host). */}
               <div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', color: 'var(--text-main)' }}>
                   <input
@@ -1691,7 +1713,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                 )}
                 <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                  The reminder goes to your email. Sending starts once email is configured for the app (Resend API key) — until then the reminder is saved and queued.
+                  The reminder goes to your email. Sending starts once email is configured for the app (Resend API key), until then the reminder is saved and queued.
                 </span>
               </div>
 
@@ -1795,7 +1817,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         />
       )}
 
-      {/* Invite Modal — by email or from workspace contacts. The invite
+      {/* Invite Modal, by email or from workspace contacts. The invite
           itself is a shareable link plus a pre-filled email in the user's
           own mail app (mailto:); no email is ever sent automatically,
           because no mail provider is configured. */}
@@ -1843,10 +1865,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   }
                   const full = await withHostPasscode(inviteMeeting);
                   const link = buildJoinLink(full.id, full.passcode);
-                  const subject = encodeURIComponent(`Invitation: ${full.title} — ${getLocalBrandName()}`);
+                  const subject = encodeURIComponent(`Invitation: ${full.title}, ${getLocalBrandName()}`);
                   const body = encodeURIComponent(`Please join my ${getLocalBrandName()} video meeting:\nTopic: ${full.title}\nTime: ${new Date(full.time).toLocaleString()}\nJoin link: ${link}\nMeeting ID: ${full.id}\nPasscode: ${full.passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
                   window.location.href = `mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`;
-                  setInviteNote(`Your mail app opened with the invitation ready to send. No email is sent automatically — ${getLocalBrandName()} has no mail provider configured yet.`);
+                  setInviteNote(`Your mail app opened with the invitation ready to send. No email is sent automatically, ${getLocalBrandName()} has no mail provider configured yet.`);
                 }}
               >
                 Email Invite
@@ -1864,7 +1886,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       style={{ justifyContent: 'flex-start', fontSize: '0.85rem', padding: '0.5rem 0.75rem' }}
                       onClick={() => {
                         if (c.email) setInviteEmail(c.email);
-                        else setInviteNote(`${c.name || 'This contact'} has no email on their profile — copy the link instead.`);
+                        else setInviteNote(`${c.name || 'This contact'} has no email on their profile, copy the link instead.`);
                       }}
                     >
                       {c.name || c.email} {c.email ? `(${c.email})` : '(no email)'}
@@ -1879,15 +1901,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
               onClick={async () => {
                 const full = await withHostPasscode(inviteMeeting);
                 navigator.clipboard.writeText(buildJoinLink(full.id, full.passcode));
-                setInviteNote('Invite link copied — paste it anywhere (WhatsApp, chat, email).');
+                setInviteNote('Invite link copied, paste it anywhere (WhatsApp, chat, email).');
               }}
             >
               <Copy size={14} /> Copy Invite Link
             </button>
-            {/* Phase 2 (#2) — WhatsApp + SMS invites. WhatsApp is a wa.me
+            {/* Phase 2 (#2), WhatsApp + SMS invites. WhatsApp is a wa.me
                 share link and works now with no provider. SMS goes through
                 Twilio on the server; until Suku connects a Twilio account
-                the SMS button stays off and says so — nothing is ever
+                the SMS button stays off and says so, nothing is ever
                 pretended sent. */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Invite by WhatsApp or SMS</span>
@@ -1915,7 +1937,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   className="premium-btn premium-btn-secondary"
                   style={{ flex: 1, justifyContent: 'center' }}
                   disabled={smsConfigured !== true || smsSending}
-                  title={smsConfigured === false ? 'SMS needs a Twilio account — see docs/phase2-setup.md' : undefined}
+                  title={smsConfigured === false ? 'SMS needs a Twilio account, see docs/phase2-setup.md' : undefined}
                   onClick={async () => {
                     const phone = invitePhone.trim();
                     if (!/^\+?[1-9]\d{6,14}$/.test(phone.replace(/[\s\-()]/g, ''))) {
@@ -1957,7 +1979,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
                 {smsConfigured === false
-                  ? 'SMS is not connected yet — it needs a Twilio account (see docs/phase2-setup.md). WhatsApp works now, no account needed.'
+                  ? 'SMS is not connected yet, it needs a Twilio account (see docs/phase2-setup.md). WhatsApp works now, no account needed.'
                   : 'WhatsApp opens with the invitation ready to send. SMS sends a text straight to the number above.'}
               </span>
               {smsNote && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>{smsNote}</span>}
@@ -2027,7 +2049,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   required
                 />
                 <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                  Paste the invite link from the host, or the meeting ID (the long code with dashes). A 6-character passcode alone cannot find a meeting — you enter that in the waiting room.
+                  Paste the invite link from the host, or the meeting ID (the long code with dashes). A 6-character passcode alone cannot find a meeting, you enter that in the waiting room.
                 </span>
                 {joinError && (
                   <div style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -2102,7 +2124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </h3>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
                 Your professional {getLocalBrandName()} room is ready.
-                {seriesCreated > 1 && ` This is a recurring series — ${seriesCreated} meetings were created (details below are for the first one).`}
+                {seriesCreated > 1 && ` This is a recurring series, ${seriesCreated} meetings were created (details below are for the first one).`}
               </p>
             </div>
 
@@ -2170,7 +2192,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
                 >
                   {copiedSuccessId === 'link' ? <Check size={14} /> : copyFailedId === 'link' ? <AlertCircle size={14} /> : <Copy size={14} />}
-                  <span>{copiedSuccessId === 'link' ? 'Copied' : copyFailedId === 'link' ? 'Copy failed — tap to retry' : 'Copy'}</span>
+                  <span>{copiedSuccessId === 'link' ? 'Copied' : copyFailedId === 'link' ? 'Copy failed, tap to retry' : 'Copy'}</span>
                 </button>
               </div>
             </div>
@@ -2202,7 +2224,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem' }}
             >
               {copiedSuccessId === 'details' ? <Check size={16} /> : copyFailedId === 'details' ? <AlertCircle size={16} /> : <Copy size={16} />}
-              <span>{copiedSuccessId === 'details' ? 'Invitation Copied' : copyFailedId === 'details' ? 'Copy failed — tap to retry' : 'Copy Invitation'}</span>
+              <span>{copiedSuccessId === 'details' ? 'Invitation Copied' : copyFailedId === 'details' ? 'Copy failed, tap to retry' : 'Copy Invitation'}</span>
             </button>
 
             <button
