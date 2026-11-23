@@ -1238,6 +1238,63 @@ export const giinApi = {
     }
   },
 
+  // Phase C1 (33), smart scheduling assistant. Suggests times from
+  // the host's stated hours plus connected calendars; polls ask
+  // attendees to vote. Never throws; callers show the honest reason.
+  suggestTimes: async (params: {
+    title?: string;
+    durationMinutes: number;
+    dateFrom?: string;
+    dateTo?: string;
+    attendeeEmails?: string[];
+    hostAvailability?: { day: number; start: string; end: string }[];
+  }) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/scheduling/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...params, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  createSchedulingPoll: async (params: {
+    title: string;
+    durationMinutes: number;
+    slots: string[];
+    attendeeEmails?: string[];
+  }) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/scheduling/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...params, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  getSchedulingPoll: async (token: string) => {
+    try {
+      const res = await fetch(`/api/scheduling/poll?token=${encodeURIComponent(token)}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
   pullCalendarEvents: async (fromIso?: string, toIso?: string) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();

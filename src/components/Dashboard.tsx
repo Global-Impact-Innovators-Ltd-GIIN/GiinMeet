@@ -6,6 +6,7 @@ import { CalendarSyncPanel } from './CalendarSyncPanel';
 import { TemplatesPanel, type MeetingTemplate } from './TemplatesPanel';
 import { RecentMeetings } from './RecentMeetings';
 import { LibraryPanel } from './LibraryPanel';
+import SchedulingAssistant from './SchedulingAssistant';
 import { MeetingRecordExtras } from './MeetingRecordExtras';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
@@ -452,6 +453,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } catch (e) {
       // Dismissed or failed: the button simply stays available.
     }
+  };
+
+  // Phase C1 (33), smart scheduling assistant, opened from the
+  // Schedule modal. Fills the schedule form when a slot is picked.
+  const [showSchedulingAssistant, setShowSchedulingAssistant] = useState(false);
+  const handleUseSuggestedSlot = (startIso: string, slotTitle: string, durationMinutes: number) => {
+    const d = new Date(startIso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    setMeetingTime(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    if (slotTitle) setMeetingTitle(slotTitle);
+    const match = durationOptions.find((o) => parseDurationMinutes(o.value) === durationMinutes);
+    if (match) setTemplateDuration(match.value);
+    setShowSchedulingAssistant(false);
   };
 
   // Phase 1 — personal room: one permanent link for this user. Fetched on
@@ -1536,6 +1550,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   required
                 />
               </div>
+              {/* Phase C1 (33), smart scheduling assistant: find a time
+                  that works, from stated hours and connected calendars. */}
+              <button
+                type="button"
+                className="premium-btn premium-btn-secondary"
+                style={{ alignSelf: 'flex-start', padding: '0.45rem 0.85rem', fontSize: '0.82rem' }}
+                onClick={() => setShowSchedulingAssistant(true)}
+              >
+                <Clock size={15} style={{ marginRight: '0.4rem', verticalAlign: '-2px' }} /> Find a time that works for everyone
+              </button>
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Duration</label>
@@ -1718,6 +1742,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Phase C1 (33), smart scheduling assistant, opened from the
+          Schedule modal. Picking a slot fills the schedule form above. */}
+      {showSchedulingAssistant && (
+        <SchedulingAssistant
+          initialTitle={meetingTitle}
+          initialDurationMinutes={parseDurationMinutes(templateDuration)}
+          onUseSlot={handleUseSuggestedSlot}
+          onClose={() => setShowSchedulingAssistant(false)}
+        />
       )}
 
       {/* Invite Modal — by email or from workspace contacts. The invite
