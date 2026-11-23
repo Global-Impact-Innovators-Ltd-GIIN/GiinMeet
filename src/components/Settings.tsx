@@ -144,7 +144,6 @@ export const Settings: React.FC<SettingsProps> = ({
   const [accentColor, setAccentColor] = useState(() => localStorage.getItem('giin_accent_color') || '#3B82F6');
   const [glassOpacity, setGlassOpacity] = useState(() => localStorage.getItem('giin_glass_opacity') || 'frosted');
   const [logoPreview, setLogoPreview] = useState(() => localStorage.getItem('giin_custom_logo') || '');
-  const [meetingWatermark, setMeetingWatermark] = useState(() => localStorage.getItem('giin_watermark') || 'branded');
   const [layoutStyle, setLayoutStyle] = useState(() => localStorage.getItem('giin_layout') || 'left-docked');
 
   const [brandNameState, setBrandNameState] = useState(() => {
@@ -181,8 +180,6 @@ export const Settings: React.FC<SettingsProps> = ({
   const [fontBody, setFontBody] = useState(() => localStorage.getItem('giin_font_body') || 'Inter');
   const [borderRadiusVal, setBorderRadiusVal] = useState(() => localStorage.getItem('giin_border_radius') || '8');
   const [uiStyle, setUiStyle] = useState(() => localStorage.getItem('giin_ui_style') || 'glassmorphism');
-  const [watermarkOpacity, setWatermarkOpacity] = useState(() => localStorage.getItem('giin_watermark_opacity') || '80');
-  const [watermarkScale, setWatermarkScale] = useState(() => localStorage.getItem('giin_watermark_scale') || '100');
 
   // A/V testing & noise profiles state
   const [devicesList, setDevicesList] = useState<{ cameras: MediaDeviceInfo[], mics: MediaDeviceInfo[], speakers: MediaDeviceInfo[] }>({ cameras: [], mics: [], speakers: [] });
@@ -538,17 +535,13 @@ export const Settings: React.FC<SettingsProps> = ({
     triggerToast(t('set.glassmorphism_aesthetics_opacity_updated'));
   };
 
-  const saveBrandingConfig = (watermark: string, layout: string) => {
-    setMeetingWatermark(watermark);
+  const saveLayoutConfig = (layout: string) => {
     setLayoutStyle(layout);
-    localStorage.setItem('giin_watermark', watermark);
     localStorage.setItem('giin_layout', layout);
     // Live-apply: App listens for the layout event and re-renders the
-    // navigation; MeetingRoom listens for the watermark event and
-    // re-renders the video-feed watermark. Without these, both settings
-    // only took effect after a full reload (and the layout never did).
+    // navigation. Without this, the setting only took effect after a
+    // full reload (and the layout never did).
     window.dispatchEvent(new Event('giin_layout_changed'));
-    window.dispatchEvent(new Event('giin_watermark_changed'));
     triggerToast(t('set.advanced_branding_configuration_saved'));
   };
 
@@ -633,17 +626,6 @@ export const Settings: React.FC<SettingsProps> = ({
     localStorage.setItem('giin_ui_style', style);
     applyUiStyle(style, isDarkMode);
     triggerToast(t('set.ui_style_effect_applied'));
-  };
-
-  const handleUpdateWatermarkSettings = (opacity: string, scale: string) => {
-    setWatermarkOpacity(opacity);
-    setWatermarkScale(scale);
-    localStorage.setItem('giin_watermark_opacity', opacity);
-    localStorage.setItem('giin_watermark_scale', scale);
-    // Live-apply: MeetingRoom listens for this and re-renders the
-    // video-feed watermark at the new size/opacity immediately.
-    window.dispatchEvent(new Event('giin_watermark_changed'));
-    triggerToast(t('set.watermark_geometry_saved'));
   };
 
   // Toggle camera hardware test
@@ -783,7 +765,7 @@ export const Settings: React.FC<SettingsProps> = ({
     const workspaceData = {
       profile: { name, email, phone, role, location, timezone, skills: userSkills },
       workspace: { workspaceName, domain, gatedRegistration, directoryVisible, guestWaitroomGating },
-      aesthetics: { accentColor, glassOpacity, layoutStyle, meetingWatermark },
+      aesthetics: { accentColor, glassOpacity, layoutStyle },
       security: { activeSessions },
       exportedAt: new Date().toISOString()
     };
@@ -809,7 +791,7 @@ export const Settings: React.FC<SettingsProps> = ({
   // Categories Sidebar
   const categories = [
     { id: 'profile', name: 'Profile Settings', icon: User, desc: 'Display details & contact info' },
-    { id: 'branding', name: 'Branding & Layout', icon: ImageIcon, desc: 'Themes, custom logos, watermarks' },
+    { id: 'branding', name: 'Branding & Layout', icon: ImageIcon, desc: 'Themes, custom logos and layout' },
     { id: 'workspace', name: 'Workspace Admin', icon: Globe, desc: 'Subdomains, limits & exports' },
     { id: 'devices', name: 'Hardware & Audio', icon: Video, desc: 'A/V testing & audio enhancement' },
     { id: 'shortcuts', name: 'Shortcuts Manager', icon: Keyboard, desc: 'Custom keyboard productivity bindings' },
@@ -1332,51 +1314,11 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
               </SectionCard>
 
-              {/* Watermark & Layout Configuration */}
-              <SectionCard icon={Video} title={t('set.watermark_layout_configuration')} subtitle="Logo overlays on video feeds and the navigation layout.">
+              {/* Layout Configuration */}
+              <SectionCard icon={Video} title={t('set.layout_configuration')} subtitle="The navigation layout.">
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.video_feed_watermark')}</label>
-                  <select value={meetingWatermark} onChange={(e) => saveBrandingConfig(e.target.value, layoutStyle)} className="premium-input">
-                    <option value="branded">{t('set.branded_overlay_top_left_logo')}</option>
-                    <option value="watermark">{t('set.top_right_logo_watermark')}</option>
-                    <option value="none">{t('set.no_branded_overlays')}</option>
-                  </select>
-                </div>
-
-                {meetingWatermark !== 'none' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
-                    <div>
-                      <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Watermark Opacity ({watermarkOpacity}%)</label>
-                      </div>
-                      <input 
-                        type="range" 
-                        min="10" 
-                        max="100" 
-                        value={watermarkOpacity} 
-                        onChange={(e) => handleUpdateWatermarkSettings(e.target.value, watermarkScale)} 
-                        style={{ width: '100%', cursor: 'pointer', accentColor: 'var(--color-primary)' }} 
-                      />
-                    </div>
-                    <div>
-                      <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Watermark Scale ({watermarkScale}%)</label>
-                      </div>
-                      <input 
-                        type="range" 
-                        min="50" 
-                        max="150" 
-                        value={watermarkScale} 
-                        onChange={(e) => handleUpdateWatermarkSettings(watermarkOpacity, e.target.value)} 
-                        style={{ width: '100%', cursor: 'pointer', accentColor: 'var(--color-primary)' }} 
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.navbar_scaffolding_layout')}</label>
-                  <select value={layoutStyle} onChange={(e) => saveBrandingConfig(meetingWatermark, e.target.value)} className="premium-input">
+                  <select value={layoutStyle} onChange={(e) => saveLayoutConfig(e.target.value)} className="premium-input">
                     <option value="left-docked">{t('set.left_docked_panel_icon_menu')}</option>
                     <option value="header-only">{t('set.top_navbar_menu_horizontal_bar')}</option>
                   </select>

@@ -652,9 +652,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [agendaEndPopup, setAgendaEndPopup] = useState<{ id: string; text: string; endLabel: string } | null>(null);
   const agendaAlertsFiredRef = useRef<Set<string>>(new Set());
   const roomJoinedAtRef = useRef<number>(Date.now());
-  // The video-room watermark was removed: no logo or text may cover
-  // the video cards or the shared screen. The saved watermark settings
-  // in Settings are kept, but nothing in the room reads them any more.
+  // No watermark in the video room: nothing covers the video cards
+  // or the shared screen.
   const publishAgenda = (items: { id: string; text: string; startTime?: string; endTime?: string; durationMinutes?: number }[]) => {
     setAgendaItems(items);
     // Phase C2a (4): persist the agenda for the prep brief and for
@@ -9540,9 +9539,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                         />
                       </div>
                     )}
-                    {/* No watermark over the shared screen: it covered the
-                        shared content, so the room shows the share only. */}
-                    
                     {isAnnotating && isScreenSharing && (
                       <ScreenAnnotation 
                         isPresenter={true} 

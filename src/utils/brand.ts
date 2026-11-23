@@ -15,7 +15,7 @@
 // waiting-room and lobby screens) and syncs it INTO the same
 // localStorage keys Settings already writes, firing the same
 // giin_logo_changed / giin_branding_changed events. Every existing
-// reader — App header, MeetingRoom watermark, Settings inputs — then
+// reader — App header, Settings inputs — then
 // shows the shared brand with no change to those readers. If the table
 // does not exist yet (SQL not run) or no brand row is set, everything
 // falls back honestly to the default GiinMeet brand; nothing ever
@@ -187,7 +187,7 @@ export async function resetWorkspaceBrand(client: BrandDbClient): Promise<BrandS
 // Write the server brand into the localStorage keys every existing
 // reader uses, apply its accent through the b230f62 theme system (no
 // second theme system), and fire the same events Settings fires, so
-// App header state, the MeetingRoom watermark and the Settings inputs
+// App header state and the Settings inputs
 // all update live. Safe to call when no brand is set: it is never
 // called then (loadAndApplySharedBrand only calls it with a row).
 export function applySharedBrand(brand: WorkspaceBrand): void {
