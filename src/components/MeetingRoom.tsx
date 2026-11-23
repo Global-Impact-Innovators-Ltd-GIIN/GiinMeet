@@ -767,6 +767,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // start it twice.
   const tokenRefreshingRef = useRef(false);
 
+  // Phase A (5): automatic quality step-down on a weak network.
+  // LiveKit's adaptive streaming already turns REMOTE quality down,
+  // but nothing ever turned the LOCAL uplink down — on a weak link
+  // the phone kept pushing 720p/1.5 Mbps and the call froze (the
+  // 630 ms latency in the 2026-11-13 live test). When the connection
+  // stays poor for a while, the watcher below republishes the camera
+  // (and any screen share) at a low encoding; it steps back up when
+  // the connection recovers. Audio is never touched — voices stay first.
+  const [isLowVideoQuality, setIsLowVideoQuality] = useState(false);
+  const videoQualityLevelRef = useRef<'high' | 'low'>('high');
+
   // Publish (or replace) one local track on the LiveKit room. This is the
   // single place that talks to LiveKit about local tracks: the connect
   // effect, device switches, and screen share all go through here, so a
@@ -822,17 +833,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // saturate a weak link); LiveKit still adapts down gracefully.
       const isPhoneUplink = typeof window !== 'undefined' && window.innerWidth < 768;
       // Phase A (1): a screen share gets an explicit encoding and NO
-      // simulcast. The old code published it with SDK defaults, so on
-      // a weak link the room could stay on the lowest simulcast layer
-      // (or none) and the share looked dead or unreadable. Screen
+      // simulcast — with SDK defaults the room could stay on the lowest
+      // simulcast layer (or none) and the share looked dead. Screen
       // content is one layer at full quality; the server still adapts
       // it down for weak receivers.
+      // Phase A (5): the low level is what the automatic step-down
+      // publishes at — a small, steady uplink that keeps the call
+      // smooth instead of freezing on a weak network.
+      const lowQuality = videoQualityLevelRef.current === 'low';
       const publishOptions: any = source === Track.Source.Camera
-        ? isPhoneUplink
-          ? { source, videoEncoding: { maxBitrate: 800_000, maxFramerate: 24 }, simulcast: true }
-          : { source, videoEncoding: { maxBitrate: 1_500_000, maxFramerate: 30 }, simulcast: true }
+        ? lowQuality
+          ? { source, videoEncoding: { maxBitrate: 300_000, maxFramerate: 15 }, simulcast: true }
+          : isPhoneUplink
+            ? { source, videoEncoding: { maxBitrate: 800_000, maxFramerate: 24 }, simulcast: true }
+            : { source, videoEncoding: { maxBitrate: 1_500_000, maxFramerate: 30 }, simulcast: true }
         : source === Track.Source.ScreenShare
-          ? { source, videoEncoding: { maxBitrate: 2_500_000, maxFramerate: 30 }, simulcast: false }
+          ? lowQuality
+            ? { source, videoEncoding: { maxBitrate: 1_000_000, maxFramerate: 15 }, simulcast: false }
+            : { source, videoEncoding: { maxBitrate: 2_500_000, maxFramerate: 30 }, simulcast: false }
           : { source };
       await room.localParticipant.publishTrack(track, publishOptions);
     } catch (e) {
@@ -852,6 +870,36 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (e) {
       console.warn('[LiveKit] Could not unpublish track:', e);
     }
+  };
+
+  // Phase A (5): re-publish the local tracks at a new quality level.
+  // Unpublish first: publishLiveKitTrack early-returns for a track
+  // that is already published, so only an unpublish + publish changes
+  // the encoding. stopLocalTrackOnUnpublish is false, so the tracks
+  // survive the unpublish. Audio is never touched — voices stay first.
+  const applyLocalVideoQuality = async (level: 'high' | 'low') => {
+    if (videoQualityLevelRef.current === level) return;
+    videoQualityLevelRef.current = level;
+    setIsLowVideoQuality(level === 'low');
+    const room = livekitRoomRef.current;
+    if (!room || room.state !== 'connected') return;
+    try {
+      const cameraTrack = localVideoTrackRef.current;
+      if (cameraTrack && cameraTrack.readyState === 'live') {
+        try { await room.localParticipant.unpublishTrack(cameraTrack); } catch (e) {}
+        await publishLiveKitTrack(cameraTrack, Track.Source.Camera);
+      }
+      const screenTrack = livekitScreenTrackRef.current;
+      if (screenTrack && screenTrack.readyState === 'live') {
+        try { await room.localParticipant.unpublishTrack(screenTrack); } catch (e) {}
+        await publishLiveKitTrack(screenTrack, Track.Source.ScreenShare);
+      }
+    } catch (e) {
+      console.warn('[LiveKit] Could not change video quality:', e);
+    }
+    triggerToast(level === 'low'
+      ? 'Your connection is weak, so video quality was lowered to keep the call smooth.'
+      : 'Your connection is good again, so video quality is back to normal.');
   };
 
   // Fix Round 6: requesting echo cancellation / noise suppression /
@@ -2305,6 +2353,33 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // change, so a newcomer starts muted too.
   const [isSpeakersMuted, setIsSpeakersMuted] = useState(false);
   const [connectionQuality, setConnectionQuality] = useState<string>('unknown');
+  const connectionQualityRef = useRef('unknown');
+  useEffect(() => { connectionQualityRef.current = connectionQuality; }, [connectionQuality]);
+  // Phase A (5): watch the connection and step the local video
+  // quality down/up automatically. A momentary dip does nothing —
+  // the level only changes after 10 s of sustained poor (or good)
+  // quality, checked every 5 s, so it never flaps.
+  useEffect(() => {
+    const qualityWatch = { poorSince: 0, goodSince: 0 };
+    const timer = setInterval(() => {
+      const q = connectionQualityRef.current;
+      const now = Date.now();
+      if (q === 'poor' || q === 'lost') {
+        if (!qualityWatch.poorSince) qualityWatch.poorSince = now;
+        qualityWatch.goodSince = 0;
+        if (now - qualityWatch.poorSince >= 10000) void applyLocalVideoQuality('low');
+      } else if (q === 'good' || q === 'excellent') {
+        if (!qualityWatch.goodSince) qualityWatch.goodSince = now;
+        qualityWatch.poorSince = 0;
+        if (now - qualityWatch.goodSince >= 10000) void applyLocalVideoQuality('high');
+      } else {
+        qualityWatch.poorSince = 0;
+        qualityWatch.goodSince = 0;
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     const streams: any[] = [...Object.values(livekitRemoteStreams), ...Object.values(remoteStreams), ...Object.values(remoteScreenStreams)];
     streams.forEach((s) => {
@@ -9965,11 +10040,30 @@ Media encrypted in transit (DTLS-SRTP).`;
           <div className="meeting-toolbar-left" style={{ gap: '0.5rem' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: </span>
             <span style={{ color: 'white', fontWeight: 600, fontSize: '0.85rem' }}>{meetingId.slice(0, 8)}</span>
-            {connectionQuality !== 'unknown' && (
-              <span title={`Connection quality: ${connectionQuality}`} aria-label={`Connection quality: ${connectionQuality}`} style={{ display: 'inline-flex', alignItems: 'center' }}>
-                <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: connectionQuality === 'excellent' ? '#10B981' : connectionQuality === 'good' ? '#84CC16' : connectionQuality === 'poor' ? '#F59E0B' : '#EF4444' }} />
-              </span>
-            )}
+            {/* Phase A (5): small non-technical connection indicator —
+                a dot plus plain words. The millisecond number lives
+                only in the tooltip, never on the toolbar. When video
+                quality has stepped down, the label says so plainly. */}
+            {(() => {
+              const qualityWord = connectionQuality === 'excellent' ? 'Excellent' : connectionQuality === 'good' ? 'Good' : connectionQuality === 'poor' ? 'Weak' : connectionQuality === 'lost' ? 'Poor' : null;
+              const latencies = Object.values(peerStates)
+                .map(p => p.latency)
+                .filter((l): l is number => typeof l === 'number');
+              const avg = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null;
+              const word = qualityWord || (avg === null ? null : avg < 150 ? 'Good' : avg < 400 ? 'Weak' : 'Poor');
+              if (!word) return null;
+              const color = word === 'Excellent' || word === 'Good' ? '#10B981' : word === 'Weak' ? '#F59E0B' : '#EF4444';
+              return (
+                <span
+                  title={avg !== null ? `Connection: ${word.toLowerCase()} (${avg} ms)` : `Connection: ${word.toLowerCase()}`}
+                  aria-label={`Connection: ${word.toLowerCase()}`}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.5rem', color, fontSize: '0.8rem', fontWeight: 600 }}
+                >
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: color }} />
+                  {word} connection{isLowVideoQuality ? ' · lower video quality' : ''}
+                </span>
+              );
+            })()}
             {/* Fix Round 8 (Evidence 1): the room retries the video
                 server on its own while on a direct connection, but the
                 host can also force one retry from here. */}
@@ -10014,32 +10108,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                 REC {formatElapsedTime(recordingSeconds)} - on this device
               </span>
             )}
-            {/* Connection quality (round-trip latency, measured every 8s) */}
-            {(() => {
-              const latencies = Object.values(peerStates)
-                .map(p => p.latency)
-                .filter((l): l is number => typeof l === 'number');
-              if (latencies.length === 0) return null;
-              const avg = Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length);
-              const color = avg < 150 ? '#10B981' : avg < 400 ? 'var(--color-accent)' : '#EF4444';
-              return (
-                <span
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.3rem',
-                    marginLeft: '0.5rem',
-                    color,
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    fontFamily: 'monospace'
-                  }}
-                  title="Average connection latency to other participants"
-                >
-                  {avg} ms
-                </span>
-              );
-            })()}
+            {/* Phase A (5): the old "{avg} ms" text lived here — the
+                plain-words indicator above replaces it. */}
           </div>
 
           {/* Center Controls */}
