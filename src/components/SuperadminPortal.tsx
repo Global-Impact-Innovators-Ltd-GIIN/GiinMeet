@@ -1973,7 +1973,7 @@ function SetupSection({ callAdmin }: {
           <li>Sign in here with the superadmin account — the portal then unlocks Users, Meetings, Configuration, Monitoring and the Audit Log.</li>
         </ol>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0.75rem 0 0' }}>
-          The service-role key is still the original one shared in chat — rotating it is a separate, still-open job: set a new key in Supabase, update the Vercel env var, and redeploy.
+          The service-role key is still the original one shared in chat — rotation is a dashboard job, not a code job: follow the steps in <code>KEY_ROTATION_STEPS.md</code> in the repo root (create a new key in Supabase, update the Vercel env var, redeploy, verify, then revoke the old key). The code already reads the key from the environment only, so no code change is needed.
         </p>
       </div>
     </div>
