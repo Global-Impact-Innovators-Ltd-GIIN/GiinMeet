@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit } from '../../_lib/security';
 
 // Resolve a personal-room slug to the current session meeting (Phase 1).
 // A personal room is a permanent link (giinmeet.../#/room/<slug>) that
 // belongs to one host. Opening it must never make the opener the host, so
 // the session meeting is found or created HERE, server-side, for the ROOM'S
-// host — never by the guest's browser:
+// host, never by the guest's browser:
 //   - An open session already exists (Scheduled / In Progress) -> join it.
 //   - Otherwise a fresh session meeting is created for the host (title =
 //     the room's title, passcode + waiting-room settings from the room)
@@ -35,6 +36,11 @@ async function getHostName(admin: any, userId: string): Promise<string> {
 
 export async function POST(req: NextRequest) {
   try {
+    // Phase C1, personal-room links are public, so resolving one is
+    // rate-limited per IP (30/min): a real open resolves once, a flood
+    // does not get to hammer the database.
+    const limited = checkRateLimit(req, 'rooms-resolve', 30, 60 * 1000);
+    if (limited) return limited;
     const body = await req.json().catch(() => ({}));
     const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
     if (!slug) {
@@ -52,13 +58,13 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     if (roomError) {
       // The table does not exist until giinmeet_phase1.sql runs.
-      return NextResponse.json({ error: 'PERSONAL_ROOMS_NOT_CONFIGURED', message: 'Personal rooms are not set up yet — run giinmeet_phase1.sql in the Supabase SQL Editor first.' }, { status: 500 });
+      return NextResponse.json({ error: 'PERSONAL_ROOMS_NOT_CONFIGURED', message: 'Personal rooms are not set up yet, run giinmeet_phase1.sql in the Supabase SQL Editor first.' }, { status: 500 });
     }
     if (!room) {
       return NextResponse.json({ error: 'NOT_FOUND', message: 'This personal room does not exist. Check the link and try again.' }, { status: 404 });
     }
 
-    // An open session already exists for this room — reuse it.
+    // An open session already exists for this room, reuse it.
     const { data: sessions } = await admin
       .from('meetings')
       .select('id,title,status')
@@ -95,7 +101,7 @@ export async function POST(req: NextRequest) {
     if (insertError) {
       const msg = String((insertError as any)?.message || insertError);
       if (/personal_room_slug|column/i.test(msg)) {
-        return NextResponse.json({ error: 'PERSONAL_ROOMS_NOT_CONFIGURED', message: 'Personal rooms are not set up yet — run giinmeet_phase1.sql in the Supabase SQL Editor first.' }, { status: 500 });
+        return NextResponse.json({ error: 'PERSONAL_ROOMS_NOT_CONFIGURED', message: 'Personal rooms are not set up yet, run giinmeet_phase1.sql in the Supabase SQL Editor first.' }, { status: 500 });
       }
       console.error('[Resolve Room API] Could not create the session meeting:', msg);
       return NextResponse.json({ error: 'DB_ERROR', message: 'Could not open this personal room. Please try again.' }, { status: 500 });

@@ -3,6 +3,7 @@ import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../../../src/supabaseClient';
 import { tierForProfile, TIER_LIMITS, TIER_LABELS } from '../../../../src/utils/tiers';
+import { checkRateLimit } from '../../_lib/security';
 
 // Server-only Supabase admin client. It uses SUPABASE_SERVICE_ROLE_KEY,
 // which bypasses RLS, so it must NEVER be imported by client code and the
@@ -19,6 +20,11 @@ function getAdminClient() {
 
 export async function POST(req: NextRequest) {
   try {
+    // Phase C1, join is a brute-force / DoS surface too: 20 token mints
+    // per minute per IP is far above a real join (a handful of retries),
+    // and it blunts token-minting floods.
+    const limited = checkRateLimit(req, 'livekit-token', 20, 60 * 1000);
+    if (limited) return limited;
     const body = await req.json().catch(() => ({}));
     const { roomId, roomSlug, userName, accessToken, participantRowId, meetingId } = body;
 
@@ -129,8 +135,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Delete-from-history: a meeting removed from history stays
-    // removed — its old join link must not mint a new token either.
-    // Best-effort read — the column only exists once
+    // removed, its old join link must not mint a new token either.
+    // Best-effort read, the column only exists once
     // giinmeet_delete_history.sql has been run, so a missing column
     // means "not deleted", never a failure.
     try {
@@ -147,8 +153,8 @@ export async function POST(req: NextRequest) {
       }
     } catch (e) { /* deleted_at column not set up yet: not deleted */ }
 
-    // Phase 3 (Feature 3) — team meetings: only team members may
-    // join. Best-effort read — the column only exists once
+    // Phase 3 (Feature 3), team meetings: only team members may
+    // join. Best-effort read, the column only exists once
     // giinmeet_phase3_teams.sql has been run, so a missing column
     // means "not a team meeting", never a failure. The host is the
     // one exception: they own the meeting.
@@ -163,7 +169,7 @@ export async function POST(req: NextRequest) {
     } catch (e) { /* team_id column not set up yet: not a team meeting */ }
 
     // Round 9 (9C): link expiry, enforced server-side. Best-effort
-    // read — the columns only exist once giinmeet_link_expiry.sql has
+    // read, the columns only exist once giinmeet_link_expiry.sql has
     // been run, so a missing column means "no expiry set", never a
     // failure. Mode 'on-end' has no date (the Completed check above
     // covers it); a duration mode with a past date refuses the token.
@@ -216,7 +222,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Superadmin portal: a suspended account cannot join any
-      // meeting. Best-effort — the column only exists once
+      // meeting. Best-effort, the column only exists once
       // giinmeet_superadmin.sql has run, so a missing column means
       // "not suspended", never a failure.
       try {
@@ -240,7 +246,7 @@ export async function POST(req: NextRequest) {
         if (!memberRow) {
           return NextResponse.json({
             error: 'TEAM_MEMBERS_ONLY',
-            message: 'This is a team meeting — only members of the team can join. Ask a team admin to add you.',
+            message: 'This is a team meeting, only members of the team can join. Ask a team admin to add you.',
           }, { status: 403 });
         }
       }
@@ -313,7 +319,7 @@ export async function POST(req: NextRequest) {
         }, { status: 403 });
       }
       // Phase 3 (Feature 3): a guest has no GiinMeet account, so they
-      // can never be a team member — a team meeting refuses guests
+      // can never be a team member, a team meeting refuses guests
       // outright, even one the host admitted by mistake.
       if (meetingTeamId) {
         return NextResponse.json({
@@ -342,14 +348,14 @@ export async function POST(req: NextRequest) {
       ? `${room.slug}-breakout-${breakoutRoomNumber}`
       : room.slug;
 
-    // 4. Capacity check — counted against LIVE LiveKit participants, not
+    // 4. Capacity check, counted against LIVE LiveKit participants, not
     // stale database rows. The `participants` table never flipped rows to
     // LEFT, so a few drop/rejoins could fill all 8 slots with ghosts and
     // 403 the next real person. LiveKit's room service is the truth about
     // who is actually connected right now; the database count is only a
     // fallback when LiveKit cannot be reached.
     // Round 3: participant limit by HOST TIER (Free 50 / Pro 100 /
-    // Enterprise 250 — see src/utils/tiers.ts). The tier is the
+    // Enterprise 250, see src/utils/tiers.ts). The tier is the
     // authority: rooms created when the cap was 8 still carry
     // max_capacity 8, so the stored value must never shrink a tier's
     // limit. A missing profile (or a host with no account) resolves
@@ -358,7 +364,7 @@ export async function POST(req: NextRequest) {
     const hostUserId = meeting.admin_id || meeting.user_id;
     // Host tier: plan_tier when the column exists, is_premium as the
     // fallback. A bad column name returns an error object (not a
-    // throw), so a failed first read retries is_premium-only — a
+    // throw), so a failed first read retries is_premium-only, a
     // deploy before giinmeet_plan_tier.sql runs must never demote a
     // Pro host to Free.
     let hostIsPremium = false;
@@ -386,9 +392,9 @@ export async function POST(req: NextRequest) {
       } catch (e) { /* profile unreadable: Free tier */ }
     }
     const hostTier = tierForProfile({ is_premium: hostIsPremium, plan_tier: hostPlanTier });
-    // Superadmin portal: a suspended host's meetings are frozen — no
-    // token is minted for them or their guests. (A missing column —
-    // SQL not run yet — reads as not suspended.)
+    // Superadmin portal: a suspended host's meetings are frozen, no
+    // token is minted for them or their guests. (A missing column ,
+    // SQL not run yet, reads as not suspended.)
     if (hostIsSuspended) {
       return NextResponse.json({
         error: 'ACCOUNT_SUSPENDED',
@@ -397,7 +403,7 @@ export async function POST(req: NextRequest) {
     }
     // Superadmin portal: stored tier limits
     // (system_settings.tier_limits) override the built-in constants.
-    // Best-effort — a missing table or key means the built-in limits
+    // Best-effort, a missing table or key means the built-in limits
     // stand.
     let maxCapacity = TIER_LIMITS[hostTier];
     try {
@@ -481,7 +487,7 @@ export async function POST(req: NextRequest) {
     if (breakoutRoomNumber === null) {
       // NOTE: the participants.role CHECK only allows HOST/SPEAKER/GUEST, so
       // a co-host or moderator is stored as GUEST in this allocation row
-      // (the column is cosmetic — capacity and identity never read it).
+      // (the column is cosmetic, capacity and identity never read it).
       // Role-ness lives on the meeting_participants row and in the token
       // response's `role`. See giinmeet_cohost_moderator_roles.sql: after
       // Suku runs it, COHOST / MODERATOR are allowed in both role columns,
