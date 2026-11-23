@@ -11,7 +11,7 @@ import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
 import { DeviceSettingsModal } from './DeviceSettingsModal';
 import { getParticipantInitials } from '../utils/getParticipantInitials';
-import { sortHandRaiseQueue, nextLayoutMode, layoutModeLabel, layoutModeHint } from '../utils/phaseB';
+import { sortHandRaiseQueue, nextLayoutMode, layoutModeHint } from '../utils/phaseB';
 import { startBackgroundFx, type BackgroundFxMode } from '../utils/backgroundFx';
 import { getLocalBrandName } from '../utils/brand';
 import { recordRecentMeeting } from '../utils/recent';
@@ -88,7 +88,7 @@ export const displayRoleLabel = (role?: string | null): string => {
 };
 
 // Tile name suffix: only Host (and Co-host, who can moderate) get a role
-// shown on their video card. Everyone else is just their name — labelling
+// shown on their video card. Everyone else is just their name, labelling
 // every tile 'Participant' adds nothing.
 export const tileRoleSuffix = (role?: string | null): string => {
   const r = (role || '').toLowerCase().replace(/[-_\s]/g, '');
@@ -112,15 +112,15 @@ export const handRaiseSoundKey = (reason?: string | null): string => {
 
 // Fix Round 6 (audio): ONE microphone capture recipe for the whole
 // room. Every mic acquisition (first join, device switch, test) must
-// request the same processing — echo cancellation, noise suppression,
-// automatic gain control, mono voice capture — or a device switch
+// request the same processing, echo cancellation, noise suppression,
+// automatic gain control, mono voice capture, or a device switch
 // silently changes what the other side hears. `ideal` (never `exact`)
 // for channelCount, so a mono-only request can never fail a device.
 // Feature 17: the browser's noiseSuppression above is the baseline
 // and stays requested on every capture. When the RNNoise chain is
 // running it takes over the job, so the chain switches the browser
-// suppressor off on the live track (applyConstraints) — exactly one
-// suppressor in the path at a time — and switches it back on when
+// suppressor off on the live track (applyConstraints), exactly one
+// suppressor in the path at a time, and switches it back on when
 // the chain stops or cannot start.
 export const micAudioConstraints = (deviceId?: string): MediaTrackConstraints => {
   const c: MediaTrackConstraints = {
@@ -145,7 +145,7 @@ export interface ChatMessage {
 }
 
 // Keep a just-sent (optimistic) message visible until the database row
-// for it shows up, then let the real row replace it — so the same
+// for it shows up, then let the real row replace it, so the same
 // message never appears twice. Used by the chat poll, the post-send
 // reload, and the file-share reload alike.
 export const mergeChatWithPending = (dbMessages: ChatMessage[], prev: ChatMessage[]): ChatMessage[] => {
@@ -187,7 +187,7 @@ export const getWebRTCScreenshareConstraints = () => {
 // Phase A (6): breakout assignment persistence across reloads.
 // sessionStorage (per tab) holds one snapshot per meeting: our room,
 // when the session ends, how many rooms exist, and the full roster.
-// It is the only thing that survives a refresh — the assignments
+// It is the only thing that survives a refresh, the assignments
 // otherwise live only in client state and in broadcasts a rejoiner
 // has already missed. A snapshot whose time is up is dead and reads
 // as "no breakouts", so an old tab never rejoins a finished session.
@@ -225,6 +225,8 @@ export const clearStoredBreakout = (meetingId: string) => {
 };
 
 import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink, buildWhatsAppInviteUrl, isMeetingHostForUser, getSystemSettings } from '../supabaseClient';
+import { ShortLinkBox } from './ShortLinkBox';
+import { t, useUiLanguage } from '../i18n';
 
 // Helper functions defined outside the component to satisfy purity rules
 const generateRandomId = () => {
@@ -253,8 +255,72 @@ const agendaTimeToDate = (hhmm: string): Date | null => {
   return d;
 };
 
+// Phase C2a (4), agenda timer. Each agenda item carries a time: a
+// start and end wall-clock time, a duration in minutes, or both. The
+// chip below counts down next to the item, ticking once a second on
+// its own clock, so the room itself never re-renders for the timer.
+const agendaRemaining = (item: { startTime?: string; endTime?: string; durationMinutes?: number }, nowMs: number): { state: 'upcoming' | 'live' | 'done' | 'untimed'; ms: number } => {
+  if (item.startTime && item.endTime) {
+    const start = agendaTimeToDate(item.startTime);
+    const end = agendaTimeToDate(item.endTime);
+    if (!start || !end) return { state: 'untimed', ms: 0 };
+    if (nowMs >= end.getTime()) return { state: 'done', ms: 0 };
+    if (nowMs >= start.getTime()) return { state: 'live', ms: end.getTime() - nowMs };
+    return { state: 'upcoming', ms: start.getTime() - nowMs };
+  }
+  return { state: 'untimed', ms: 0 };
+};
+
+const formatCountdown = (ms: number): string => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
+const AgendaTimerChip: React.FC<{ item: { startTime?: string; endTime?: string; durationMinutes?: number } }> = ({ item }) => {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const { state, ms } = agendaRemaining(item, now);
+  if (state === 'done') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '0.15rem 0.5rem', borderRadius: '999px', backgroundColor: 'rgba(16,185,129,0.15)', color: '#6EE7B7', fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+        {t('agenda.timerDone')}
+      </span>
+    );
+  }
+  if (state === 'live') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', padding: '0.15rem 0.5rem', borderRadius: '999px', backgroundColor: 'rgba(250,189,2,0.2)', color: 'var(--color-accent)', fontSize: '0.7rem', fontWeight: 800, whiteSpace: 'nowrap' }}>
+        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', animation: 'pulse-ring 2s infinite' }} />
+        {formatCountdown(ms)} {t('agenda.timerLeft')}
+      </span>
+    );
+  }
+  if (state === 'upcoming') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '0.15rem 0.5rem', borderRadius: '999px', backgroundColor: 'rgba(255,255,255,0.08)', color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+        {t('agenda.timerStartsIn')} {formatCountdown(ms)}
+      </span>
+    );
+  }
+  if (item.durationMinutes) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '0.15rem 0.5rem', borderRadius: '999px', backgroundColor: 'rgba(255,255,255,0.08)', color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+        {item.durationMinutes} min
+      </span>
+    );
+  }
+  return null;
+};
+
 // Live state of a timed agenda item, evaluated at render time.
-const agendaItemStatus = (item: { startTime?: string; endTime?: string }): 'upcoming' | 'live' | 'done' => {
+const agendaItemStatus = (item: { startTime?: string; endTime?: string; durationMinutes?: number }): 'upcoming' | 'live' | 'done' => {
   if (!item.startTime || !item.endTime) return 'upcoming';
   const start = agendaTimeToDate(item.startTime);
   const end = agendaTimeToDate(item.endTime);
@@ -306,7 +372,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   // Fix Round 6: the raw mic capture vs the track actually published.
   // When Studio Voice is on, the published track is the WebAudio
-  // destination track and the raw capture feeds it — the two are
+  // destination track and the raw capture feeds it, the two are
   // different objects and must never be confused (stopping the raw
   // track silences the enhancement; stopping the destination track
   // leaves the raw capture running with the mic light on).
@@ -320,7 +386,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Feature 17: the RNNoise chain. The raw capture feeds the worklet;
   // the worklet's destination track is what gets published (or feeds
   // Studio Voice when that is on too). The chain owns its own 48 kHz
-  // AudioContext — RNNoise assumes 48 kHz — and its own worklet
+  // AudioContext, RNNoise assumes 48 kHz, and its own worklet
   // module + model bytes, both loaded once and cached.
   const noiseSuppressionChainRef = useRef<{
     rawTrack: MediaStreamTrack;
@@ -424,7 +490,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
   // In-room invite by email: no mail provider is configured, so this
   // opens the user's own mail app with the invitation pre-filled (a real
-  // mailto:) and copies the link — it never claims an email was sent.
+  // mailto:) and copies the link, it never claims an email was sent.
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteNote, setInviteNote] = useState('');
   const [showMeetingInfo, setShowMeetingInfo] = useState(false);
@@ -476,7 +542,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [selectedNewAdminId, setSelectedNewAdminId] = useState<string>('');
   const [leaveOption, setLeaveOption] = useState<'transfer' | 'end' | null>(null);
 
-  // Fix Round 6 (Phase 6) — end-for-all state. endedState renders the
+  // Fix Round 6 (Phase 6), end-for-all state. endedState renders the
   // "meeting ended" screen; endedRef makes entering it idempotent so
   // the broadcast, the Realtime watcher and the poll cannot end the
   // meeting twice or fight the reconnect logic.
@@ -492,7 +558,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isWaitingRoomEnabled, setIsWaitingRoomEnabled] = useState(true);
   const [isChatLocked, setIsChatLocked] = useState(false);
   // Superadmin portal flag (system_settings.guests_can_chat): when ON,
-  // guests without an account may send chat. Default OFF — guests can
+  // guests without an account may send chat. Default OFF, guests can
   // read chat but cannot send, exactly as before.
   const [guestsCanChat, setGuestsCanChat] = useState(false);
   useEffect(() => {
@@ -515,7 +581,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Q&A banner: every new question pops an animated ticker banner for
   // everyone in the room (the sender sees it too), auto-dismissed after
   // 30 seconds, closable, and tappable to open the Q&A Hub. The question
-  // itself still lives in the Hub — the banner is only the announcement.
+  // itself still lives in the Hub, the banner is only the announcement.
   const [qaBanner, setQaBanner] = useState<{ id: string; text: string; author: string } | null>(null);
   const qaBannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showQaBanner = (q: { id: string; text: string; author: string }) => {
@@ -524,7 +590,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     qaBannerTimeoutRef.current = setTimeout(() => setQaBanner(null), 30000);
   };
   // Re-announce: tapping a question in the Hub highlights it and shows it
-  // again as the banner for everyone — a reminder for unanswered
+  // again as the banner for everyone, a reminder for unanswered
   // questions. Receivers dedupe by id, so the question is never added
   // twice to anyone's list; the broadcast only re-shows the banner.
   const [highlightedQaId, setHighlightedQaId] = useState<string | null>(null);
@@ -542,13 +608,27 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // the agenda in the side panel; every participant receives it as a
   // draggable sticky note. It travels on the signalling channel, so a
   // participant who joins mid-meeting asks for it and the host answers.
-  // Timed agenda items: { id, text, startTime?, endTime? } — times are
+  // Timed agenda items: { id, text, startTime?, endTime? }, times are
   // optional 24h "HH:MM" strings set in the Agenda tab. Timed items
   // trigger start/end alerts for the admin only (see the alert effect
   // below); untimed items behave exactly as before.
-  const [agendaItems, setAgendaItems] = useState<{ id: string; text: string; startTime?: string; endTime?: string }[]>([]);
-  const agendaItemsRef = useRef<{ id: string; text: string; startTime?: string; endTime?: string }[]>([]);
+  const [agendaItems, setAgendaItems] = useState<{ id: string; text: string; startTime?: string; endTime?: string; durationMinutes?: number }[]>([]);
+  const agendaItemsRef = useRef<{ id: string; text: string; startTime?: string; endTime?: string; durationMinutes?: number }[]>([]);
   useEffect(() => { agendaItemsRef.current = agendaItems; }, [agendaItems]);
+  // Phase C2a (4): load the agenda the host saved for this meeting, so
+  // a late joiner and the prep brief see the same agenda the room has.
+  // Never clobbers a live agenda that arrived first.
+  useEffect(() => {
+    let active = true;
+    giinApi.getAgenda(meetingId).then((res: any) => {
+      if (active && res?.ok && Array.isArray(res.items) && res.items.length > 0 && agendaItemsRef.current.length === 0) {
+        setAgendaItems(res.items);
+        setAgendaNoteVisible(true);
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId]);
   const isAdminRef = useRef(isAdmin);
   useEffect(() => { isAdminRef.current = isAdmin; }, [isAdmin]);
   const [agendaNoteVisible, setAgendaNoteVisible] = useState(false);
@@ -557,12 +637,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [agendaInput, setAgendaInput] = useState('');
   const [newAgendaStart, setNewAgendaStart] = useState('');
   const [newAgendaEnd, setNewAgendaEnd] = useState('');
+  const [newAgendaDuration, setNewAgendaDuration] = useState('');
   const [isAgendaTabActive, setIsAgendaTabActive] = useState(false);
-  // Timed-agenda end popup (admin only) — shown when a timed item ends.
+  // Timed-agenda end popup (admin only), shown when a timed item ends.
   const [agendaEndPopup, setAgendaEndPopup] = useState<{ id: string; text: string; endLabel: string } | null>(null);
   const agendaAlertsFiredRef = useRef<Set<string>>(new Set());
   const roomJoinedAtRef = useRef<number>(Date.now());
-  // Video-feed watermark (Branding & Layout) — reads the saved mode /
+  // Video-feed watermark (Branding & Layout), reads the saved mode /
   // opacity / scale and re-renders live when Settings changes them.
   type WatermarkMode = 'branded' | 'watermark' | 'none';
   const [watermarkMode, setWatermarkMode] = useState<WatermarkMode>(() =>
@@ -587,8 +668,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     window.addEventListener('giin_watermark_changed', handleWatermarkChange);
     return () => window.removeEventListener('giin_watermark_changed', handleWatermarkChange);
   }, []);
-  const publishAgenda = (items: { id: string; text: string; startTime?: string; endTime?: string }[]) => {
+  const publishAgenda = (items: { id: string; text: string; startTime?: string; endTime?: string; durationMinutes?: number }[]) => {
     setAgendaItems(items);
+    // Phase C2a (4): persist the agenda for the prep brief and for
+    // late joiners. Fire and forget, the live broadcast is the source
+    // of truth in the room and must never wait on the server.
+    if (isAdminRef.current) {
+      void giinApi.saveAgenda(meetingId, items);
+    }
     if (items.length > 0) setAgendaNoteVisible(true);
     if (sigChannelRef.current) {
       sigChannelRef.current.send({ type: 'broadcast', event: 'agenda-update', payload: { items } });
@@ -599,18 +686,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!text) return;
     const start = newAgendaStart.trim();
     const end = newAgendaEnd.trim();
-    if ((start && !end) || (!start && end)) {
-      triggerToast('Set both a start and an end time for a timed item, or leave both blank.');
+    // Phase C2a (4): a time per item. Minutes alone set the length;
+    // start plus minutes fills in the end time; start plus end still
+    // works as before, and the minutes are stored with the item.
+    const duration = Math.max(0, Math.min(480, parseInt(newAgendaDuration.trim(), 10) || 0));
+    if ((start && !end && !duration) || (!start && end)) {
+      triggerToast('Set a start time and minutes, or a start and an end time, or leave the times blank.');
       return;
     }
     if (start && end && end <= start) {
       triggerToast('The end time must be after the start time.');
       return;
     }
-    publishAgenda([...agendaItemsRef.current, { id: generateRandomId(), text, ...(start && end ? { startTime: start, endTime: end } : {}) }]);
+    let finalEnd = end;
+    if (start && !finalEnd && duration > 0) {
+      const [h, m] = start.split(':').map(Number);
+      const total = h * 60 + m + duration;
+      finalEnd = `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+    }
+    publishAgenda([...agendaItemsRef.current, {
+      id: generateRandomId(),
+      text,
+      ...(start && finalEnd ? { startTime: start, endTime: finalEnd } : {}),
+      ...(duration > 0 ? { durationMinutes: duration } : {}),
+    }]);
     setAgendaInput('');
     setNewAgendaStart('');
     setNewAgendaEnd('');
+    setNewAgendaDuration('');
   };
   const handleRemoveAgendaItem = (id: string) => {
     publishAgenda(agendaItemsRef.current.filter(item => item.id !== id));
@@ -645,7 +748,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [showHandRaiseMenu, setShowHandRaiseMenu] = useState(false);
 
   // Sound effects (hand-raise chimes + soundboard) on/off for this device.
-  // Persisted locally; this is the "mute" for notification sounds — it
+  // Persisted locally; this is the "mute" for notification sounds, it
   // never touches the microphone or anyone else's audio. The long-lived
   // realtime handlers read it through the ref so they never see a stale
   // value.
@@ -656,7 +759,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Round 3: shared sounds. `pendingSoundsRef` holds sounds that
   // arrived while this device's AudioContext was suspended (iOS
-  // Safari outside a user gesture) — they flush on the next gesture
+  // Safari outside a user gesture), they flush on the next gesture
   // instead of scheduling against a frozen clock and staying silent.
   // `joinSoundSeenRef` + `joinedAtRef` power the shared join sound:
   // only a genuinely new joiner (first presence sight, after our own
@@ -687,7 +790,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // reconnect with a fresh token) when the token nears expiry.
   const [livekitReconnectNonce, setLivekitReconnectNonce] = useState(0);
   // Fix Round 8 (#7/#8): the room's reconnect state, kept quiet. The
-  // LiveKit SDK heals transient drops itself — the app must not tear
+  // LiveKit SDK heals transient drops itself, the app must not tear
   // the room down on every wobble (that was the tile flicker AND the
   // "client initiated disconnect" that stranded rooms on P2P). This
   // flag only drives the gentle "Reconnecting..." overlay on the tiles
@@ -701,10 +804,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // --- Fix Round 5: video stability -------------------------------------
   // LiveKit room membership, tracked SEPARATELY from media tracks. A
   // participant who publishes no tracks (no camera, no mic) never fires
-  // TrackSubscribed, so the old code — which treated "has a MediaStream"
-  // as "is connected" — left their tile on "Connecting..." forever. These
+  // TrackSubscribed, so the old code, which treated "has a MediaStream"
+  // as "is connected", left their tile on "Connecting..." forever. These
   // are keyed by LiveKit identity (for guests: the meeting_participants
-  // row id — see the token route).
+  // row id, see the token route).
   const [livekitParticipantIds, setLivekitParticipantIds] = useState<Set<string>>(new Set<string>());
   // Peers with a published LiveKit CAMERA track (even if it is not
   // subscribed / has no live frames yet). "Connecting..." is only honest
@@ -727,11 +830,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // connect effect (and so leaving can free our capacity slot).
   const livekitRoomSlugRef = useRef<string | null>(null);
   const livekitRoomIdRef = useRef<string | null>(null);
-  // Fix Round 6 (Phase 6) — enter the ended state. Disconnects the media
+  // Fix Round 6 (Phase 6), enter the ended state. Disconnects the media
   // (LiveKit room + P2P links) and shows the "meeting ended" screen.
   // Idempotent: the broadcast, the Realtime watcher and the poll can all
   // fire, but the meeting only ends once. Audio capture/publish code is
-  // untouched — this only disconnects the room and closes peer links;
+  // untouched, this only disconnects the room and closes peer links;
   // track stopping happens on unmount as before.
   // Shared media teardown: LiveKit disconnect + every P2P link closed.
   // Used both by the ended screen and the leave-call screen, so a
@@ -752,7 +855,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const enterEndedState = useCallback((reason: 'host-ended' | 'you-ended' | 'removed', detail?: string) => {
     if (endedRef.current) return;
     endedRef.current = true;
-    // Round 9 (9A): capture the meeting length and headcount now — the
+    // Round 9 (9A): capture the meeting length and headcount now, the
     // participant list is torn down with the room, so it cannot be read
     // later when the ended screen renders.
     const endedDurationSeconds = elapsedSecondsRef.current;
@@ -762,7 +865,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [disconnectMedia]);
 
   // Leave-call screen: leaving a call shows this screen instead of
-  // jumping straight to the dashboard — Rejoin, Go to dashboard, or a
+  // jumping straight to the dashboard, Rejoin, Go to dashboard, or a
   // 10-second countdown that goes to the dashboard on its own.
   const [leftCall, setLeftCall] = useState<{ title: string; durationSeconds: number } | null>(null);
   const [leftCallCountdown, setLeftCallCountdown] = useState(10);
@@ -845,12 +948,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Phase A (5): automatic quality step-down on a weak network.
   // LiveKit's adaptive streaming already turns REMOTE quality down,
-  // but nothing ever turned the LOCAL uplink down — on a weak link
+  // but nothing ever turned the LOCAL uplink down, on a weak link
   // the phone kept pushing 720p/1.5 Mbps and the call froze (the
   // 630 ms latency in the 2026-11-13 live test). When the connection
   // stays poor for a while, the watcher below republishes the camera
   // (and any screen share) at a low encoding; it steps back up when
-  // the connection recovers. Audio is never touched — voices stay first.
+  // the connection recovers. Audio is never touched, voices stay first.
   const [isLowVideoQuality, setIsLowVideoQuality] = useState(false);
   const videoQualityLevelRef = useRef<'high' | 'low'>('high');
 
@@ -858,18 +961,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // single place that talks to LiveKit about local tracks: the connect
   // effect, device switches, and screen share all go through here, so a
   // camera/mic/screen change can never silently leave LiveKit serving a
-  // stale (stopped) track. Safe to call when LiveKit is not connected —
+  // stale (stopped) track. Safe to call when LiveKit is not connected ,
   // it simply does nothing.
   const publishLiveKitTrack = async (track: MediaStreamTrack, source: any, attempt = 0) => {
     const room = livekitRoomRef.current;
     if (!room || !track) return;
     try {
       // A camera re-acquired while the room is reconnecting used to be
-      // silently dropped (early return, never retried) — the remote side
+      // silently dropped (early return, never retried), the remote side
       // then never saw video again until the next toggle. Retry a few
       // times instead: a screen share that never publishes is the
       // same failure, and the sharer cannot see that nobody sees it.
-      // Phase A (1): bounded — 5 tries, 2 s apart — then give up so a
+      // Phase A (1): bounded, 5 tries, 2 s apart, then give up so a
       // dead room cannot spin forever.
       if (room.state !== 'connected') {
         if (attempt < 5 && track.readyState === 'live') {
@@ -891,14 +994,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         await room.localParticipant.unpublishTrack(oldTrack);
         // The room runs with stopLocalTrackOnUnpublish:false (the Studio
         // Voice enhancer feeds off the raw mic track, so unpublishing it
-        // must not stop it — the SDK default would kill the chain).
-        // Stop a replaced track explicitly here instead — unless it is
+        // must not stop it, the SDK default would kill the chain).
+        // Stop a replaced track explicitly here instead, unless it is
         // the enhancer's live source, which the chain still needs.
         if (oldTrack !== enhancerChainRef.current?.rawTrack) {
           try { oldTrack.stop(); } catch (e) {}
         }
       }
-      // Fix Round 8 (#4): on a phone, cap the camera uplink — a phone
+      // Fix Round 8 (#4): on a phone, cap the camera uplink, a phone
       // camera can push 720p+ into a weak mobile connection and
       // saturate it, which reads as "very bad signal" for everyone.
       // Fix Round 8 (#9): publish an explicit 720p encoding with
@@ -909,12 +1012,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // saturate a weak link); LiveKit still adapts down gracefully.
       const isPhoneUplink = typeof window !== 'undefined' && window.innerWidth < 768;
       // Phase A (1): a screen share gets an explicit encoding and NO
-      // simulcast — with SDK defaults the room could stay on the lowest
+      // simulcast, with SDK defaults the room could stay on the lowest
       // simulcast layer (or none) and the share looked dead. Screen
       // content is one layer at full quality; the server still adapts
       // it down for weak receivers.
       // Phase A (5): the low level is what the automatic step-down
-      // publishes at — a small, steady uplink that keeps the call
+      // publishes at, a small, steady uplink that keeps the call
       // smooth instead of freezing on a weak network.
       const lowQuality = videoQualityLevelRef.current === 'low';
       const publishOptions: any = source === Track.Source.Camera
@@ -952,13 +1055,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Unpublish first: publishLiveKitTrack early-returns for a track
   // that is already published, so only an unpublish + publish changes
   // the encoding. stopLocalTrackOnUnpublish is false, so the tracks
-  // survive the unpublish. Audio is never touched — voices stay first.
+  // survive the unpublish. Audio is never touched, voices stay first.
   const applyLocalVideoQuality = async (level: 'high' | 'low') => {
     if (videoQualityLevelRef.current === level) return;
     videoQualityLevelRef.current = level;
     setIsLowVideoQuality(level === 'low');
     // Phase B (21): when the connection forces a step-down, offer
-    // low-bandwidth mode — it is the bigger saving (camera off).
+    // low-bandwidth mode, it is the bigger saving (camera off).
     if (level === 'low' && !lowBandwidthRef.current) setShowLowBandwidthSuggestion(true);
     if (level === 'high') setShowLowBandwidthSuggestion(false);
     const room = livekitRoomRef.current;
@@ -983,11 +1086,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Fix Round 6: requesting echo cancellation / noise suppression /
-  // gain control is not the same as getting it — a browser may silently
+  // gain control is not the same as getting it, a browser may silently
   // ignore the request (notably on phones). Read the CAPTURE track's
   // real settings after every acquisition and say so, once per session,
   // when processing is actually off: the honest fix then is headphones,
-  // not another toggle. Only an explicit `false` warns — `undefined`
+  // not another toggle. Only an explicit `false` warns, `undefined`
   // means the browser does not report it, not that it is off.
   const verifyMicProcessing = (track: MediaStreamTrack) => {
     try {
@@ -1000,16 +1103,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       console.warn('[Audio] Browser did not apply mic processing:', missing, s);
       if (!micProcessingWarnedRef.current) {
         micProcessingWarnedRef.current = true;
-        triggerToast(`Your browser could not enable ${missing.join(' and ')} on this microphone — use headphones to keep your speakers out of the mic.`);
+        triggerToast(`Your browser could not enable ${missing.join(' and ')} on this microphone, use headphones to keep your speakers out of the mic.`);
       }
-    } catch (e) { /* settings unreadable — capture itself still works */ }
+    } catch (e) { /* settings unreadable, capture itself still works */ }
   };
 
   // Fix Round 6: publish ONE mic track everywhere it must go (LiveKit
   // + every P2P sender + local stream + speaking detector). The single
   // funnel for mic-track swaps, so a device switch, a Studio Voice
   // toggle and the first acquisition cannot diverge into a different
-  // track per engine — which is how the old toggle changed nothing on
+  // track per engine, which is how the old toggle changed nothing on
   // LiveKit while swapping the P2P senders.
   const publishMicTrack = async (track: MediaStreamTrack) => {
     localAudioTrackRef.current = track;
@@ -1054,17 +1157,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [breakoutRoomsCount, setBreakoutRoomsCount] = useState(storedBreakout?.roomsCount ?? 2);
   const [breakoutDurationMinutes, setBreakoutDurationMinutes] = useState(5);
 
-  // Phase 3 (Feature 1) — host room management. Assignments are the
+  // Phase 3 (Feature 1), host room management. Assignments are the
   // live record of who is in which room (round-robin at start, then
   // updated by every host move, and synced to every moderator's panel
   // by the start / move receivers on the meeting-events channel). They
   // are NOT persisted anywhere: they live in client state and travel
   // over the meeting-events channel, so this feature needs no database
   // change. The roster itself is the admitted-participants list
-  // (Supabase, polled) plus these assignments — never LiveKit
+  // (Supabase, polled) plus these assignments, never LiveKit
   // presence, which only ever sees the room you are in.
-  // Phase A (6): the assignments ARE persisted now — in the per-tab
-  // snapshot above (readStoredBreakout) — so a refresh restores them
+  // Phase A (6): the assignments ARE persisted now, in the per-tab
+  // snapshot above (readStoredBreakout), so a refresh restores them
   // alongside our own room. Still no database change.
   const [breakoutAssignments, setBreakoutAssignments] = useState<{ [peerKey: string]: number }>(() => storedBreakout?.assignments ?? {});
   // Host broadcast draft + the last broadcast banner every client shows.
@@ -1088,7 +1191,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const breakoutRoomsCountRef = useRef(breakoutRoomsCount);
   useEffect(() => { breakoutRoomsCountRef.current = breakoutRoomsCount; }, [breakoutRoomsCount]);
   // Phase A (6): last time this client answered a breakout-state
-  // request — one answer per 10 s, so a roomful of reloads cannot
+  // request, one answer per 10 s, so a roomful of reloads cannot
   // storm the breakout route.
   const lastBreakoutStateAnswerRef = useRef(0);
 
@@ -1098,13 +1201,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Round 9 (9A): ref mirror of the timer, so enterEndedState (a
   // useCallback with empty deps) can read the meeting length at end.
   const elapsedSecondsRef = useRef(0);
-  const [layoutMode, setLayoutMode] = useState<'grid' | 'speaker' | 'side'>('grid');
+  const [layoutMode, setLayoutMode] = useState<'grid' | 'speaker' | 'side' | 'focus'>('grid');
+  // Phase C2a (3): re-render when the UI language changes.
+  useUiLanguage();
   const [pinnedKey, setPinnedKey] = useState<string | null>(null);
-  // Phase B (14): host spotlight — the person the host spotlights for
+  // Phase B (14): host spotlight, the person the host spotlights for
   // EVERYONE in the room (synced by broadcast). Local pinning
   // (pinnedKey) stays local: it only changes what YOU watch.
   const [spotlightKey, setSpotlightKey] = useState<string | null>(null);
-  // Phase B (21): low-bandwidth mode — audio-first for weak connections.
+  // Phase B (21): low-bandwidth mode, audio-first for weak connections.
   const [lowBandwidth, setLowBandwidth] = useState(false);
   const lowBandwidthRef = useRef(false);
   const lowBandwidthVideoWasOnRef = useRef(true);
@@ -1146,7 +1251,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [userVotes, setUserVotes] = useState<{ [pollId: string]: number }>({});
   const [newPollQuestion, setNewPollQuestion] = useState('');
   const [newPollOptions, setNewPollOptions] = useState(['', '']);
-  // Phase 1 — quiz mode: the host marks one option as the correct answer.
+  // Phase 1, quiz mode: the host marks one option as the correct answer.
   // Scoring is DERIVED from the votes (never stored separately): every
   // client runs the same vote logic, so all clients agree on the
   // leaderboard without a separate broadcast.
@@ -1158,7 +1263,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Ref mirror of the Studio Voice flag: mic swaps close over the flag
   // and must re-apply the chain, not silently drop it.
   useEffect(() => { isAudioEnhancedRef.current = isAudioEnhanced; }, [isAudioEnhanced]);
-  // Feature 17: AI noise cleaning (RNNoise) — on by default, per
+  // Feature 17: AI noise cleaning (RNNoise), on by default, per
   // participant: each person controls their own mic cleaning, and the
   // choice is remembered in this browser (localStorage, 'on'/'off').
   const [isNoiseSuppressionOn, setIsNoiseSuppressionOn] = useState<boolean>(() => readNoiseSuppressionPreference());
@@ -1169,14 +1274,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => { isNoiseSuppressionOnRef.current = isNoiseSuppressionOn; }, [isNoiseSuppressionOn]);
   // idle: off, or on but no mic yet. loading: the model is starting.
   // active: the denoised track is what others hear. unavailable: the
-  // model could not start on this device — the normal mic (with the
+  // model could not start on this device, the normal mic (with the
   // browser's own noise reduction) carries on, and the panel says so.
   const [noiseSuppressionStatus, setNoiseSuppressionStatus] = useState<NoiseSuppressionStatus>('idle');
   const [isStudioLightEnabled, setIsStudioLightEnabled] = useState(false);
   
   const [isMeetingLocked, setIsMeetingLocked] = useState(false);
   const [isScreenShareBlockedForGuests, setIsScreenShareBlockedForGuests] = useState(false);
-  // Fix Round 8 (#3): screen-share feedback state — a click that opens
+  // Fix Round 8 (#3): screen-share feedback state, a click that opens
   // nothing must never look dead again.
   const [screenShareStarting, setScreenShareStarting] = useState(false);
   const [screenShareError, setScreenShareError] = useState<string | null>(null);
@@ -1237,7 +1342,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [myKey] = useState(() => currentUser?.id || crypto.randomUUID());
   // Our own meeting_participants row id (set when we joined via the
   // waiting room / host creation flow). Guests have user_id NULL in the
-  // database, so this row id — not myKey — is the only reliable way to
+  // database, so this row id, not myKey, is the only reliable way to
   // identify our own row (e.g. when the host kicks us).
   const [myParticipantRowId] = useState<string | null>(() => {
     try { return localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { return null; }
@@ -1256,11 +1361,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     livekitRole === 'MODERATOR' ||
     moderatorKeys.has(myKey) ||
     (myParticipantRowId ? moderatorKeys.has(myParticipantRowId) : false);
-  // Phase 3 (Feature 2) — role split:
+  // Phase 3 (Feature 2), role split:
   //   - canModerate (host, co-host, moderator): mute, remove, manage
   //     breakout rooms, mark Q&A answered.
   //   - canAdmit (host, co-host only): admit / decline from the waiting
-  //     room. A moderator cannot admit people — the admit route enforces
+  //     room. A moderator cannot admit people, the admit route enforces
   //     it server-side (it matches role 'CoHost' exactly).
   //   - Ending the meeting, locking it, transferring the host role and
   //     changing room settings stay host-only.
@@ -1344,7 +1449,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Phase A (3): this notice is ONLY for genuine join failures (room
   // full, not admitted, meeting ended/locked, link expired, breakout
   // join failure). It is never set for a transient drop or a
-  // peer-to-peer fallback — reconnects happen quietly in the
+  // peer-to-peer fallback, reconnects happen quietly in the
   // background, and the only visible sign is the small toolbar dot.
   const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
   const triggerToast = (msg: string) => {
@@ -1354,11 +1459,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }, 4000);
   };
 
-  // Timed-agenda start/end alerts — ADMIN ONLY. Every 20s the admin's
+  // Timed-agenda start/end alerts, ADMIN ONLY. Every 20s the admin's
   // client checks the timed agenda items: when an item STARTS it shows
   // a small toast ("Now on: ..."); when an item ENDS it shows a toast
   // AND the short end popup ("That part has ended"), so the admin
-  // knows to move to the next part. Nobody else sees either one — the
+  // knows to move to the next part. Nobody else sees either one, the
   // check runs only when isAdmin, and the toast/popup are local state.
   // Fired keys include the time, so editing an item's times re-arms
   // it. An item that already ended BEFORE the admin joined this
@@ -1372,7 +1477,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const start = agendaTimeToDate(item.startTime);
         const end = agendaTimeToDate(item.endTime);
         if (!start || !end) continue;
-        const range = `${formatAgendaTime(item.startTime)} – ${formatAgendaTime(item.endTime)}`;
+        const range = `${formatAgendaTime(item.startTime)} to ${formatAgendaTime(item.endTime)}`;
         const startKey = `start:${item.id}:${item.startTime}`;
         const endKey = `end:${item.id}:${item.endTime}`;
         if (!agendaAlertsFiredRef.current.has(startKey) && now >= start.getTime() && now < end.getTime()) {
@@ -1381,7 +1486,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
         if (!agendaAlertsFiredRef.current.has(endKey) && now >= end.getTime() && end.getTime() >= roomJoinedAtRef.current) {
           agendaAlertsFiredRef.current.add(endKey);
-          triggerToast(`✅ "${item.text}" has ended — time to move to the next part.`);
+          triggerToast(`✅ "${item.text}" has ended, time to move to the next part.`);
           setAgendaEndPopup({ id: item.id, text: item.text, endLabel: formatAgendaTime(item.endTime) });
         }
       }
@@ -1458,7 +1563,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // connect effect, which fetches a fresh token, so a fixed server is
   // picked up without rejoining the meeting.
   const handleRetryLiveKit = () => {
-    // Fix Round 8 (#8): silent retry — no toast. The toolbar dot
+    // Fix Round 8 (#8): silent retry, no toast. The toolbar dot
     // shows whether the room is back on the video server.
     setConnectionNotice(null);
     setEngineType('LIVEKIT');
@@ -1558,7 +1663,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Attach the liveness handler to a freshly acquired local camera track.
   // An ended camera used to stay "on" forever (enabling an ended track
-  // does nothing) — now it triggers a reacquisition instead of a black tile.
+  // does nothing), now it triggers a reacquisition instead of a black tile.
   const attachLocalCameraTrack = (track: MediaStreamTrack) => {
     localVideoTrackRef.current = track;
     setLocalCameraLive(track.readyState === 'live');
@@ -1584,7 +1689,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (guard.attempts >= 3) {
       setIsVideoOn(false);
       setLocalCameraRecovering(false);
-      triggerToast('Your camera stopped and could not be restarted — you are showing as camera off. Turn your camera on again to retry.');
+      triggerToast('Your camera stopped and could not be restarted, you are showing as camera off. Turn your camera on again to retry.');
       return;
     }
     guard.inFlight = true;
@@ -1632,7 +1737,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // direct-call view alike. A tile shows live video ONLY when a live
   // video track is actually flowing; "Connecting..." ONLY while a camera
   // publication exists but its frames have not arrived yet (or the P2P
-  // handshake is still in flight). Everyone else is "Camera Off" —
+  // handshake is still in flight). Everyone else is "Camera Off" ,
   // including a participant who never publishes any track at all.
   const getRemoteTileState = (peerKey: string) => {
     const livekitStream = livekitRemoteStreams[peerKey];
@@ -1661,7 +1766,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const connectToLiveKit = async () => {
       try {
         // Find (or create) the LiveKit room for this meeting, then request a
-        // token for that room. The token route looks the room up by its slug —
+        // token for that room. The token route looks the room up by its slug ,
         // a meeting ID on its own is not a room.
         let videoRoom = await ensureMeetingRoom(meetingId, meetingTitle, currentUser?.id);
         if (!videoRoom) {
@@ -1679,13 +1784,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // (verified server-side) plus the admitted participant row id.
         // LiveKit-native breakouts: a breakout room is its own LiveKit
         // room, `<main-slug>-breakout-<n>`, joined with a token minted for
-        // that room — the token route verifies admission against the main
+        // that room, the token route verifies admission against the main
         // meeting and mints for the breakout slug. This effect re-runs on
         // the breakoutRoom change, so entering a breakout disconnects the
         // main room (cleanup below) and joins the breakout room, and
         // returning rejoins the main room. Only one LiveKit room is ever
         // held at a time, so voices and video from other rooms never leak
-        // in — and every room's media goes through the LiveKit server.
+        // in, and every room's media goes through the LiveKit server.
         const targetSlug = breakoutRoom !== null
           ? `${videoRoom.slug}-breakout-${breakoutRoom}`
           : videoRoom.slug;
@@ -1698,13 +1803,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (data.error === 'MAX_CAPACITY_REACHED') {
           // Honest stop, NOT a silent P2P downgrade: a full room must not
           // pretend to work as a 5-way peer-to-peer mesh. The user stays
-          // out of the media path with a clear message and a retry — the
+          // out of the media path with a clear message and a retry, the
           // capacity count is live now, so a slot frees as soon as
           // someone really leaves. The limit comes from the server
           // (host tier: Free 50 / Pro 100 / Enterprise 250), never a
           // hardcoded number.
           if (typeof data.maxCapacity === 'number') setRoomCapacity(data.maxCapacity);
-          setConnectionNotice(data.message || 'This meeting room is full. You cannot join the video yet — wait for someone to leave, then press "Retry".');
+          setConnectionNotice(data.message || 'This meeting room is full. You cannot join the video yet, wait for someone to leave, then press "Retry".');
 
           return;
         }
@@ -1728,7 +1833,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
         if (data.error === 'LINK_EXPIRED') {
           // Round 9 (9C): the link's time is up. Plain words, no jargon,
-          // no toast — the centred card is the message.
+          // no toast, the centred card is the message.
           setConnectionNotice('This meeting link has expired. Ask the host for a new link.');
           return;
         }
@@ -1745,7 +1850,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
 
         // Fix Round 6: stopLocalTrackOnUnpublish:false. The SDK default
-        // (true) stops a track the moment it is unpublished — which
+        // (true) stops a track the moment it is unpublished, which
         // would stop the raw mic track when Studio Voice publishes its
         // filtered track in its place, silencing the enhancer's own
         // input. Track lifecycle is explicit in this file instead
@@ -1763,18 +1868,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // auto-reconnects transient drops, but a disconnect it cannot heal
         // (token expiry, server gone) used to leave stale tiles with no
         // message and no retry. Now we say so, re-mint a fresh token and
-        // reconnect — the user sees exactly what is happening.
+        // reconnect, the user sees exactly what is happening.
         room.on(RoomEvent.Disconnected, () => {
           if (!active) return;
           // Fix Round 8 (#7/#8): a disconnect is usually transient and
-          // the SDK heals it itself — the app must NOT tear the room
+          // the SDK heals it itself, the app must NOT tear the room
           // down here. The old code bumped the reconnect nonce on every
           // wobble, which disconnected the room itself ("client
           // initiated disconnect"), cleared every tile, and looped the
           // room into a permanent P2P fallback. Now: stay quiet, show
           // only the gentle tile overlay, and let the SDK reconnect.
           // Only if the room is STILL down after a few seconds do we
-          // force one clean reconnect — and never for an ended meeting.
+          // force one clean reconnect, and never for an ended meeting.
           void (async () => {
             try {
               const { data } = await giinApi.getMeetingDetails(meetingId);
@@ -1795,7 +1900,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
         // Fix Round 8 (#4): live connection quality for the local
         // participant. A weak mobile link used to look like a broken
-        // app — now the toolbar shows the signal (excellent / good /
+        // app, now the toolbar shows the signal (excellent / good /
         // poor / lost) so a bad connection is visible, not mysterious.
         room.on(RoomEvent.ConnectionQualityChanged, (quality: any, participant: any) => {
           if (!active) return;
@@ -1803,7 +1908,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         });
 
         // Fix Round 8 (#7): the SDK tells us when it is healing a drop
-        // and when it has healed it. The tile overlay follows these —
+        // and when it has healed it. The tile overlay follows these ,
         // never a banner, never a toast.
         room.on(RoomEvent.Reconnecting, () => {
           if (!active) return;
@@ -1821,7 +1926,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // (even before it is subscribed); TrackMuted/Unmuted tell us
         // whose camera is muted at the source. Without these, a
         // participant publishing nothing looked identical to one whose
-        // video was still on its way — hence the eternal "Connecting...".
+        // video was still on its way, hence the eternal "Connecting...".
         room.on(RoomEvent.ParticipantConnected, (participant: any) => {
           if (!active) return;
           markLivekitParticipant(participant.identity, true);
@@ -1854,10 +1959,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           noteLivekitPublication(publication, participant.identity);
           // A published camera that never got subscribed (adaptive
           // streaming / dynacast stall, or a subscribe that raced the
-          // join) leaves the tile waiting forever — ask for it explicitly.
+          // join) leaves the tile waiting forever, ask for it explicitly.
           // Phase A (1): the same stall hits screen shares, and a share
           // that is published but never subscribed is exactly the
-          // "screen share is dead" report — subscribe those too.
+          // "screen share is dead" report, subscribe those too.
           if (publication.kind === 'video' && (publication.source === Track.Source.Camera || publication.source === Track.Source.ScreenShare) && !publication.isSubscribed) {
             try { publication.setSubscribed(true); } catch (e) { /* auto-subscribe will retry */ }
           }
@@ -1891,7 +1996,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           const peerKey = participant.identity;
           if (track.kind !== 'video' && track.kind !== 'audio') return;
           // Record the publication (camera or not) so the tile knows
-          // whether video is actually on its way — see noteLivekitPublication.
+          // whether video is actually on its way, see noteLivekitPublication.
           noteLivekitPublication(publication, peerKey);
           // A screen-share track is a separate stream from the person's
           // camera. Mixing it into the camera MediaStream would make the
@@ -1968,7 +2073,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           p.trackPublications.forEach((pub: any) => {
             noteLivekitPublication(pub, p.identity);
             // Phase A (1): a screen share published BEFORE we joined
-            // needs the same explicit subscribe as the camera above —
+            // needs the same explicit subscribe as the camera above ,
             // without it, joining mid-share can leave the share
             // published but never delivered to us.
             if (pub?.kind === 'video' && pub?.source === Track.Source.ScreenShare && !pub.isSubscribed) {
@@ -1993,7 +2098,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       } catch (err: any) {
         // Fix Round 8 (#7/#8 + Evidence 1): a disconnect caused by our
         // own teardown ("Client initiated disconnect") or by an
-        // unmounted effect must never flip the room to P2P — that was
+        // unmounted effect must never flip the room to P2P, that was
         // the silent permanent downgrade. Only a real server failure
         // falls back, quietly: the P2P mesh keeps the call alive, the
         // toolbar dot shows the state, and the room retries LiveKit on
@@ -2006,10 +2111,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // Breakout rooms are LiveKit-native: there is no P2P mesh to
           // fall back to inside a breakout room, and a silent downgrade
           // would bring back the quality drop this redesign removed.
-          // Say so honestly instead — the notice card offers "Retry
+          // Say so honestly instead, the notice card offers "Retry
           // video server", and the host can end the breakouts to bring
           // everyone back to the main room.
-          setConnectionNotice(`Could not join Breakout Room ${breakoutRoom}. Check your connection, then press "Retry" — or ask the host to end the breakout rooms to return to the main room.`);
+          setConnectionNotice(`Could not join Breakout Room ${breakoutRoom}. Check your connection, then press "Retry", or ask the host to end the breakout rooms to return to the main room.`);
           return;
         }
         setEngineType('P2P');
@@ -2025,7 +2130,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         livekitRoomRef.current = null;
       }
       // The room is gone, so its tracks are ended. Clear them now so the
-      // tiles fall back to avatars instead of holding a dead track — and so
+      // tiles fall back to avatars instead of holding a dead track, and so
       // a token-refresh reconnect does not mix ended tracks with fresh ones.
       setLivekitRemoteStreams({});
       setRemoteScreenStreams({});
@@ -2041,7 +2146,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // `livekitReconnectNonce` IS a dependency: bumping it is how the token
     // refresh forces a clean disconnect + reconnect with a fresh token.
   // Fix Round 8 (#2): depend on the user ID, not the whole user
-  // object — the session restore replaces the object identity after
+  // object, the session restore replaces the object identity after
   // mount, and the old dependency tore the LiveKit room down and
   // reconnected it on every reload.
   // `breakoutRoom` IS a dependency: switching rooms is a clean
@@ -2049,9 +2154,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [isMediaInitialized, engineType, meetingId, myKey, currentUser?.id, isAdmin, livekitReconnectNonce, breakoutRoom]);
 
   // Fix Round 6: when the engine becomes LiveKit, the P2P mesh is
-  // redundant — tear it down (see teardownP2PMesh). The mesh rebuilds
+  // redundant, tear it down (see teardownP2PMesh). The mesh rebuilds
   // itself from presence broadcasts if the engine ever falls back to
-  // P2P (LiveKit failure in the main room only — never inside a
+  // P2P (LiveKit failure in the main room only, never inside a
   // breakout room), so this cannot strand a call.
   useEffect(() => {
     if (engineType !== 'LIVEKIT') return;
@@ -2060,7 +2165,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [engineType]);
 
   // Token expiry: refresh EARLY and WITHOUT dropping media. The token now
-  // lasts 6 hours, but the refresh still fires at 15 minutes remaining —
+  // lasts 6 hours, but the refresh still fires at 15 minutes remaining ,
   // not in a 60-second window a backgrounded tab can miss. It uses
   // room.updateToken(), so the call does not disconnect and reconnect (no
   // video/audio drop for anyone near 1h59m). Only if updateToken fails do
@@ -2161,7 +2266,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     return () => clearInterval(id);
   }, [isMediaInitialized]);
 
-  // Phase C1 (26) — recent meetings: record this join on this device so
+  // Phase C1 (26), recent meetings: record this join on this device so
   // the dashboard can offer one-tap rejoin. Local only, no passcode.
   useEffect(() => {
     recordRecentMeeting({
@@ -2178,7 +2283,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // participant list: a key that appears gets a joinedAt, a key that
   // disappears gets a leftAt. The host can view it from the dashboard
   // after the meeting (same browser). It is a record of this browser's
-  // view of the room, not a server log — the labels say so.
+  // view of the room, not a server log, the labels say so.
   useEffect(() => {
     try {
       const key = `giin_attendance_${meetingId}`;
@@ -2192,7 +2297,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (!map[k]) map[k] = { name: p.name, joinedAt: now, leftAt: null };
         else map[k].name = p.name;
       });
-      // Round 9 (9D): the host's own attendance — the participants list
+      // Round 9 (9D): the host's own attendance, the participants list
       // excludes self, so without this the host never appears in their
       // own attendance report.
       present.add(myKey);
@@ -2233,17 +2338,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // allocation row LEFT so the room's capacity slot is freed. Without the
   // LEFT mark, every drop/rejoin left a JOINED row behind and the room
   // filled with ghosts (the capacity leak). Best-effort: the tab may be
-  // closing, so the request may not complete — the host can still kick a
+  // closing, so the request may not complete, the host can still kick a
   // stale row, and the token route now counts live LiveKit participants
   // instead of stale rows. This effect has EMPTY deps on purpose: it runs
   // its cleanup only on unmount. The LiveKit connect effect's cleanup also
   // runs on engine switches and token refreshes, so the row must NOT be
-  // removed there — a token refresh is not a leave.
+  // removed there, a token refresh is not a leave.
   useEffect(() => {
     const markLeft = () => {
       try {
         const rowId = localStorage.getItem(`giin_participant_row_${meetingId}`);
-        // Round 9 (9A/9B): leave server-side — the row becomes 'Left'
+        // Round 9 (9A/9B): leave server-side, the row becomes 'Left'
         // (it persists for rejoin) and the meeting completes when the
         // last person leaves. The old removeParticipant deleted the row.
         void giinApi.leaveMeeting(meetingId, rowId || undefined);
@@ -2277,7 +2382,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Keyboard shortcuts. Deliberately no dependency array: the listener is
   // re-registered every render so the handlers always see fresh state
-  // (toggleMute/toggleVideo read state directly). 'L' is NOT bound — a
+  // (toggleMute/toggleVideo read state directly). 'L' is NOT bound, a
   // stray keypress must never end the meeting; leaving is click-only.
   // Ignored while typing in an input, textarea, select or editable area.
   useEffect(() => {
@@ -2349,7 +2454,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         dyingTrack.stop();
       }
       // Fix Round 6: when Studio Voice is on, localAudioTrackRef is the
-      // filtered destination track — stopping it alone leaves the raw
+      // filtered destination track, stopping it alone leaves the raw
       // capture feeding the chain with the mic light on. Tear the
       // chain down (stops the destination track) and stop the raw
       // capture too. Also end every speaking-indicator loop.
@@ -2371,7 +2476,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Round 3: one send path for shared sound/state events. The
   // signalling effect re-subscribes whenever `stream` changes, so the
-  // channel ref can be briefly null mid-teardown — retry once instead
+  // channel ref can be briefly null mid-teardown, retry once instead
   // of silently dropping the event.
   const broadcastEvent = (event: string, payload: any) => {
     if (sigChannelRef.current) {
@@ -2428,7 +2533,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     broadcastEvent('clear-all-hands', {});
   };
 
-  // Phase B (14): host spotlight — one speaker for everyone. The host's
+  // Phase B (14): host spotlight, one speaker for everyone. The host's
   // choice travels on the same broadcast channel as hand raises, so
   // every client (main room and breakout rooms) sees it.
   const setHostSpotlight = (peerKey: string | null) => {
@@ -2443,7 +2548,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     broadcastEvent('spotlight-set', { peerKey });
   };
 
-  // Phase B (12): call on the next person in the hand-raise queue —
+  // Phase B (12): call on the next person in the hand-raise queue ,
   // oldest raised hand first. Their hand comes down and the host
   // spotlight moves to them, so the room sees who has the floor.
   const callOnNext = () => {
@@ -2533,12 +2638,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           }
         });
 
-        // Publish the new camera to LiveKit as well — otherwise LiveKit
+        // Publish the new camera to LiveKit as well, otherwise LiveKit
         // viewers keep receiving the old (now stopped) track.
         await publishLiveKitTrack(videoTrack, Track.Source.Camera);
       } catch (err) {
         console.error('Failed to change camera:', err);
-        triggerToast('Could not switch camera — keeping the current one.');
+        triggerToast('Could not switch camera, keeping the current one.');
       }
     }
   };
@@ -2560,7 +2665,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // raw track while the chain is live would silence the new chain,
       // and leaving the old chain up leaks a second live mic.
       teardownEnhancer();
-      // Feature 17: same for the noise-cleaning chain — its
+      // Feature 17: same for the noise-cleaning chain, its
       // destination track is the published one when it is running.
       // The old raw track is dying, so no need to hand the browser
       // suppressor back for it (the rebuild below owns the new
@@ -2577,12 +2682,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // Studio Voice and Noise Cleaning stay as the user set them: a
       // mic switch must not silently drop either (the old code
       // published the raw track while the toggle still showed ON).
-      // One rebuild applies both, in order — RNNoise first, then the
+      // One rebuild applies both, in order, RNNoise first, then the
       // Studio Voice filters on the denoised audio.
       await rebuildPublishedMicTrack();
     } catch (err) {
       console.error('Failed to change microphone:', err);
-      triggerToast('Could not switch microphone — keeping the current one.');
+      triggerToast('Could not switch microphone, keeping the current one.');
     }
   };
 
@@ -2604,7 +2709,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const connectionQualityRef = useRef('unknown');
   useEffect(() => { connectionQualityRef.current = connectionQuality; }, [connectionQuality]);
   // Phase A (5): watch the connection and step the local video
-  // quality down/up automatically. A momentary dip does nothing —
+  // quality down/up automatically. A momentary dip does nothing ,
   // the level only changes after 10 s of sustained poor (or good)
   // quality, checked every 5 s, so it never flaps.
   useEffect(() => {
@@ -2689,7 +2794,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Safety net: a track was just added/removed on this peer. If no offer
   // went out within ~2.5s (missed onnegotiationneeded), renegotiate
   // explicitly. `changedAt` is the time the track change happened.
-  // Phase A (1): one shot was not enough — if the connection was
+  // Phase A (1): one shot was not enough, if the connection was
   // mid-negotiation when the screen track was added, the single check
   // found it non-stable and gave up, so the remote side never received
   // the screen. Retry a few times over ~8 s instead.
@@ -2801,7 +2906,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Clean up a single peer connection
-  // Phase A (4): total — this runs from broadcast handlers and the
+  // Phase A (4): total, this runs from broadcast handlers and the
   // kick button, and a throw there used to be able to wedge the room
   // (the 2026-11-13 host-tab crash on kick is unconfirmed, but a
   // peer-cleanup throw is the one place in that path with no guard).
@@ -2846,7 +2951,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Fix Round 6: close ONE P2P link without touching the tile. Unlike
-  // cleanupPeer (the peer left), the participant is still in the room —
+  // cleanupPeer (the peer left), the participant is still in the room ,
   // only the redundant transport goes away (their voice stays on
   // LiveKit). A P2P screen track is dropped too, unless it is also a
   // LiveKit screen track: the two must never share one MediaStream, or
@@ -2896,12 +3001,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Fix Round 6: one engine carries each voice. While LiveKit is the
   // engine, a P2P link to the same peer sends that peer's microphone
-  // (and camera) a second time — doubling uplink load and jitter on
+  // (and camera) a second time, doubling uplink load and jitter on
   // constrained connections, for a stream nobody plays (tiles prefer
   // LiveKit). Close the redundant links. Links to peers whose own
   // engine is P2P are KEPT: they cannot reach the SFU, so the mesh is
   // their only path to us. Peers whose engine is not known yet are
-  // treated as LiveKit — their presence broadcast (every 6 s) corrects
+  // treated as LiveKit, their presence broadcast (every 6 s) corrects
   // the record if they are really P2P, and the mesh rebuilds.
   const teardownP2PMesh = () => {
     Object.keys(pcsRef.current).forEach(peerKey => {
@@ -2911,7 +3016,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Collaborative Whiteboard Drawing Functions
-  // Phase B (10): AI summary — generated from the transcript by the
+  // Phase B (10): AI summary, generated from the transcript by the
   // configured LLM (POST /api/meetings/summary). No key configured means
   // no summary is generated and the panel says so plainly; a missing or
   // empty transcript is the same. Never a fake pre-written summary.
@@ -2938,11 +3043,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setSummaryStatus('done');
       } else {
         setSummaryStatus('unavailable');
-        setSummaryNote(result?.message || 'AI summaries need setup — no summary provider key is configured.');
+        setSummaryNote(result?.message || 'AI summaries need setup, no summary provider key is configured.');
       }
     } catch (e: any) {
       setSummaryStatus('unavailable');
-      setSummaryNote('The summary could not be generated right now — the transcript is still saved. Try again from the meeting record.');
+      setSummaryNote('The summary could not be generated right now, the transcript is still saved. Try again from the meeting record.');
     } finally {
       setIsGeneratingSummary(false);
     }
@@ -3004,7 +3109,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     });
   };
 
-  // Phase 2 (#13) — Q&A queue: the host, a co-host or a moderator marks
+  // Phase 2 (#13), Q&A queue: the host, a co-host or a moderator marks
   // a question answered; it leaves the open queue for the Answered
   // section below and can be reopened. Same broadcast pattern as the
   // polls: one event, every client applies it, no server round-trip.
@@ -3047,13 +3152,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Move into / out of a breakout room. Breakout rooms are LiveKit-native:
   // each one is its own LiveKit room (`<main-slug>-breakout-<n>`), so
   // entering a breakout leaves the main LiveKit room and joins the
-  // breakout's LiveKit room with a fresh token minted for it — the LiveKit
+  // breakout's LiveKit room with a fresh token minted for it, the LiveKit
   // connect effect below re-runs on the breakoutRoom change and does the
   // switch. The engine NEVER flips to P2P here: breakout media is routed
   // through the LiveKit server exactly like the main meeting, so quality
   // holds with several people in a room. If the main room had fallen back
   // to P2P (LiveKit unreachable), entering a breakout retries LiveKit
-  // immediately instead of waiting for the once-a-minute P2P recovery —
+  // immediately instead of waiting for the once-a-minute P2P recovery ,
   // a breakout has no P2P mesh to fall back to.
   const enterBreakoutRoom = (roomNumber: number | null) => {
     setBreakoutRoom(roomNumber);
@@ -3063,13 +3168,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Phase 3 (Feature 2) — breakout control transport. Control must
+  // Phase 3 (Feature 2), breakout control transport. Control must
   // reach EVERY room, but the P2P signalling channel splits per room
   // (`sig-webrtc-<id>-breakout-<n>`), so a host in the main room cannot
   // reach breakout rooms over it (and rooms cannot reach each other).
   // The meeting-events channel (`meeting-events-<id>`) is subscribed by
   // everyone regardless of room or engine, so all breakout control
-  // (start / end / move / broadcast) goes over it — via the SERVER route
+  // (start / end / move / broadcast) goes over it, via the SERVER route
   // POST /api/meetings/breakout, which verifies the caller is the host,
   // a co-host or a moderator and broadcasts with a `server: true`
   // marker. Receivers ignore breakout events without the marker, so a
@@ -3086,7 +3191,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // The room-count input is free text: clamp it so the assignments and
     // the count every client receives always agree (rooms 1-5).
     roomsCount = Math.min(5, Math.max(1, roomsCount || 2));
-    // Phase B (20): pre-assignments the host made before starting win —
+    // Phase B (20): pre-assignments the host made before starting win ,
     // only people the host did not place are dealt round-robin.
     const assignments: { [peerKey: string]: number } = {};
     Object.entries(breakoutAssignments).forEach(([peerKey, room]) => {
@@ -3103,7 +3208,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
     // Phase 3: keep the host's live record of who is where, so the
     // room-management roster below can show it and moves can update it.
-    // The server verifies the caller first — local state only changes
+    // The server verifies the caller first, local state only changes
     // after the server OKs, so a rejected start shows nothing.
     try {
       await sendBreakoutControl('start-breakout', {
@@ -3112,7 +3217,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         roomsCount
       });
     } catch (err: any) {
-      triggerToast(err?.message || 'Could not start the breakout rooms — please try again.');
+      triggerToast(err?.message || 'Could not start the breakout rooms, please try again.');
       return;
     }
     breakoutActiveRef.current = true;
@@ -3120,7 +3225,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setBreakoutRoomsCount(roomsCount);
     setBreakoutBroadcast(null);
     setBreakoutTimeRemaining(durationMinutes * 60);
-    // Phase A (6): snapshot the session — the host stays in the main
+    // Phase A (6): snapshot the session, the host stays in the main
     // room (room null) but still needs the roster + timer after their
     // own reload. Every other client snapshots on the start receiver.
     writeStoredBreakout(meetingId, {
@@ -3136,11 +3241,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       await sendBreakoutControl('end-breakout', {});
     } catch (err: any) {
-      triggerToast(err?.message || 'Could not end the breakout rooms — please try again.');
+      triggerToast(err?.message || 'Could not end the breakout rooms, please try again.');
       return;
     }
     breakoutActiveRef.current = false;
-    // Phase A (6): breakouts are over — drop the snapshot so a later
+    // Phase A (6): breakouts are over, drop the snapshot so a later
     // refresh does not rejoin a finished session.
     clearStoredBreakout(meetingId);
     setBreakoutAssignments({});
@@ -3149,7 +3254,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setBreakoutTimeRemaining(null);
   };
 
-  // Phase 3 (Feature 1) — move one participant to another room (or back
+  // Phase 3 (Feature 1), move one participant to another room (or back
   // to the main room) while breakouts are active. The move travels on
   // the meeting-events channel, so it reaches the participant no matter
   // which room they are in right now; only the named peerKey acts on it.
@@ -3165,7 +3270,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         durationSeconds: breakoutTimeRemaining
       });
     } catch (err: any) {
-      triggerToast(err?.message || 'Could not move that participant — please try again.');
+      triggerToast(err?.message || 'Could not move that participant, please try again.');
       return;
     }
     setBreakoutAssignments(prev => {
@@ -3184,7 +3289,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Phase 3 (Feature 1) — one message the host sends to every room at
+  // Phase 3 (Feature 1), one message the host sends to every room at
   // once (main room included). Same meeting-events channel as moves, so
   // it reaches participants in every breakout room, not just the host's
   // own room. The host sees their own message as a banner too.
@@ -3199,7 +3304,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       await sendBreakoutControl('breakout-broadcast', { message });
     } catch (err: any) {
-      triggerToast(err?.message || 'Could not send the broadcast — please try again.');
+      triggerToast(err?.message || 'Could not send the broadcast, please try again.');
       return;
     }
     setBreakoutBroadcast({ message, from });
@@ -3207,7 +3312,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
 
-  // Web Audio speaking volume analyzer (registry version — Fix Round 6).
+  // Web Audio speaking volume analyzer (registry version, Fix Round 6).
   // One analyser per peer, deduped by stream: a re-subscribe or a
   // re-negotiation used to pile up a new analyser + rAF loop each time,
   // none of them ever stopped. stopSpeakingDetection ends the loop and
@@ -3287,10 +3392,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Load meeting details (admin_id and notes). The passcode is NOT read
-  // from the meeting row any more — it is hidden from anon reads — so the
+  // from the meeting row any more, it is hidden from anon reads, so the
   // host fetches it through the host-only server route for the invite
   // panel, and everyone else gets an empty passcode (the panel then shows
-  // '—' and the share link carries no code). The old code started with a
+  // ',' and the share link carries no code). The old code started with a
   // freshly generated random code as the passcode state, so guests could
   // briefly see a made-up code in the invite panel.
   useEffect(() => {
@@ -3326,7 +3431,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     loadDetails();
   }, [meetingId]);
 
-  // Fix Round 6 (Phase 6) — the end signal must NOT depend on the P2P
+  // Fix Round 6 (Phase 6), the end signal must NOT depend on the P2P
   // signalling channel. That channel was gated on `passcode`, and
   // loadDetails sets passcode='' for every non-host, so guests
   // unsubscribed from it and never heard 'end-meeting'. This dedicated
@@ -3347,7 +3452,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           triggerToast('You are now the host of this meeting.');
         }
       })
-      // Phase 3 (Feature 1) — breakout control lives on this channel, NOT
+      // Phase 3 (Feature 1), breakout control lives on this channel, NOT
       // on the P2P signalling channel. That channel splits per room
       // (`sig-webrtc-<id>-breakout-<n>`), so a host in the main room could
       // not reach breakout rooms over it, and rooms could not reach each
@@ -3355,7 +3460,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // or engine (see the Fix Round 6 note above), so start / end / move
       // / broadcast all reach every participant wherever they are.
       .on('broadcast', { event: 'start-breakout' }, (payload: any) => {
-        // Phase 3 (Feature 2): only the server may start breakouts — a
+        // Phase 3 (Feature 2): only the server may start breakouts, a
         // client-sent event without the server marker is ignored.
         const data = payload.payload;
         if (!data || data.server !== true || !data.assignments) return;
@@ -3393,7 +3498,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (!payload?.payload || payload.payload.server !== true) return;
         if (!breakoutActiveRef.current) return;
         breakoutActiveRef.current = false;
-        // Phase A (6): breakouts are over — drop the snapshot so a
+        // Phase A (6): breakouts are over, drop the snapshot so a
         // later refresh does not rejoin a finished session.
         clearStoredBreakout(meetingId);
         enterBreakoutRoom(null);
@@ -3440,7 +3545,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           setBreakoutTimeRemaining(null);
           triggerToast('The host moved you back to the main room.');
         } else {
-          // A late joiner moved in mid-session has no timer yet — take
+          // A late joiner moved in mid-session has no timer yet, take
           // the remaining time the host sent with the move.
           setBreakoutTimeRemaining(prev => prev ?? (typeof data.durationSeconds === 'number' ? data.durationSeconds : null));
           triggerToast(`The host moved you to Breakout Room ${target}.`);
@@ -3453,7 +3558,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         triggerToast(`${data.from || 'Host'}: ${data.message.trim()}`);
       })
       // Phase A (6): a rejoiner who restored a breakout room from
-      // storage asks for the live state — the host (or any moderator
+      // storage asks for the live state, the host (or any moderator
       // holding the live roster) answers through the server route, so
       // the answer carries the server marker. Rate-limited to one
       // answer per 10 s, so a roomful of reloads cannot storm it.
@@ -3471,11 +3576,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       // Phase A (6): the live state, answering a rejoiner's request.
       // Sync the roster / countdown WITHOUT moving anyone who is
-      // already where they belong and WITHOUT the start alert — only
+      // already where they belong and WITHOUT the start alert, only
       // a rejoiner whose room actually changed moves, with one toast.
       // (A requester whose assignment is gone stays put: the host may
       // have moved them while they were away, and the move broadcast
-      // will reach them — bouncing them to the main room on a missing
+      // will reach them, bouncing them to the main room on a missing
       // key would be worse.)
       .on('broadcast', { event: 'breakout-state' }, (payload: any) => {
         const data = payload.payload;
@@ -3505,7 +3610,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .subscribe((status: string) => {
         // Phase A (6): if we restored a breakout room from storage,
-        // ask the room for the live state once subscribed — the host
+        // ask the room for the live state once subscribed, the host
         // may have moved us or changed the timer while we were away.
         // No answer is fine: the stored snapshot stands until the
         // timer ends (see the countdown backstop below).
@@ -3524,7 +3629,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meetingId]);
 
-  // Fix Round 6 (Phase 6) — server-truth meeting watcher. A missed
+  // Fix Round 6 (Phase 6), server-truth meeting watcher. A missed
   // broadcast must never strand anyone: the meeting row itself says
   // when the meeting ended (status Completed) or who the host is now
   // (admin_id). Realtime first, 5s polling as the backstop.
@@ -3637,7 +3742,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             });
             // Unread badge: a message from someone else while the chat
             // panel is closed counts as unread. (Your own messages can't
-            // reach here with the panel closed — you send from the panel.)
+            // reach here with the panel closed, you send from the panel.)
             if (!isSelf && activePanelRef.current !== 'chat') {
               setUnreadChatCount(c => c + 1);
             }
@@ -3668,7 +3773,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (ownRowSeen) {
             seenOwnRowRef.current = true;
           } else if (seenOwnRowRef.current && !isAdmin && !endedRef.current) {
-            // Round 9 (9A): our row left the admitted list — the host
+            // Round 9 (9A): our row left the admitted list, the host
             // removed us (status 'Removed'). No alert: the removed
             // screen IS the message.
             enterEndedState('removed');
@@ -3986,14 +4091,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const handleSignal = async (data: any) => {
       const { type, senderKey, sdp, candidate } = data;
 
-      // Fix Round 6: the mesh is dormant while the SFU carries media —
+      // Fix Round 6: the mesh is dormant while the SFU carries media ,
       // except for a peer whose own engine is P2P (their LiveKit
       // failed), who can only reach us peer-to-peer. The offer carries
       // the sender's engine so the answerer can tell. Answers and
       // candidates need no gate: they only arrive for a PC this side
       // already created.
       // LiveKit-native breakouts: never answer a mesh offer inside a
-      // breakout room — not even from a peer on an older build (or one
+      // breakout room, not even from a peer on an older build (or one
       // whose LiveKit failed) offering peer-to-peer. Breakout media
       // goes through the LiveKit server only.
       if (breakoutRoomRef.current !== null && type === 'offer') return;
@@ -4089,7 +4194,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const senderKey = data.senderKey;
         
         if (senderKey !== myKey) {
-          // Round 3: shared join sound — only a genuinely new joiner.
+          // Round 3: shared join sound, only a genuinely new joiner.
           // Presence is a 6s heartbeat, so first sight of a senderKey
           // (after our own 15s entry grace, so joining a full room
           // does not fire one chime per person already there) plays
@@ -4102,7 +4207,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             playSynthesizedSound('join');
           }
           // Fix Round 6: remember the peer's engine. A peer on the SFU
-          // needs no P2P link — and if we built one while their engine
+          // needs no P2P link, and if we built one while their engine
           // was unknown, close it now that we know.
           if (data.engine) peerEnginesRef.current[senderKey] = data.engine;
           if (data.engine === 'LIVEKIT' && engineTypeRef.current === 'LIVEKIT') closeP2PLink(senderKey);
@@ -4167,7 +4272,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             existingPc.connectionState === 'closed';
 
           // Fix Round 6: build the mesh only when it is actually the
-          // transport — our engine is P2P (main-room fallback), or the
+          // transport, our engine is P2P (main-room fallback), or the
           // peer's is (their LiveKit failed, so the SFU cannot carry
           // them). Two LiveKit peers never mesh: their voices already
           // meet on the server, and a parallel mesh only doubles the
@@ -4177,7 +4282,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // server; a mesh here would silently bring back peer-to-peer
           // breakout video (and the quality drop with several people).
           // A peer whose LiveKit failed inside a breakout stays without
-          // media until their LiveKit retry lands — the honest failure,
+          // media until their LiveKit retry lands, the honest failure,
           // not a quiet P2P downgrade.
           if (isInitiator && needsConnection && breakoutRoomRef.current === null && (engineTypeRef.current === 'P2P' || data.engine === 'P2P')) {
             initPeerConnection(senderKey);
@@ -4187,7 +4292,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       .on('broadcast', { event: 'leave' }, (payload: any) => {
         const data = payload.payload;
         cleanupPeer(data.senderKey);
-        // Round 3: shared leave sound — one soft tone when someone
+        // Round 3: shared leave sound, one soft tone when someone
         // really leaves (the sender never hears their own: self:false).
         if (data.senderKey !== myKey) playSynthesizedSound('leave');
       })
@@ -4195,7 +4300,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (isAdmin) {
           const data = payload.payload;
           // Admit by the DATABASE participant row id when the guest has
-          // one — the signalling key alone matches no database row, so the
+          // one, the signalling key alone matches no database row, so the
           // old admit updated zero rows and the guest stayed 'Waiting'
           // forever in the database (the 4s poll could never see Admitted).
           const admitKey = data.participantRowId || data.senderKey;
@@ -4227,7 +4332,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             // is known (else the signalling key). The 5s database poll
             // returns rows keyed by row id, so an entry keyed by the
             // signalling key would never match it and the same guest
-            // showed twice — once per key. Normalising the id to the
+            // showed twice, once per key. Normalising the id to the
             // row id here (and in the poll merge below) keeps both
             // writers on the same identity.
             const rowId = data.participantRowId;
@@ -4243,7 +4348,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
       })
       .on('broadcast', { event: 'end-meeting' }, () => {
-        // Legacy path — the dedicated meeting-events channel is the
+        // Legacy path, the dedicated meeting-events channel is the
         // primary signal now (Phase 6). Kept so a client on the older
         // build still ends this one.
         if (!isAdmin) {
@@ -4320,8 +4425,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // (guests have user_id NULL, so their myKey never matches a user id).
         const isMe = data.targetUserId === myKey || (data.targetRowId && myParticipantRowId && data.targetRowId === myParticipantRowId);
         if (isMe) {
-          // Phase A (4): a host can never be removed — the server
-          // refuses it — so a matching target on the host's own client
+          // Phase A (4): a host can never be removed, the server
+          // refuses it, so a matching target on the host's own client
           // is a stale or wrong key, not an ejection. Without this
           // guard the host's tab could end its own meeting on a kick
           // meant for someone else (the unconfirmed 2026-11-13 crash:
@@ -4329,12 +4434,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // one place a kick could take the host down with it).
           if (isAdminRef.current) return;
           // Round 9 (9A): the server kept our row as 'Removed' (the
-          // rejoin block) — do NOT delete it, and do not alert: the
+          // rejoin block), do NOT delete it, and do not alert: the
           // removed screen IS the message.
           enterEndedState('removed');
           return;
         }
-        // Phase A (4): someone else was kicked — clean them up locally
+        // Phase A (4): someone else was kicked, clean them up locally
         // now instead of waiting for the next participants poll, so
         // their tile and peer connection go away at once. Never throws:
         // a broadcast handler must not be able to wedge the room.
@@ -4376,7 +4481,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setPolls(prev => prev.map(p => p.id === data.pollId ? { ...p, votes: data.votes } : p));
       })
       .on('broadcast', { event: 'close-poll' }, (payload: any) => {
-        // Phase 1 — the host closed a poll: voting stops everywhere at
+        // Phase 1, the host closed a poll: voting stops everywhere at
         // once, results are shown to everyone, and a quiz reveals its
         // correct answer + leaderboard.
         const data = payload.payload;
@@ -4433,7 +4538,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'spotlight-set' }, (payload: any) => {
         const data = payload.payload;
-        // Phase B (14): the host's spotlight is for everyone — show it,
+        // Phase B (14): the host's spotlight is for everyone, show it,
         // and switch to speaker view so it is actually visible.
         if (data?.peerKey) {
           setSpotlightKey(data.peerKey);
@@ -4453,7 +4558,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       .on('broadcast', { event: 'reaction' }, (payload: any) => {
         const data = payload.payload;
         triggerReaction(data.senderKey, data.emoji);
-        // 👏 is the toolbar twin of the soundboard Applause — it plays the
+        // 👏 is the toolbar twin of the soundboard Applause, it plays the
         // same sound for everyone. Other emoji reactions stay visual-only.
         if (data.emoji === '👏') playSynthesizedSound('applause');
       })
@@ -4552,7 +4657,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               senderKey: myKey,
               participantRowId: myParticipantRowId || undefined,
               name: currentUser?.name || 'Guest',
-              // Fix Round 6: peers need to know our engine — a P2P-only
+              // Fix Round 6: peers need to know our engine, a P2P-only
               // peer can only reach us over the mesh, a LiveKit peer
               // must not build one to us.
               engine: engineTypeRef.current,
@@ -4668,7 +4773,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Screen sharing track feed replacement injector (User gesture compliant)
   const startScreenShare = async (): Promise<boolean> => {
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
-      triggerToast('Screen sharing is not supported in this browser — try a desktop browser instead.');
+      triggerToast('Screen sharing is not supported in this browser, try a desktop browser instead.');
       return false;
     }
     setScreenShareError(null);
@@ -4676,14 +4781,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       const constraints = getWebRTCScreenshareConstraints();
       // audio: true asks the browser for system audio with the share
-      // (Chrome/Edge: pick a tab or window — "Share audio" — to include
+      // (Chrome/Edge: pick a tab or window, "Share audio", to include
       // the sound of a video you play). Not every choice provides audio:
       // sharing a whole screen often has no audio track, and Firefox does
-      // not support it at all — when no audio track arrives we say so
+      // not support it at all, when no audio track arrives we say so
       // plainly instead of pretending the share has sound.
       // Fix Round 8 (#3): getDisplayMedia can hang forever without
       // opening a picker (notably in automated/headless browsers, and
-      // when the browser's picker is blocked) — the old code awaited it
+      // when the browser's picker is blocked), the old code awaited it
       // with no timeout, so the click looked dead with no error at all.
       // Race it against a 25 s timeout and say so honestly.
       const displayStream = await Promise.race([
@@ -4742,7 +4847,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // stale track) used to leave the sharer believing everyone could
       // see the screen while nobody could. Retry briefly, then say so
       // honestly instead of showing a share nobody receives. (When
-      // there is no LiveKit room — the P2P fallback — there is nothing
+      // there is no LiveKit room, the P2P fallback, there is nothing
       // to verify here; the P2P senders above carry the share.)
       if (livekitRoomRef.current) {
         let screenPublished = false;
@@ -4760,7 +4865,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           }
         }
         if (!screenPublished) {
-          const msg = 'Your screen could not be shared — others cannot see it yet. Stop the share and start it again.';
+          const msg = 'Your screen could not be shared, others cannot see it yet. Stop the share and start it again.';
           setScreenShareError(msg);
           triggerToast(msg);
         }
@@ -4794,21 +4899,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // Unexpected end: iOS / the browser ended the capture (app switch,
         // call, screen lock, Control Centre). The track is dead and cannot
         // be restarted, and re-acquiring needs a real user tap
-        // (getDisplayMedia without one is rejected) — so tear the dead
+        // (getDisplayMedia without one is rejected), so tear the dead
         // track down but do NOT silently drop the share: show a notice
         // with a one-tap restart instead.
         screenShareStoppedByUserRef.current = true; // silence the re-entrant onended from stopScreenShare()
         stopScreenShare();
         setIsScreenSharing(false);
-        const msg = 'Your screen share ended by itself — your phone stopped the capture (switching apps, a call, or the screen locking can do this). Tap Try again to share again.';
+        const msg = 'Your screen share ended by itself, your phone stopped the capture (switching apps, a call, or the screen locking can do this). Tap Try again to share again.';
         setScreenShareError(msg);
         triggerToast(msg);
       };
 
       setIsScreenSharing(true);
       triggerToast(screenAudioTrack
-        ? 'Screen sharing started with system audio — others can hear the sound of what you share.'
-        : 'Screen sharing started without system audio — this browser or screen choice did not provide audio. To share sound, pick a browser tab and tick "Share audio" in the picker.');
+        ? 'Screen sharing started with system audio, others can hear the sound of what you share.'
+        : 'Screen sharing started without system audio, this browser or screen choice did not provide audio. To share sound, pick a browser tab and tick "Share audio" in the picker.');
       return true;
     } catch (err: any) {
       console.warn('[Screen Share] Permission denied or failed.', err);
@@ -4833,7 +4938,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         : err?.name === 'OverconstrainedError'
         ? 'Your browser refused the screen capture settings -- try again.'
         : err?.name === 'PickerTimeoutError'
-        ? 'The screen picker did not open — check that screen sharing is allowed for this browser, then try again.'
+        ? 'The screen picker did not open, check that screen sharing is allowed for this browser, then try again.'
         : `Screen sharing could not start (${err?.message || 'unknown error'}).`;
       triggerToast(reason);
       setScreenShareError(reason);
@@ -4916,7 +5021,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // but whose database row is not visible yet would otherwise
         // flicker out of the list until their next 2s announcement.
         // Identity is the database row id once known, else the
-        // signalling key — the same rule as the broadcast handler —
+        // signalling key, the same rule as the broadcast handler ,
         // so one guest is never two entries. A stale broadcast copy
         // (signalling key id, row id attached) is dropped outright
         // once the database row for that guest is in the list.
@@ -5129,7 +5234,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [remoteStreams, livekitRemoteStreams, isSpatialAudioEnabled]);
 
   // Fix Round 6: speaking detection for LiveKit peers. It used to come
-  // only from the P2P mesh's ontrack — so with the mesh gated off in
+  // only from the P2P mesh's ontrack, so with the mesh gated off in
   // LiveKit mode, remote speaking rings would go dead. Analyse the
   // LiveKit stream directly (deduped by the registry, so a peer with
   // both engines never gets two analysers), and stop analysers for
@@ -5155,7 +5260,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [livekitRemoteStreams, remoteStreams, engineType]);
 
   // All-browsers + camera/mic-on-at-join (Round 4): media error kinds.
-  // 'denied' = the browser/site is blocking the device — retrying would
+  // 'denied' = the browser/site is blocking the device, retrying would
   // just re-prompt and fail the same way. 'not-found' = no such device
   // (or the browser cannot reach media devices at all). 'busy' = another
   // app holds the device. 'transient' = anything that can clear on its
@@ -5170,7 +5275,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
   // True when the user joined with everything off on purpose ("Join
   // without camera / microphone", or both lobby toggles off): the room
-  // must NOT acquire any device at join — no permission prompt, no
+  // must NOT acquire any device at join, no permission prompt, no
   // capture. Devices are acquired lazily the first time the user turns
   // one on (see toggleMute / the video effect).
   const joinedWithoutDevices = initialMutedState && !initialVideoState;
@@ -5188,7 +5293,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Phase A (2): release the camera and mic when the page unloads.
   // A reload used to leave the old page holding the devices, so the
   // new page's getUserMedia failed or hung ("camera in use by another
-  // app") and media init stalled — LiveKit and signalling never
+  // app") and media init stalled, LiveKit and signalling never
   // started, and the controls did nothing until something else shook
   // the state loose. Stopping the tracks here hands the devices back
   // before the new page asks for them.
@@ -5218,13 +5323,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const savedMic = (() => { try { return localStorage.getItem('giin_selected_mic') || ''; } catch (e) { return ''; } })();
     const toastMicError = (err: any) => {
       const reason = !navigator.mediaDevices?.getUserMedia
-        ? 'This browser cannot access a microphone on this page — check the browser site permissions, or try a different browser.'
+        ? 'This browser cannot access a microphone on this page, check the browser site permissions, or try a different browser.'
         : err?.name === 'NotAllowedError'
-        ? 'Microphone blocked — allow the microphone in the browser address bar, then turn your mic on again. Others cannot hear you until then.'
+        ? 'Microphone blocked, allow the microphone in the browser address bar, then turn your mic on again. Others cannot hear you until then.'
         : err?.name === 'NotFoundError'
-        ? 'No microphone was found on this device — plug one in, then turn your mic on again.'
+        ? 'No microphone was found on this device, plug one in, then turn your mic on again.'
         : err?.name === 'NotReadableError'
-        ? 'Your microphone is in use by another app — close that app, then turn your mic on again.'
+        ? 'Your microphone is in use by another app, close that app, then turn your mic on again.'
         : `Your microphone could not be started (${err?.message || 'unknown error'}). Others cannot hear you.`;
       triggerToast(reason);
     };
@@ -5237,7 +5342,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // Phase A (2): getUserMedia can hang indefinitely after a reload
       // (the device is still held by the page being replaced), which
       // used to stall the whole join with no error. Fail fast after
-      // 15 s instead — the caller retries once, and the mic toggle can
+      // 15 s instead, the caller retries once, and the mic toggle can
       // acquire lazily afterwards.
       const s = await Promise.race([
         navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints(withSaved && savedMic ? savedMic : undefined) }),
@@ -5257,7 +5362,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await publishMicTrack(audioTrack);
       // Feature 17: the user is audible at once on the plain capture;
       // the denoised track replaces it in the background once the
-      // (small, cached) RNNoise model loads — no join delay, and a
+      // (small, cached) RNNoise model loads, no join delay, and a
       // model that cannot load changes nothing here (the plain mic
       // carries on with the browser's own noise reduction).
       void rebuildPublishedMicTrack();
@@ -5297,7 +5402,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Initialize audio track (kept alive throughout the meeting)
   useEffect(() => {
     // A user who joined with everything off on purpose gets no mic
-    // prompt and no capture at join — the mic is acquired lazily the
+    // prompt and no capture at join, the mic is acquired lazily the
     // first time they unmute (see toggleMute).
     if (joinedWithoutDevices) return;
     void acquireMicTrack();
@@ -5322,15 +5427,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (isVideoOn) {
         const current = localVideoTrackRef.current;
         if (!current || current.readyState === 'ended') {
-          // No usable track — acquire a fresh one. (The old code only
+          // No usable track, acquire a fresh one. (The old code only
           // re-enabled an existing track, so an ended track stayed
           // "on" with a black tile; enabling an ended track is a no-op.)
           if (current && current.readyState === 'ended') localVideoTrackRef.current = null;
           // Round 4: one acquisition funnel with retries. A camera id
           // saved on another machine can make this device refuse outright
-          // (retry once with the default camera); a transient failure —
+          // (retry once with the default camera); a transient failure ,
           // the camera still releasing after the pre-join preview
-          // stopped, or a hiccup — gets one automatic retry after a
+          // stopped, or a hiccup, gets one automatic retry after a
           // short delay instead of leaving the user camera-off. A
           // denied permission or a missing camera never retries.
           videoJoinRetryRef.current = false;
@@ -5341,7 +5446,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               throw e;
             }
             const savedCam = withSaved ? localStorage.getItem('giin_selected_camera') : null;
-            // Phase A (2): same hang guard as the mic — a camera held
+            // Phase A (2): same hang guard as the mic, a camera held
             // by the pre-reload page can make getUserMedia hang with no
             // error. Fail fast after 15 s so the retry (and the
             // isMediaInitialized fallback below) can run.
@@ -5418,13 +5523,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           } else if (lastVideoErr && lastVideoErr.message !== 'Component unmounted') {
             console.warn('Error acquiring video:', lastVideoErr);
             const reason = !navigator.mediaDevices?.getUserMedia
-              ? 'This browser cannot access a camera on this page — check the browser site permissions, or try a different browser.'
+              ? 'This browser cannot access a camera on this page, check the browser site permissions, or try a different browser.'
               : lastVideoErr?.name === 'NotAllowedError'
-              ? 'Camera blocked — allow the camera in the browser address bar, then turn your camera on again. Others see your avatar until then.'
+              ? 'Camera blocked, allow the camera in the browser address bar, then turn your camera on again. Others see your avatar until then.'
               : lastVideoErr?.name === 'NotFoundError'
-              ? 'No camera was found on this device — you are joining with the camera off.'
+              ? 'No camera was found on this device, you are joining with the camera off.'
               : lastVideoErr?.name === 'NotReadableError'
-              ? 'Your camera is in use by another app — close that app, then turn your camera on again.'
+              ? 'Your camera is in use by another app, close that app, then turn your camera on again.'
               : `Your camera could not be started (${lastVideoErr?.message || 'unknown error'}). You are joining with the camera off.`;
             triggerToast(reason);
             setLocalCameraLive(false);
@@ -5432,7 +5537,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           }
         } else {
           // Track is live: re-enable it AND make sure LiveKit is still
-          // serving it — a publication lost during a reconnect is
+          // serving it, a publication lost during a reconnect is
           // otherwise never repaired, and remotes keep a black tile.
           current.enabled = true;
           setLocalCameraLive(true);
@@ -5452,7 +5557,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
       setIsMediaInitialized(true);
     }
-    // Phase A (2): init must complete even if acquisition throws —
+    // Phase A (2): init must complete even if acquisition throws ,
     // otherwise isMediaInitialized stays false, the LiveKit connect
     // and signalling effects never start, and the room never joins.
     // (A hang is covered by the 10 s fallback below.)
@@ -5465,7 +5570,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Phase A (2): media init must never gate the room forever. If
   // device acquisition hangs despite the timeouts above, the LiveKit
   // connect and signalling effects wait on isMediaInitialized and
-  // never start — the room looks joined but nothing works, and the
+  // never start, the room looks joined but nothing works, and the
   // controls do nothing. After 10 s, declare init done anyway:
   // devices are acquired lazily by the toggles, and a late camera
   // still attaches through the video effect above.
@@ -5546,9 +5651,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           console.error(err);
         }
       } else {
-        // Phase B (9): no technical error, no alert — a plain message in
+        // Phase B (9): no technical error, no alert, a plain message in
         // the transcript panel, and captions switch back off.
-        setCaptionsUnavailable('Live captions need setup — this browser does not support on-device speech recognition. Try Chrome or Edge for live captions.');
+        setCaptionsUnavailable('Live captions need setup, this browser does not support on-device speech recognition. Try Chrome or Edge for live captions.');
         setTimeout(() => {
           setIsCaptionsEnabled(false);
         }, 0);
@@ -5573,14 +5678,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } else {
       // Unmuting with no live mic (the join acquisition failed, or the
       // user joined without devices): acquire one now. A mute toggle
-      // must never be a dead end — before this fix, unmuting did
+      // must never be a dead end, before this fix, unmuting did
       // nothing at all when no track existed, and only a reload could
       // bring the mic back.
       const raw = localMicRawTrackRef.current;
       if (!raw || raw.readyState !== 'live') {
         void acquireMicTrack().then(ok => {
           if (!ok) {
-            // Stay honestly muted — acquireMicTrack already explained why.
+            // Stay honestly muted, acquireMicTrack already explained why.
             setIsMuted(true);
             broadcastMediaState({ isMuted: true });
           }
@@ -5604,11 +5709,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     broadcastMediaState({ isVideoOn: nextVideoOn });
   };
 
-  // Phase B (21): low-bandwidth mode — audio-first for weak connections.
+  // Phase B (21): low-bandwidth mode, audio-first for weak connections.
   // Your camera goes off, the uplink steps down to the low encoding
   // (screen share included), and background effects switch off. Your
   // audio is never touched. Turning it off brings your camera back (if
-  // it was on) and restores full quality — the Phase A watcher steps
+  // it was on) and restores full quality, the Phase A watcher steps
   // down again if the connection is still poor.
   const setLowBandwidthMode = async (on: boolean) => {
     if (on === lowBandwidthRef.current) return;
@@ -5625,7 +5730,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         broadcastMediaState({ isVideoOn: false });
       }
       await applyLocalVideoQuality('low');
-      triggerToast('Low-bandwidth mode is on — audio first, video off. Everything else still works.');
+      triggerToast('Low-bandwidth mode is on, audio first, video off. Everything else still works.');
     } else {
       setBgFxStatus(null);
       if (lowBandwidthVideoWasOnRef.current) {
@@ -5634,12 +5739,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         broadcastMediaState({ isVideoOn: true });
       }
       await applyLocalVideoQuality('high');
-      triggerToast('Low-bandwidth mode is off — your camera is back on.');
+      triggerToast('Low-bandwidth mode is off, your camera is back on.');
     }
   };
 
   const handleLeaveOrEnd = () => {
-    // Fix Round 6 (Phase 6): the host is ALWAYS asked to choose —
+    // Fix Round 6 (Phase 6): the host is ALWAYS asked to choose ,
     // transfer host or end for everyone. The old code skipped the
     // choice (and the broadcast) whenever the participant list looked
     // empty, and that list is database-derived and can lag behind the
@@ -5654,13 +5759,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Fix Round 6 (Phase 6) — end for everyone, for real. Order matters:
+  // Fix Round 6 (Phase 6), end for everyone, for real. Order matters:
   // (1) the SERVER ends it first (meeting Completed + LiveKit room
   // deleted) so the link is dead even if every broadcast is missed;
   // (2) the end is broadcast on both channels, awaited with a timeout,
   // so the signal is not lost to the unmount that follows; (3) only
   // then does this client show its own ended screen. The old code did
-  // it backwards — fire-and-forget broadcast, then immediate unmount —
+  // it backwards, fire-and-forget broadcast, then immediate unmount ,
   // and the LiveKit room was never torn down at all, so everyone else
   // kept talking. If the server end fails, NOBODY is ended and the
   // host gets the honest error instead of a silent partial end.
@@ -5674,7 +5779,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (e) { /* broadcast is best-effort: server state + polling cover it */ }
   };
 
-  // Phase 1 — attendance auto-report: after the meeting ends for everyone,
+  // Phase 1, attendance auto-report: after the meeting ends for everyone,
   // Phase C1 (34), flush attendance + speaking time to Supabase when
   // the host ends the meeting (host only, fire-and-forget). Builds
   // join/leave events from the local attendance record and speak events
@@ -5727,7 +5832,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Phase B (9 + 10): when the host ends the meeting, save the merged
   // transcript to the meeting record, then generate the AI summary from
-  // it. Fire-and-forget — the end never waits for it and never fails
+  // it. Fire-and-forget, the end never waits for it and never fails
   // because of it. The summary send hooks into Phase C (feature 29).
   const saveTranscriptAndSummary = async () => {
     if (!isAdmin) return;
@@ -5743,7 +5848,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (summary && summary.ok === false) {
         console.warn('[GiinMeet] Summary was not generated:', summary.reason || summary.message || 'unknown');
       }
-      // Phase C1 (29) — post-meeting follow-up, automatic: the summary,
+      // Phase C1 (29), post-meeting follow-up, automatic: the summary,
       // decisions and action items go to the attendees by email. Only
       // when a summary was actually generated; fire-and-forget, like the
       // transcript save above.
@@ -5770,24 +5875,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setLeaveOption(null);
       setSelectedNewAdminId('');
       enterEndedState('you-ended', (result as any)?.livekitWarning);
-      // Phase 1 — attendance auto-report (fire-and-forget).
+      // Phase 1, attendance auto-report (fire-and-forget).
       void sendAttendanceReport();
       // Phase C1 (34), attendance + speaking time to Supabase (fire-and-forget).
       void flushAttendanceEvents();
-      // Phase B (9 + 10) — transcript save + AI summary (fire-and-forget).
+      // Phase B (9 + 10), transcript save + AI summary (fire-and-forget).
       void saveTranscriptAndSummary();
     } catch (err: any) {
       console.error('[GiinMeet] End for everyone failed:', err);
-      setEndError(err?.message || 'Could not end the meeting. Nobody was removed — please try again.');
+      setEndError(err?.message || 'Could not end the meeting. Nobody was removed, please try again.');
     } finally {
       setEndingInProgress(false);
     }
   };
 
-  // Fix Round 6 (Phase 6) — transfer host, for real. The transfer is
+  // Fix Round 6 (Phase 6), transfer host, for real. The transfer is
   // a server-verified act now (POST /api/meetings/transfer-host): the
   // caller must be the current host, and the new host must be a
-  // signed-in participant actually in the meeting — a guest (no auth
+  // signed-in participant actually in the meeting, a guest (no auth
   // account) can never hold the host role, so guests are not offered
   // in the picker. The old code broadcast the designation BEFORE the
   // database write and ignored the write's error entirely, so a failed
@@ -5820,7 +5925,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       leaveToLeaveScreen();
     } catch (err: any) {
       console.error('[GiinMeet] Failed to transfer host role:', err);
-      setEndError(err?.message || 'Could not transfer the host role. You are still the host — please try again.');
+      setEndError(err?.message || 'Could not transfer the host role. You are still the host, please try again.');
     } finally {
       setEndingInProgress(false);
     }
@@ -5938,13 +6043,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Fix Round 6: Studio Voice, rebuilt. The old toggle re-acquired the
-  // microphone on every flip (without the selected device — so it
+  // microphone on every flip (without the selected device, so it
   // silently switched mics), never stopped the previous track, never
   // published anything to LiveKit (only the P2P senders changed, so on
   // the LiveKit engine the toggle changed nothing anyone heard), and
   // never tore the old filter chain down. The chain is now built from
   // the CURRENT capture and tracked in enhancerChainRef, so it can be
-  // torn down exactly once — and the raw track stays alive as the
+  // torn down exactly once, and the raw track stays alive as the
   // chain's input until the chain is gone.
   const buildEnhancedTrack = (rawTrack: MediaStreamTrack): MediaStreamTrack => {
     try {
@@ -5996,7 +6101,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try { chain.destTrack.stop(); } catch (e) {}
   };
 
-  // Feature 17: AI noise cleaning (RNNoise) — free, on-device, no
+  // Feature 17: AI noise cleaning (RNNoise), free, on-device, no
   // server. The chain is raw mic -> RNNoise AudioWorklet (48 kHz) ->
   // MediaStreamDestination, and the destination track is what gets
   // published (or feeds Studio Voice when that is on too, so the
@@ -6006,13 +6111,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   //    audio is never touched, so cleaning survives a step-down.
   //  - Phase B (21) low-bandwidth mode is audio-first (camera off,
   //    video encoding down); the cleaning chain is audio-only and
-  //    stays live — that is exactly when people are on weak
+  //    stays live, that is exactly when people are on weak
   //    connections in noisy places.
   //  - Exactly one suppressor at a time: while this chain runs, the
   //    browser's own noiseSuppression is switched off on the live
   //    capture; when the chain stops or cannot start, it is switched
   //    back on. A browser that refuses applyConstraints just keeps
-  //    both on — slightly heavier processing, never a broken call.
+  //    both on, slightly heavier processing, never a broken call.
   const getNoiseSuppressionCtx = (): AudioContext | null => {
     try {
       if (noiseSuppressionCtxRef.current) {
@@ -6026,7 +6131,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       const ctx: AudioContext = new Ctx({ sampleRate: 48000 });
       // RNNoise assumes 48 kHz. If this device cannot run a 48 kHz
       // context (some Bluetooth headsets force another rate), the
-      // model would hear the wrong pitch — treat it as unavailable
+      // model would hear the wrong pitch, treat it as unavailable
       // instead of shipping garbled audio.
       if (ctx.sampleRate !== 48000) {
         try { void ctx.close(); } catch (e) {}
@@ -6042,7 +6147,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Build the cleaning chain for the CURRENT capture and return the
   // track to publish. On ANY failure returns the raw track (and
   // hands the browser suppressor back), marks the feature
-  // unavailable for this session, and says so once in plain words —
+  // unavailable for this session, and says so once in plain words ,
   // the call itself never breaks.
   const buildNoiseSuppressionTrack = async (rawTrack: MediaStreamTrack): Promise<MediaStreamTrack> => {
     const buildId = ++noiseSuppressionBuildIdRef.current;
@@ -6080,7 +6185,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // One suppressor at a time: RNNoise owns the job now, so the
       // browser's own suppressor steps aside on this capture.
       try { await rawTrack.applyConstraints({ noiseSuppression: false }); } catch (e) {
-        console.warn('[Noise] Could not switch off the browser suppressor — both stay on:', e);
+        console.warn('[Noise] Could not switch off the browser suppressor, both stay on:', e);
       }
       noiseSuppressionChainRef.current = { rawTrack, destTrack, source, node, dest };
       setNoiseSuppressionStatus('active');
@@ -6093,7 +6198,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await giveBrowserSuppressorBack();
       if (!noiseSuppressionWarnedRef.current) {
         noiseSuppressionWarnedRef.current = true;
-        triggerToast('Noise cleaning could not start on this device — your normal microphone is still on, with the browser’s own noise reduction.');
+        triggerToast('Noise cleaning could not start on this device, your normal microphone is still on, with the browser’s own noise reduction.');
       }
       return rawTrack;
     }
@@ -6103,7 +6208,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // for rebuilds, where a new chain is about to take over the same
   // capture (handing the browser suppressor back first would flap
   // it off-on-off). Stopping the destination track is safe even when
-  // it is the published one — the caller republishes right after.
+  // it is the published one, the caller republishes right after.
   const teardownNoiseSuppression = (restoreBrowserSuppressor = true) => {
     // Invalidate any build still loading the model.
     noiseSuppressionBuildIdRef.current++;
@@ -6121,12 +6226,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // One rebuild for every mic change: tear both processors down and
-  // rebuild from the CURRENT raw capture — RNNoise first, then Studio
-  // Voice on the denoised audio — then publish through the one funnel
+  // rebuild from the CURRENT raw capture, RNNoise first, then Studio
+  // Voice on the denoised audio, then publish through the one funnel
   // (publishMicTrack: LiveKit + P2P senders + speaking detector).
   // Generation-guarded: a mic switch or toggle that starts a newer
   // rebuild makes this one drop its result instead of publishing
-  // over the top of it. Never throws — a failed step falls back to
+  // over the top of it. Never throws, a failed step falls back to
   // the raw capture, so the mic stays live.
   const rebuildPublishedMicTrack = async (): Promise<void> => {
     const generation = ++micProcessingGenerationRef.current;
@@ -6134,7 +6239,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!rawTrack || rawTrack.readyState !== 'live') return;
     if (!roomMountedRef.current) return;
     teardownEnhancer();
-    // Hand the browser suppressor back when cleaning is OFF — the
+    // Hand the browser suppressor back when cleaning is OFF, the
     // rebuild below will not build a chain to take its place. When
     // cleaning is ON the new chain takes over (or, if it fails,
     // hands the suppressor back itself), so no flap off-on-off.
@@ -6175,7 +6280,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!nextVal) {
       setNoiseSuppressionStatus('idle');
     } else if (noiseSuppressionChainRef.current) {
-      triggerToast('Noise cleaning is on — background noise is removed before anyone hears it.');
+      triggerToast('Noise cleaning is on, background noise is removed before anyone hears it.');
     }
   };
 
@@ -6187,21 +6292,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!rawTrack || rawTrack.readyState !== 'live') {
       setIsAudioEnhanced(false);
       isAudioEnhancedRef.current = false;
-      triggerToast('Microphone is not ready yet — try again once your mic is on.');
+      triggerToast('Microphone is not ready yet, try again once your mic is on.');
       return;
     }
     // No re-acquisition: the toggle re-routes the CURRENT capture, so it
     // can never silently switch microphones. Echo cancellation and gain
     // control are already on for the capture (see micAudioConstraints);
     // noise is handled by Noise Cleaning (Feature 17). One rebuild
-    // applies both — RNNoise first, then the Studio Voice filter chain
-    // on the denoised audio — and the result is published to LiveKit
+    // applies both, RNNoise first, then the Studio Voice filter chain
+    // on the denoised audio, and the result is published to LiveKit
     // AND the P2P mesh alike through the one funnel (publishMicTrack).
     try {
       await rebuildPublishedMicTrack();
     } catch (err) {
       console.error('Failed to toggle audio enhancement:', err);
-      triggerToast('Could not change Studio Voice — keeping the current microphone.');
+      triggerToast('Could not change Studio Voice, keeping the current microphone.');
     }
   };
 
@@ -6220,7 +6325,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // is kept in bgFxRawTrackRef; the processed track replaces it as the
   // published camera track (LiveKit) and on the P2P senders, and the
   // local preview stream shows the processed picture. Anything that
-  // fails falls back to the normal camera with a plain message — the
+  // fails falls back to the normal camera with a plain message, the
   // effect never breaks the call.
   const replaceLocalVideoTrack = async (track: MediaStreamTrack) => {
     localVideoTrackRef.current = track;
@@ -6240,7 +6345,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const enableBackgroundFx = async (mode: 'blur' | 'giin') => {
     if (lowBandwidthRef.current) {
-      triggerToast('Background effects are off in low-bandwidth mode — turn it off to use them.');
+      triggerToast('Background effects are off in low-bandwidth mode, turn it off to use them.');
       return;
     }
     if (!isVideoOnRef.current) {
@@ -6258,7 +6363,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       const session = await startBackgroundFx(raw, mode, () => {
         // The model failed mid-call: fall back to the normal camera.
         void disableBackgroundFx();
-        triggerToast('The background effect stopped — your video is back to normal.');
+        triggerToast('The background effect stopped, your video is back to normal.');
       });
       bgFxSessionRef.current = session;
       bgFxRawTrackRef.current = raw;
@@ -6268,7 +6373,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (e: any) {
       setBgFxStatus(null);
       setBgFxMode('none');
-      triggerToast(e?.message || 'Background effects are not available right now — your video stays normal.');
+      triggerToast(e?.message || 'Background effects are not available right now, your video stays normal.');
     }
   };
 
@@ -6307,7 +6412,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // ONE shared sound engine for hand-raise chimes AND the soundboard.
   // Every sound is built from shaped WebAudio tones / filtered noise with
   // a real attack/decay envelope (never a bare oscillator switched on at
-  // full gain — that clicks). Peaks stay low (<= 0.12) and sawtooth
+  // full gain, that clicks). Peaks stay low (<= 0.12) and sawtooth
   // voices run through a lowpass, so nothing blasts or screeches.
   // Delivery reuses the single Supabase Realtime signalling channel
   // (sigChannelRef): hand-raises ride their existing 'hand-raise' event
@@ -6321,7 +6426,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (!soundEffectsEnabledRef.current) return;
       const ctx = getAudioCtx();
       // Round 3: a suspended AudioContext (iOS Safari outside a user
-      // gesture) schedules tones against a frozen clock — they never
+      // gesture) schedules tones against a frozen clock, they never
       // sound. That is why a hand-raise chime was only heard by the
       // raiser (who had just tapped): everyone else's context was
       // suspended. Queue the sound instead and flush it on the next
@@ -6408,7 +6513,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         });
       } else if (type === 'horn') {
         // Party horn: a bright two-note "toot" (rising slide) with a
-        // breathy blow underneath — lowpassed, no raw sawtooth blast.
+        // breathy blow underneath, lowpassed, no raw sawtooth blast.
         tone({ wave: 'sawtooth', freq: 392, freqEnd: 523.25, at: 0, dur: 0.32, peak: 0.05, attack: 0.02, lowpass: 1600 });
         tone({ wave: 'sawtooth', freq: 392, freqEnd: 659.25, at: 0.32, dur: 0.5, peak: 0.06, attack: 0.02, lowpass: 1600 });
         tone({ wave: 'triangle', freq: 784, freqEnd: 1046.5, at: 0.32, dur: 0.5, peak: 0.05, attack: 0.02 });
@@ -6426,7 +6531,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         tone({ wave: 'sine', freq: 880, at: 0.14, dur: 0.7, peak: 0.11 });
         tone({ wave: 'triangle', freq: 1760, at: 0.14, dur: 0.4, peak: 0.02 });
       } else if (type === 'hand-comment') {
-        // Comment: one soft low "plip" — calm, unobtrusive.
+        // Comment: one soft low "plip", calm, unobtrusive.
         tone({ wave: 'sine', freq: 523.25, at: 0, dur: 0.45, peak: 0.10 });
         tone({ wave: 'triangle', freq: 1046.5, at: 0, dur: 0.25, peak: 0.02 });
       } else if (type === 'hand-idea') {
@@ -6436,26 +6541,26 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         tone({ wave: 'sine', freq: 783.99, at: 0.22, dur: 0.55, peak: 0.11 });
         tone({ wave: 'triangle', freq: 1567.98, at: 0.22, dur: 0.3, peak: 0.02 });
       } else if (type === 'hand-urgent') {
-        // Urgent: two crisp attention pings over a soft low pulse —
+        // Urgent: two crisp attention pings over a soft low pulse ,
         // distinct from every other chime, still not a siren.
         tone({ wave: 'triangle', freq: 1174.66, at: 0, dur: 0.28, peak: 0.12 });
         tone({ wave: 'triangle', freq: 1174.66, at: 0.3, dur: 0.35, peak: 0.12 });
         tone({ wave: 'sine', freq: 196, at: 0, dur: 0.65, peak: 0.06 });
       } else if (type === 'join') {
-        // Round 3: join — soft rising two-note blip, a new person arrived.
+        // Round 3: join, soft rising two-note blip, a new person arrived.
         tone({ wave: 'sine', freq: 587.33, at: 0, dur: 0.35, peak: 0.07 });
         tone({ wave: 'sine', freq: 880, at: 0.1, dur: 0.45, peak: 0.07 });
       } else if (type === 'leave') {
-        // Round 3: leave — soft falling tone, someone left.
+        // Round 3: leave, soft falling tone, someone left.
         tone({ wave: 'sine', freq: 440, at: 0, dur: 0.4, peak: 0.06 });
         tone({ wave: 'sine', freq: 329.63, at: 0.12, dur: 0.4, peak: 0.05 });
       } else if (type === 'admit-request') {
-        // Someone is waiting to be admitted — a "knock on the door"
+        // Someone is waiting to be admitted, a "knock on the door"
         // followed by a bright rising chime. The two low knocks make
         // it unmistakable on first hearing: nothing else in the app
         // knocks. Distinct from hand-question (E5->A5 sine),
         // hand-idea (C-E-G arpeggio), join (D5->A5) and leave
-        // (falling A4->E4) — different rhythm, timbre and contour.
+        // (falling A4->E4), different rhythm, timbre and contour.
         tone({ wave: 'triangle', freq: 392, at: 0, dur: 0.12, peak: 0.11 });
         tone({ wave: 'triangle', freq: 392, at: 0.16, dur: 0.12, peak: 0.11 });
         tone({ wave: 'sine', freq: 987.77, at: 0.34, dur: 0.3, peak: 0.11 });
@@ -6467,7 +6572,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         tone({ wave: 'sine', freq: 783.99, at: 0, dur: 0.5, peak: 0.10 });
         tone({ wave: 'sine', freq: 1046.5, at: 0.08, dur: 0.45, peak: 0.05 });
       }
-      // Flush anything queued while the context was suspended — a
+      // Flush anything queued while the context was suspended, a
       // remote chime that arrived before this client ever tapped.
       if (pendingSoundsRef.current.length > 0) {
         const queued = pendingSoundsRef.current;
@@ -6523,7 +6628,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Waiting-room request chime: one unique sound per newly-waiting
   // guest. The guest re-announces every 2s and the list is re-polled
   // every 5s, so the chime is keyed on guest identity (row id, else
-  // signalling key) — never on the list changing. Guests already
+  // signalling key), never on the list changing. Guests already
   // waiting when the host joins chime once on first sight; a guest
   // who leaves and returns chimes again (their keys are forgotten
   // once they leave the list). playSynthesizedSound already queues
@@ -6553,7 +6658,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const cleanOptions = newPollOptions.filter(o => o.trim() !== '');
     if (cleanOptions.length < 2) return;
     // Quiz mode needs a correct answer picked before launch. The answer is
-    // matched by its TEXT, not its row number — empty options are filtered
+    // matched by its TEXT, not its row number, empty options are filtered
     // out of cleanOptions, which would shift the indices.
     const correctText = newPollIsQuiz && newPollCorrectOption !== null
       ? (newPollOptions[newPollCorrectOption] || '').trim()
@@ -6567,7 +6672,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       options: cleanOptions,
       votes: cleanOptions.map(() => 0),
       creatorId: currentUser?.id || myKey,
-      // Phase 1 — quiz mode + closed state. isClosed freezes voting and
+      // Phase 1, quiz mode + closed state. isClosed freezes voting and
       // reveals results to everyone; correctOption is only revealed once
       // the poll is closed.
       isQuiz: newPollIsQuiz,
@@ -6628,7 +6733,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Phase 1 — host closes a poll: voting stops, results are shown to
+  // Phase 1, host closes a poll: voting stops, results are shown to
   // everyone, and a quiz reveals its correct answer + leaderboard.
   const handleClosePoll = (pollId: string) => {
     setPolls(prev => prev.map(p => p.id === pollId ? { ...p, isClosed: true } : p));
@@ -6641,7 +6746,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Phase 1 — quiz leaderboard, derived from the votes: a voter scores 1
+  // Phase 1, quiz leaderboard, derived from the votes: a voter scores 1
   // point while their CURRENT vote is the correct answer (changing a vote
   // away from the right answer loses the point, exactly like the totals).
   const participantNameForKey = (key: string): string => {
@@ -6688,7 +6793,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // In-meeting file viewer (view-only): images full-size, PDFs in an
   // in-app frame, plain-text files as text. No download button, no
-  // link — a shared file stays in the meeting, and the server deletes
+  // link, a shared file stays in the meeting, and the server deletes
   // it when the host ends the meeting (see the end-meeting API route).
   const [fileViewer, setFileViewer] = useState<{ name: string; url: string; kind: 'image' | 'pdf' | 'text' | 'other' } | null>(null);
   const [fileViewerText, setFileViewerText] = useState<string | null>(null);
@@ -6698,7 +6803,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setFileViewerText(null);
     setFileViewerGone(false);
     // A definite 404/410 here means the file was already deleted
-    // (meeting ended) — only that counts; other failures leave the
+    // (meeting ended), only that counts; other failures leave the
     // viewer to show whatever it can.
     fetch(f.url, { method: 'HEAD' }).then(r => { if (r.status === 404 || r.status === 410) setFileViewerGone(true); }).catch(() => {});
     if (f.kind === 'text') {
@@ -6708,11 +6813,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Chat file sharing: upload to the 'chat-files' bucket, then post the
   // file as a chat message. The message text carries only the storage
-  // path (`📎 name — file:<meetingId>/<file>`) — never a raw URL — and
+  // path (`📎 name, file:<meetingId>/<file>`), never a raw URL, and
   // renderChatText shows it VIEW-ONLY (inline thumbnail for images,
   // in-app viewer for everything, no download link). Guests cannot send
-  // files — same
-  // as text chat, sending needs a signed-in session — and the file is
+  // files, same
+  // as text chat, sending needs a signed-in session, and the file is
   // only uploaded after that check, so a guest never uploads a file
   // that can never be posted.
   const handleAttachFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -6720,7 +6825,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     e.target.value = '';
     if (!file) return;
     if (file.size > 25 * 1024 * 1024) {
-      triggerToast('That file is larger than 25 MB — chat files are limited to 25 MB.');
+      triggerToast('That file is larger than 25 MB, chat files are limited to 25 MB.');
       return;
     }
     const { data: { session } } = await supabase.auth.getSession();
@@ -6735,7 +6840,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await giinApi.sendMessage({
         thread_id: meetingId,
         sender_name: senderName,
-        text: `📎 ${name} — file:${path}`,
+        text: `📎 ${name}, file:${path}`,
         user_id: currentUser?.id
       });
       const list = await giinApi.getMessages(meetingId);
@@ -6754,10 +6859,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // A file message renders VIEW-ONLY, inside the meeting — never as a
+  // A file message renders VIEW-ONLY, inside the meeting, never as a
   // download link. Images get an inline thumbnail; every file opens in
   // the in-app viewer (openFileViewer). The message text carries only
-  // the storage path (`📎 name — file:<meetingId>/<file>`); older
+  // the storage path (`📎 name, file:<meetingId>/<file>`); older
   // messages that still carry a full https URL render the same way,
   // with the URL hidden. Anything else renders as plain text.
   const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'bmp', 'svg'];
@@ -6770,7 +6875,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     return 'other';
   };
   const renderChatText = (text: string) => {
-    const m = text.match(/^📎 (.+) — (?:file:)?(\S+)$/);
+    const m = text.match(/^📎 (.+), (?:file:)?(\S+)$/);
     if (!m) return text;
     const name = m[1];
     const ref = m[2];
@@ -6791,7 +6896,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             onClick={() => openFileViewer({ name, url, kind: 'image' })}
             style={{ display: 'block', marginTop: '0.3rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-accent)', cursor: 'pointer', overflowWrap: 'break-word' }}
           >
-            📎 {name} — tap to view
+            📎 {name}, tap to view
           </span>
         </span>
       );
@@ -6801,7 +6906,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onClick={() => openFileViewer({ name, url, kind })}
         style={{ color: 'var(--color-accent)', fontWeight: 600, cursor: 'pointer' }}
       >
-        📎 {name} — tap to view
+        📎 {name}, tap to view
       </span>
     );
   };
@@ -6809,7 +6914,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const sendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     // The host can lock chat for everyone except the host. Enforce it here
-    // as well as in the UI — a disabled input alone is not a lock.
+    // as well as in the UI, a disabled input alone is not a lock.
     if (isChatLocked && !isAdmin) return;
     if (!chatInput.trim()) return;
 
@@ -6855,23 +6960,23 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (err) {
       // Never silently drop a failed send: take the optimistic message
       // back, put the text back in the box, and say why. (Guests hit this
-      // when the superadmin flag is off — sending needs a signed-in
-      // session unless guests_can_chat is on, see giinApi.sendMessage —
+      // when the superadmin flag is off, sending needs a signed-in
+      // session unless guests_can_chat is on, see giinApi.sendMessage ,
       // so the failure is honest, not a phantom send.)
       console.error('Failed to send chat message:', err);
       setMessages(prev => prev.filter(m => m.id !== optimistic.id));
       setChatInput(text);
-      triggerToast(err instanceof Error ? err.message : 'Could not send the message — please try again.');
+      triggerToast(err instanceof Error ? err.message : 'Could not send the message, please try again.');
     }
   };
 
   const isDirectCall = isP2PCall && participants.length <= 1 && !isScreenSharing && !Object.keys(peerStates).some(k => peerStates[k].isScreenSharing);
 
-  // Fix Round 6 (Phase 6) — the ended screen. Rendered BEFORE the
+  // Fix Round 6 (Phase 6), the ended screen. Rendered BEFORE the
   // minimised branch so a minimised participant sees it too. The media
   // is already disconnected by enterEndedState; this screen only
   // explains what happened and sends the user back to the dashboard.
-  // onEndMeeting(true) skips the server end — it already happened.
+  // onEndMeeting(true) skips the server end, it already happened.
   if (endedState) {
     return (
       <div style={{
@@ -6982,12 +7087,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   if (isMinimized) {
     // Determine which stream to display in the mini window
     // Phase A (1): fall back to the screen-track map, like the main
-    // layout — a missed broadcast must not hide a live share here either.
+    // layout, a missed broadcast must not hide a live share here either.
     const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing) || Object.keys(remoteScreenStreams)[0];
     const activeRemoteKey = Object.keys(peerStates).find(k => peerStates[k].isSpeaking) || Object.keys(remoteStreams)[0] || Object.keys(livekitRemoteStreams)[0];
 
     // Fix Round 6: the mini window used to read the P2P stream map
-    // only — with the mesh gated off in LiveKit mode that map is
+    // only, with the mesh gated off in LiveKit mode that map is
     // empty, so minimising showed yourself instead of the speaker.
     // Resolve through the active (LiveKit-first) stream, like the
     // tiles do.
@@ -7043,7 +7148,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               autoPlay
               playsInline
               // Fix Round 6: when minimised this is the only player for
-              // the remote voice — except with Spatial Audio on, when
+              // the remote voice, except with Spatial Audio on, when
               // the WebAudio panner also plays it. Mute the element
               // then, like the grid tiles do.
               muted={isLocalStream || isSpatialAudioEnabled}
@@ -7260,7 +7365,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           )}
         </div>
       )}
-      {/* Phase 3 (Feature 1) — host broadcast banner. Shown to everyone
+      {/* Phase 3 (Feature 1), host broadcast banner. Shown to everyone
           (main room and all breakout rooms) until dismissed or the
           breakouts end. Sits below the room banner when both show. */}
       {breakoutBroadcast && (
@@ -7294,7 +7399,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </button>
         </div>
       )}
-      {/* Phase B (21): automatic low-bandwidth suggestion — shown when
+      {/* Phase B (21): automatic low-bandwidth suggestion, shown when
           the Phase A quality guard steps the uplink down. */}
       {showLowBandwidthSuggestion && !lowBandwidth && (
         <div style={{
@@ -7317,7 +7422,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           maxWidth: '90%'
         }}>
           <WifiOff size={14} color="var(--color-accent)" />
-          <span>Connection is weak — switch to low-bandwidth mode (audio first, video off)?</span>
+          <span>Connection is weak, switch to low-bandwidth mode (audio first, video off)?</span>
           <button
             onClick={() => void setLowBandwidthMode(true)}
             style={{ border: 'none', background: 'var(--color-accent)', color: 'black', padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -7353,7 +7458,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
         }}>
           <WifiOff size={14} />
-          <span>Low-bandwidth mode — audio first, your video is off</span>
+          <span>Low-bandwidth mode, audio first, your video is off</span>
           <button
             onClick={() => void setLowBandwidthMode(false)}
             style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700, color: '#111827', textDecoration: 'underline', padding: 0 }}
@@ -7485,6 +7590,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               </div>
             </div>
 
+            {/* Phase C2a (1 + 2): short link and QR code, host only. */}
+            {isAdmin && (<ShortLinkBox meetingId={meetingId} showQr />)}
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
               <div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Meeting ID</span>
@@ -7495,7 +7603,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Passcode</span>
                 <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>
-                  {passcode || '—'}
+                  {passcode || ','}
                 </div>
               </div>
             </div>
@@ -7507,7 +7615,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 Topic: ${meetingTitle}
 Join Link: ${link}
 Meeting ID: ${meetingId}
-Passcode: ${passcode || '—'}
+Passcode: ${passcode || ','}
 
 Media encrypted in transit (DTLS-SRTP).`;
                 navigator.clipboard.writeText(invitation);
@@ -7520,7 +7628,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               {copiedInfo === 'details' ? <Check size={12} /> : <Copy size={12} />}
               <span>{copiedInfo === 'details' ? 'Invitation Details Copied' : 'Copy Invitation Email'}</span>
             </button>
-            {/* Phase 2 (#2) — WhatsApp invite: a wa.me share link, no
+            {/* Phase 2 (#2), WhatsApp invite: a wa.me share link, no
                 provider needed. Opens WhatsApp with the invitation ready
                 to send; the host picks the contact there. */}
             <button
@@ -7569,7 +7677,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           </div>
         )}
 
-        {/* Waiting Room Alert Overlay for Hosts — the full queue, not just
+        {/* Waiting Room Alert Overlay for Hosts, the full queue, not just
             the first person waiting. */}
         {canAdmit && waitingList.length > 0 && (
           <div className="scroll-refined-dark" style={{
@@ -7659,7 +7767,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <button onClick={() => setAgendaNoteVisible(false)} aria-label="Close agenda" style={{ background: 'none', border: 'none', color: '#0B0F19', fontSize: '1.2rem', cursor: 'pointer', lineHeight: 1, padding: '0.1rem 0.3rem' }}>&times;</button>
             </div>
             <ol style={{ margin: 0, padding: '0.75rem 0.9rem 0.9rem 1.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600, lineHeight: 1.45 }}>
-              {agendaItems.map(item => (<li key={item.id}>{item.startTime && item.endTime ? `${formatAgendaTime(item.startTime)} – ${formatAgendaTime(item.endTime)} · ` : ''}{item.text}</li>))}
+              {agendaItems.map(item => (<li key={item.id} style={{ display: 'flex', gap: '0.4rem', alignItems: 'baseline', flexWrap: 'wrap' }}><span style={{ flex: '1 1 auto' }}>{item.startTime && item.endTime ? `${formatAgendaTime(item.startTime)} to ${formatAgendaTime(item.endTime)} · ` : ''}{item.text}</span><AgendaTimerChip item={item} /></li>))}
             </ol>
           </div>
         )}
@@ -7703,7 +7811,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         // Fix Round 6: the grid tile already mutes its
                         // audio element when Spatial Audio is on (the
                         // WebAudio panner plays the voice instead). This
-                        // 1:1 view did not — so with Spatial on, a voice
+                        // 1:1 view did not, so with Spatial on, a voice
                         // played twice, centre + panned, slightly out of
                         // sync: the echo / interference in a two-person
                         // call.
@@ -8069,7 +8177,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             // has arrived, not only when the sharer's broadcast flag
             // says so. A missed broadcast (joining mid-share, a dropped
             // announcement) used to leave the share invisible even
-            // though the track was already in the room — the layout
+            // though the track was already in the room, the layout
             // stayed on the normal grid and the screen sat in
             // remoteScreenStreams unused. The track map is the truth.
             const hasScreenShare = isScreenSharing || Object.keys(peerStates).some(k => peerStates[k].isScreenSharing) || Object.keys(remoteScreenStreams).length > 0;
@@ -8085,7 +8193,9 @@ Media encrypted in transit (DTLS-SRTP).`;
               .filter(p => (p.userId || p.id) !== myKey)
               .map(p => p.userId || p.id);
             const speakingPeerKey = remotePeerKeys.find(k => peerStates[k]?.isSpeaking && !peerStates[k]?.isMuted);
-            const computedSpotlightKey = (layoutMode === 'speaker' || layoutMode === 'side')
+            // Phase C2a (8): Focus uses the same spotlight as Speaker
+            // and Side-by-side, then hides every other tile.
+            const computedSpotlightKey = (layoutMode === 'speaker' || layoutMode === 'side' || layoutMode === 'focus')
               ? (spotlightKey && (spotlightKey === 'local' || remotePeerKeys.includes(spotlightKey)) ? spotlightKey : (pinnedKey && (pinnedKey === 'local' || remotePeerKeys.includes(pinnedKey)) ? pinnedKey : (speakingPeerKey || remotePeerKeys[0] || 'local')))
               : null;
 
@@ -8283,7 +8393,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 // fallback when LiveKit could not connect at all.
                 // One honest tile state: live video only on a live track,
                 // "Connecting..." only while a camera is actually on its
-                // way — never for a participant with no tracks at all.
+                // way, never for a participant with no tracks at all.
                 const tile = getRemoteTileState(peerKey);
                 const activeStreamObj = tile.activeStreamObj;
                 const hasConnection = tile.isPresent;
@@ -8348,7 +8458,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         <Star size={11} /> SPOTLIGHT
                       </span>
                     )}
-                    {/* Phase B (14): host spotlight — the host spotlights
+                    {/* Phase B (14): host spotlight, the host spotlights
                         one speaker for EVERYONE; a participant's own pin
                         (above) only changes what they watch. */}
                     {isAdmin && (
@@ -8382,7 +8492,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         <Star size={13} />
                       </button>
                     )}
-                    {/* Fix Round 8: host mute on the video card — the same
+                    {/* Fix Round 8: host mute on the video card, the same
                         server-verified mute as the participants list, with
                         its own unmistakable button (red pill, MicOff icon
                         + "Mute" label) so it is never confused with the
@@ -8519,7 +8629,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   })()}
 
                   {/* Phase A (3): a peer whose connection is healing
-                      gets a small pulsing dot only — no words, no
+                      gets a small pulsing dot only, no words, no
                       dimming overlay. Reconnects happen quietly. */}
                   {pState.isReconnecting && (
                     <span
@@ -8673,7 +8783,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       })()
                     )}
 
-                    {/* Secure Fintech Watermark Overlay — wired to the
+                    {/* Secure Fintech Watermark Overlay, wired to the
                         Branding & Layout watermark settings: hidden when
                         the mode is 'none'; size and opacity follow the
                         watermark scale / opacity sliders. */}
@@ -8793,7 +8903,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             // No Screen Share: Normal grid tiling
             return (
-              <div className={`meeting-grid scroll-refined${layoutMode === 'speaker' ? ' speaker-mode' : ''}${layoutMode === 'side' ? ' side-mode' : ''}`} style={{
+              <div className={`meeting-grid scroll-refined${layoutMode === 'speaker' ? ' speaker-mode' : ''}${layoutMode === 'side' ? ' side-mode' : ''}${layoutMode === 'focus' ? ' focus-mode' : ''}`} style={{
                 flex: 1,
                 minHeight: 0,
                 minWidth: 0,
@@ -8825,11 +8935,18 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}
                   />
                 )}
+                {/* Phase C2a (8): Focus mode banner, one tap back to everyone. */}
+                {layoutMode === 'focus' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.75rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(250,189,2,0.08)', fontSize: '0.8rem', color: 'white', position: 'relative', zIndex: 5 }}>
+                    <span style={{ flex: '1 1 auto', minWidth: 0 }}>{t('room.focusOn')}</span>
+                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }} onClick={() => setLayoutMode('grid')}>Show everyone</button>
+                  </div>
+                )}
                 {/* Portrait-phone tile auto-size: this inner wrapper carries
                     the wrap layout and margin:auto centres the tiles when
                     they fit, but collapses to the top (never clips the
                     first tiles) when 3+ tiles overflow the viewport height
-                    — plain align/justify centering on a scrollable flex
+                   , plain align/justify centering on a scrollable flex
                     container hides the top rows above the scroll origin. */}
                 <div className="meeting-tiles" style={{
                   margin: '0 auto',
@@ -8934,7 +9051,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </label>
               <input 
                 type="text" 
-                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !canSendChat ? "Sign in to send messages — guests can read chat" : "Send message to everyone..."} 
+                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !canSendChat ? "Sign in to send messages, guests can read chat" : "Send message to everyone..."} 
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 disabled={(!canSendChat || (isChatLocked && !isAdmin))}
@@ -9137,7 +9254,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             onClick={async () => {
                               const { error } = await giinApi.setParticipantRole(meetingId, p.id, 'CoHost');
                               if (error) {
-                                triggerToast(`Could not make ${p.name} a co-host — please try again.`);
+                                triggerToast(`Could not make ${p.name} a co-host, please try again.`);
                               } else {
                                 setCoHostKeys(prev => {
                                   const next = new Set(prev);
@@ -9159,7 +9276,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             onClick={async () => {
                               const { error } = await giinApi.setParticipantRole(meetingId, p.id, 'Moderator');
                               if (error) {
-                                triggerToast(`Could not make ${p.name} a moderator — please try again.`);
+                                triggerToast(`Could not make ${p.name} a moderator, please try again.`);
                               } else {
                                 setModeratorKeys(prev => {
                                   const next = new Set(prev);
@@ -9181,7 +9298,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             onClick={async () => {
                               const { error } = await giinApi.setParticipantRole(meetingId, p.id, 'Participant');
                               if (error) {
-                                triggerToast(`Could not remove ${p.name}'s role — please try again.`);
+                                triggerToast(`Could not remove ${p.name}'s role, please try again.`);
                               } else {
                                 setCoHostKeys(prev => {
                                   const next = new Set(prev);
@@ -9297,10 +9414,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                         onClick={async () => {
                           try {
                             await giinApi.admitParticipant(meetingId, rp.id, 'Admitted');
-                            triggerToast(`${rp.name} was invited back — they can rejoin with the same link.`);
+                            triggerToast(`${rp.name} was invited back, they can rejoin with the same link.`);
                             loadRemovedParticipants();
                           } catch (err: any) {
-                            triggerToast(err?.message || `Could not invite ${rp.name} back — please try again.`);
+                            triggerToast(err?.message || `Could not invite ${rp.name} back, please try again.`);
                           }
                         }}
                         style={{ border: 'none', background: 'rgba(16, 185, 129, 0.12)', cursor: 'pointer', color: '#10B981', fontSize: '0.7rem', fontWeight: 600, padding: '3px 8px', borderRadius: '4px' }}
@@ -9534,7 +9651,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Breakout Rooms</span>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                  Breakout rooms work just like the main room — each room is separate, so video quality holds with several people in a room.
+                  Breakout rooms work just like the main room, each room is separate, so video quality holds with several people in a room.
                 </span>
                 {breakoutTimeRemaining === null ? (
                   <>
@@ -9567,13 +9684,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                       </div>
                     </div>
 
-                    {/* Phase B (20): pre-assign rooms before starting —
+                    {/* Phase B (20): pre-assign rooms before starting ,
                         the host places each person in a room in advance;
                         anyone left on Auto is dealt round-robin. */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Place people in rooms first (optional):</span>
                       {participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').length === 0 ? (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No other participants yet — they can be placed once they join.</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No other participants yet, they can be placed once they join.</span>
                       ) : (
                         participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').map(p => {
                           const peerKey = p.userId || p.id;
@@ -9615,7 +9732,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       {Math.floor(breakoutTimeRemaining / 60)}:{(breakoutTimeRemaining % 60).toString().padStart(2, '0')}
                     </span>
                     {breakoutTimeRemaining !== null && breakoutTimeRemaining <= 60 && (
-                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#F87171' }}>Ending soon — wrap up</span>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#F87171' }}>Ending soon, wrap up</span>
                     )}
                     
                     {/* Host Join Room Selector */}
@@ -9659,7 +9776,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       </div>
                     </div>
 
-                    {/* Phase 3 (Feature 1) — who is in which room, with
+                    {/* Phase 3 (Feature 1), who is in which room, with
                         live moves. The roster is the shared assignment
                         record: round-robin at start, updated on every
                         move for every moderator's panel. Anyone who
@@ -9667,7 +9784,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         host moves them in. Moves and broadcasts travel
                         on the meeting-events channel, so they reach
                         every room. The video in each room runs on the
-                        LiveKit server — the roster itself comes from
+                        LiveKit server, the roster itself comes from
                         the admitted-participants list plus these
                         assignments, not from LiveKit presence, so it
                         stays correct across rooms. */}
@@ -9699,7 +9816,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       )}
                     </div>
 
-                    {/* Phase 3 (Feature 1) — broadcast a message to all rooms at once. */}
+                    {/* Phase 3 (Feature 1), broadcast a message to all rooms at once. */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'left' }}>Broadcast to all rooms:</span>
                       <div style={{ display: 'flex', gap: '4px' }}>
@@ -9831,14 +9948,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                         + Add Option
                       </button>
                     </div>
-                    {/* Phase 1 — quiz mode: one option is the correct answer. */}
+                    {/* Phase 1, quiz mode: one option is the correct answer. */}
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'white', cursor: 'pointer' }}>
                       <input
                         type="checkbox"
                         checked={newPollIsQuiz}
                         onChange={(e) => { setNewPollIsQuiz(e.target.checked); if (!e.target.checked) setNewPollCorrectOption(null); }}
                       />
-                      Quiz mode — mark one correct answer and score voters
+                      Quiz mode, mark one correct answer and score voters
                     </label>
                     {newPollIsQuiz && newPollCorrectOption === null && (
                       <span style={{ fontSize: '0.75rem', color: '#F59E0B' }}>Pick the correct answer above before launching.</span>
@@ -9863,7 +9980,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     polls.map(p => {
                       const totalVotes = p.votes.reduce((a: number, b: number) => a + b, 0);
                       const hasVoted = userVotes[p.id] !== undefined;
-                      // Phase 1 — a closed poll shows its results to everyone,
+                      // Phase 1, a closed poll shows its results to everyone,
                       // even those who never voted. The correct answer of a
                       // quiz is only revealed once the poll is closed.
                       const showResults = hasVoted || p.isClosed;
@@ -10135,12 +10252,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
                   {noiseSuppressionStatus === 'unavailable'
-                    ? 'Noise cleaning could not start on this device — your normal microphone is still on, with the browser’s own noise reduction.'
+                    ? 'Noise cleaning could not start on this device, your normal microphone is still on, with the browser’s own noise reduction.'
                     : noiseSuppressionStatus === 'loading'
                     ? 'Starting noise cleaning…'
                     : isNoiseSuppressionOn
                     ? 'AI noise cleaning is on: street noise, generators, keyboards and fans are removed on this device before anyone hears them. It keeps working in low-bandwidth mode, and your audio never leaves this device.'
-                    : 'Noise cleaning is off — only the browser’s own noise reduction is on. Turn it on to strip out street noise, generators, keyboards and fans before anyone hears them.'}
+                    : 'Noise cleaning is off, only the browser’s own noise reduction is on. Turn it on to strip out street noise, generators, keyboards and fans before anyone hears them.'}
                 </p>
               </div>
 
@@ -10175,7 +10292,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
-                  Studio Voice focuses your voice with a gentle high-pass filter, presence band and soft compression. Echo cancellation and gain control are already on for every microphone — noise is handled by Noise Cleaning above.
+                  Studio Voice focuses your voice with a gentle high-pass filter, presence band and soft compression. Echo cancellation and gain control are already on for every microphone, noise is handled by Noise Cleaning above.
                 </p>
               </div>
 
@@ -10246,7 +10363,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   ))}
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
-                  Soft Blur blurs your whole video — it is not a background blur. For a true background effect, use Background below.
+                  Soft Blur blurs your whole video, it is not a background blur. For a true background effect, use Background below.
                 </p>
               </div>
 
@@ -10376,7 +10493,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   {captionsUnavailable && (
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4, padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>{captionsUnavailable}</p>
                   )}
-                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>Captions are yours alone to turn on or off — each person chooses for themselves. When the host ends the meeting, the full transcript is saved to the meeting record.</p>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>Captions are yours alone to turn on or off, each person chooses for themselves. When the host ends the meeting, the full transcript is saved to the meeting record.</p>
                   {/* Phase C1 (36), caption language: ONE language per
                       person (or none), never all three at once. Kinyarwanda
                       captions are English text translated into Kinyarwanda. */}
@@ -10526,7 +10643,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </div>
                   ) : (
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', height: '200px', textAlign: 'center' }}>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{summaryNote || 'Generate a short summary of this meeting from the transcript — decisions and action items included.'}</span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{summaryNote || 'Generate a short summary of this meeting from the transcript, decisions and action items included.'}</span>
                       <button 
                         onClick={generateAiSummary}
                         className="premium-btn premium-btn-primary"
@@ -10582,7 +10699,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   textAlign: 'left'
                 }}
               >
-                {soundEffectsEnabled ? '🔔 Sounds on — tap to mute' : '🔕 Sounds muted — tap to unmute'}
+                {soundEffectsEnabled ? '🔔 Sounds on, tap to mute' : '🔕 Sounds muted, tap to unmute'}
               </button>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -10699,10 +10816,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                       return;
                     }
                     const link = buildJoinLink(meetingId, passcode);
-                    const subject = encodeURIComponent(`Invitation: ${meetingTitle} — ${getLocalBrandName()}`);
+                    const subject = encodeURIComponent(`Invitation: ${meetingTitle}, ${getLocalBrandName()}`);
                     const body = encodeURIComponent(`Please join my ${getLocalBrandName()} video meeting:\nTopic: ${meetingTitle}\nJoin link: ${link}\nMeeting ID: ${meetingId}\nPasscode: ${passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
                     window.location.href = `mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`;
-                    setInviteNote(`Your mail app opened with the invitation ready to send. No email is sent automatically — ${getLocalBrandName()} has no mail provider configured yet.`);
+                    setInviteNote(`Your mail app opened with the invitation ready to send. No email is sent automatically, ${getLocalBrandName()} has no mail provider configured yet.`);
                   }}
                   className="premium-btn premium-btn-secondary"
                   style={{ width: '100%', justifyContent: 'center', gap: '0.5rem', fontSize: '0.8rem' }}
@@ -10797,21 +10914,24 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>End
                         <input type="time" value={newAgendaEnd} onChange={(e) => setNewAgendaEnd(e.target.value)} className="premium-input" style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem' }} />
                       </label>
-                      <span>Optional — timed items alert only the admin at start and end.</span>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>{t('agenda.duration')}
+                        <input type="number" min={1} max={480} value={newAgendaDuration} onChange={(e) => setNewAgendaDuration(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))} className="premium-input" style={{ width: '64px', padding: '0.35rem 0.5rem', fontSize: '0.8rem' }} aria-label={t('agenda.duration')} />
+                      </label>
+                      <span>Optional. Timed items alert only the admin at start and end, and the timer counts down next to each item.</span>
                     </div>
                   </form>
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   {agendaItems.length === 0 ? (
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem 0' }}>{isAdmin ? 'No agenda yet — add the first item above.' : 'No agenda has been set yet.'}</p>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem 0' }}>{isAdmin ? 'No agenda yet, add the first item above.' : 'No agenda has been set yet.'}</p>
                   ) : agendaItems.map((item, idx) => (
                     <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.6rem 0.75rem', border: '1px solid #1E293B', borderRadius: '8px', backgroundColor: 'rgba(250, 189, 2, 0.06)' }}>
                       <span style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', color: '#0B0F19', fontSize: '0.7rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{idx + 1}</span>
                       <span style={{ flex: 1, fontSize: '0.85rem', color: 'white', lineHeight: 1.4 }}>
-                        {item.startTime && item.endTime && (
-                          <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--color-accent)', fontWeight: 700 }}>
-                            {formatAgendaTime(item.startTime)} – {formatAgendaTime(item.endTime)}
-                            {agendaItemStatus(item) === 'live' ? '  •  LIVE NOW' : agendaItemStatus(item) === 'done' ? '  •  Done' : ''}
+                        {((item.startTime && item.endTime) || item.durationMinutes) && (
+                          <span style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', fontSize: '0.72rem', color: 'var(--color-accent)', fontWeight: 700 }}>
+                            {item.startTime && item.endTime ? `${formatAgendaTime(item.startTime)} to ${formatAgendaTime(item.endTime)}` : ''}
+                            <AgendaTimerChip item={item} />
                           </span>
                         )}
                         {item.text}
@@ -10829,7 +10949,7 @@ Media encrypted in transit (DTLS-SRTP).`;
       </div>
 
       {/* Fix Round 8 (#3): a failed screen share stays visible, not a
-          4-second toast that can be missed — with a one-tap retry. */}
+          4-second toast that can be missed, with a one-tap retry. */}
       {screenShareError && (
         <div role="alert" style={{ margin: '0 1rem', padding: '0.6rem 0.9rem', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.45)', borderRadius: '8px', color: '#FCA5A5', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ flex: 1, minWidth: '200px' }}>{screenShareError}</span>
@@ -10883,10 +11003,10 @@ Media encrypted in transit (DTLS-SRTP).`;
             title={isMuted ? "Unmute Mic (M)" : "Mute Mic (M)"}
           >
             {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
-            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isMuted ? 'Unmute' : 'Mute'}</span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isMuted ? t('room.unmute') : t('room.mute')}</span>
           </button>
 
-          {/* Feature 17: AI noise cleaning toggle — on by default. */}
+          {/* Feature 17: AI noise cleaning toggle, on by default. */}
           <button
             onClick={() => void toggleNoiseSuppression()}
             style={{
@@ -10905,7 +11025,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               transition: 'all 0.2s ease',
               backdropFilter: 'blur(4px)'
             }}
-            title={noiseSuppressionStatus === 'unavailable' ? 'Noise cleaning could not start on this device — your normal microphone is still on' : isNoiseSuppressionOn ? 'Noise cleaning: on — background noise is removed before others hear it' : 'Noise cleaning: off — turn on to remove background noise'}
+            title={noiseSuppressionStatus === 'unavailable' ? 'Noise cleaning could not start on this device, your normal microphone is still on' : isNoiseSuppressionOn ? 'Noise cleaning: on, background noise is removed before others hear it' : 'Noise cleaning: off, turn on to remove background noise'}
           >
             <AudioLines size={18} />
             <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isNoiseSuppressionOn ? 'Clean' : 'Noise'}</span>
@@ -10960,7 +11080,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{screenShareStarting ? 'Starting…' : isScreenSharing ? 'Stop Share' : 'Share'}</span>
           </button>
 
-          {/* Speakers — one-tap feedback breaker (Fix Round 8 #4) */}
+          {/* Speakers, one-tap feedback breaker (Fix Round 8 #4) */}
           <button
             onClick={() => setIsSpeakersMuted(!isSpeakersMuted)}
             style={{
@@ -11061,7 +11181,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             title="Chat (C)"
           >
             <MessageSquare size={18} />
-            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>Chat</span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{t('room.chat')}</span>
             {unreadChatCount > 0 && activePanel !== 'chat' && (
               <span style={{
                 position: 'absolute',
@@ -11107,14 +11227,14 @@ Media encrypted in transit (DTLS-SRTP).`;
             <Edit2 size={20} />
           </button>
 
-          {/* Phase B (15): Layout — Grid / Speaker / Side-by-side. The spotlight (host pick, else pin, else speaker) drives speaker and side-by-side. */}
+          {/* Phase B (15): Layout, Grid / Speaker / Side-by-side. Phase C2a (8) adds Focus. The spotlight (host pick, else pin, else speaker) drives speaker, side-by-side and focus. */}
           <button 
             onClick={() => setLayoutMode(nextLayoutMode(layoutMode))}
             style={{
               width: '56px',
               height: '56px',
               borderRadius: '14px',
-              backgroundColor: layoutMode === 'speaker' ? 'var(--color-primary)' : 'rgba(255, 255, 255, 0.1)',
+              backgroundColor: (layoutMode === 'speaker' || layoutMode === 'focus') ? 'var(--color-primary)' : 'rgba(255, 255, 255, 0.1)',
               border: 'none',
               display: 'flex',
               flexDirection: 'column',
@@ -11128,7 +11248,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             title={layoutModeHint(layoutMode)}
           >
             {layoutMode === 'grid' ? <LayoutGrid size={18} /> : <LayoutList size={18} />}
-            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{layoutModeLabel(layoutMode)}</span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{layoutMode === 'grid' ? t('room.layoutSpeaker') : layoutMode === 'speaker' ? t('room.layoutSide') : layoutMode === 'side' ? t('room.layoutFocus') : t('room.layoutGrid')}</span>
           </button>
 
           {/* End Call / Hang Up */}
@@ -11159,7 +11279,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           <div className="meeting-toolbar-left" style={{ gap: '0.5rem' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: </span>
             <span style={{ color: 'white', fontWeight: 600, fontSize: '0.85rem' }}>{meetingId.slice(0, 8)}</span>
-            {/* Phase A (5): small non-technical connection indicator —
+            {/* Phase A (5): small non-technical connection indicator ,
                 a dot plus plain words. The millisecond number lives
                 only in the tooltip, never on the toolbar. When video
                 quality has stepped down, the label says so plainly. */}
@@ -11227,7 +11347,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 REC {formatElapsedTime(recordingSeconds)} - on this device
               </span>
             )}
-            {/* Phase A (5): the old "{avg} ms" text lived here — the
+            {/* Phase A (5): the old "{avg} ms" text lived here, the
                 plain-words indicator above replaces it. */}
           </div>
 
@@ -11255,7 +11375,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
             </button>
 
-            {/* Feature 17: AI noise cleaning toggle — on by default. */}
+            {/* Feature 17: AI noise cleaning toggle, on by default. */}
             <button
               className="toolbar-control-btn"
               onClick={() => void toggleNoiseSuppression()}
@@ -11272,7 +11392,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 cursor: 'pointer',
                 transition: 'all var(--transition-fast)'
               }}
-              title={noiseSuppressionStatus === 'unavailable' ? 'Noise cleaning could not start on this device — your normal microphone is still on' : isNoiseSuppressionOn ? 'Noise cleaning: on — background noise is removed before others hear it' : 'Noise cleaning: off — turn on to remove background noise'}
+              title={noiseSuppressionStatus === 'unavailable' ? 'Noise cleaning could not start on this device, your normal microphone is still on' : isNoiseSuppressionOn ? 'Noise cleaning: on, background noise is removed before others hear it' : 'Noise cleaning: off, turn on to remove background noise'}
             >
               <AudioLines size={18} />
             </button>
@@ -11322,7 +11442,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <Monitor size={18} />
             </button>
 
-            {/* Speakers — one-tap feedback breaker (Fix Round 8 #4) */}
+            {/* Speakers, one-tap feedback breaker (Fix Round 8 #4) */}
             <button
               className="toolbar-control-btn"
               onClick={() => setIsSpeakersMuted(!isSpeakersMuted)}
@@ -11910,7 +12030,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </button>
                   )}
 
-                  {/* Keyboard Shortcuts — its own collapsible element, so the
+                  {/* Keyboard Shortcuts, its own collapsible element, so the
                       menu stays short and nothing is cut off; tap to expand. */}
                   <div style={{ borderTop: '1px solid #1E293B', marginTop: '0.25rem', paddingTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', flexShrink: 0 }}>
                     <button
@@ -11988,7 +12108,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               }}
             >
               <Users size={16} />
-              <span className="hide-mobile-text">Participants</span>
+              <span className="hide-mobile-text">{t('room.participants')}</span>
             </button>
 
             <button 
@@ -12008,7 +12128,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               }}
             >
               <MessageSquare size={16} />
-              <span className="hide-mobile-text">Chat</span>
+              <span className="hide-mobile-text">{t('room.chat')}</span>
             </button>
 
             <button 
@@ -12032,18 +12152,18 @@ Media encrypted in transit (DTLS-SRTP).`;
       )}
 
       {/* Leave Meeting Modal for Admin */}
-      {/* In-meeting file viewer — view-only. No download button, no link. */}
+      {/* In-meeting file viewer, view-only. No download button, no link. */}
       {fileViewer && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(2, 6, 23, 0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10001, padding: '1rem' }} onClick={() => setFileViewer(null)}>
           <div style={{ width: 'min(92vw, 760px)', maxHeight: '86dvh', backgroundColor: '#0B0F19', border: '1px solid #1E293B', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.9rem 1.1rem', borderBottom: '1px solid #1E293B' }}>
               <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📎 {fileViewer.name}</span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>View only — stays in this meeting</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>View only, stays in this meeting</span>
               <button onClick={() => setFileViewer(null)} className="panel-close-btn" aria-label="Close viewer">&times;</button>
             </div>
             <div className="scroll-refined" style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
               {fileViewerGone ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.5 }}>This file is no longer available — shared files are removed when the meeting ends.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.5 }}>This file is no longer available, shared files are removed when the meeting ends.</p>
               ) : fileViewer.kind === 'image' ? (
                 <img src={fileViewer.url} alt={fileViewer.name} onError={() => setFileViewerGone(true)} style={{ maxWidth: '100%', maxHeight: 'calc(86dvh - 120px)', objectFit: 'contain', borderRadius: '8px' }} />
               ) : fileViewer.kind === 'pdf' ? (
@@ -12231,12 +12351,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </select>
                     {participants.length > 0 && participants.filter(p => !!p.userId).length === 0 && (
                       <div style={{ fontSize: '0.8rem', color: '#FCA5A5', lineHeight: 1.4 }}>
-                        Nobody signed in to take over yet — guests who joined without signing in cannot become host.
+                        Nobody signed in to take over yet, guests who joined without signing in cannot become host.
                       </div>
                     )}
                     {participants.some(p => !p.userId) && participants.filter(p => !!p.userId).length > 0 && (
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                        Guests who joined without signing in cannot become host — only signed-in participants are listed.
+                        Guests who joined without signing in cannot become host, only signed-in participants are listed.
                       </div>
                     )}
                   </div>
@@ -12452,7 +12572,7 @@ Media encrypted in transit (DTLS-SRTP).`;
         </div>
       )}
 
-      {/* Timed-agenda end popup — ADMIN ONLY. A short message that the
+      {/* Timed-agenda end popup, ADMIN ONLY. A short message that the
           part has ended, so the admin knows to move to the next part.
           Dismiss with the × or the Dismiss button. Nobody else sees it. */}
       {isAdmin && agendaEndPopup && (
@@ -12475,7 +12595,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700 }}>That part has ended</div>
               <div style={{ color: 'rgba(255,255,255,0.75)', marginTop: '0.2rem' }}>
-                "{agendaEndPopup.text}" ended at {agendaEndPopup.endLabel} — time to move to the next part.
+                "{agendaEndPopup.text}" ended at {agendaEndPopup.endLabel}, time to move to the next part.
               </div>
               <button onClick={() => setAgendaEndPopup(null)} style={{ marginTop: '0.6rem', padding: '0.35rem 0.9rem', borderRadius: 'var(--radius-md)', border: 'none', backgroundColor: 'var(--color-accent)', color: 'var(--color-on-accent, #000)', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}>
                 Dismiss

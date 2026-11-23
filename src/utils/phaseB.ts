@@ -1,5 +1,5 @@
 // Phase B shared helpers (features 9, 12, 14, 15, 21). Pure functions
-// only — no React, no network — so they are trivially testable and the
+// only, no React, no network, so they are trivially testable and the
 // MeetingRoom stays the only place that touches live state.
 
 export interface HandRaiseEntry {
@@ -11,7 +11,7 @@ export interface HandRaiseEntry {
 
 // Feature 12: the hand-raise queue is ALWAYS in the order hands went up.
 // Raises arrive over the broadcast channel, so arrival order can differ
-// from raise order after a rejoin — sort by timestamp, oldest first.
+// from raise order after a rejoin, sort by timestamp, oldest first.
 export const sortHandRaiseQueue = (raises: HandRaiseEntry[]): HandRaiseEntry[] =>
   [...raises].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
@@ -24,7 +24,7 @@ export const handRaisePosition = (raises: HandRaiseEntry[], userId: string): num
 // Feature 9: live captions run on the browser's built-in speech
 // recognition (no key, no account). It only exists in Chromium-based
 // browsers (and Safari); everywhere else captions simply are not
-// available and the UI says so in plain words — never a technical error.
+// available and the UI says so in plain words, never a technical error.
 export const isCaptionEngineAvailable = (): boolean => {
   if (typeof window === 'undefined') return false;
   const w = window as any;
@@ -37,18 +37,23 @@ export const isCaptionEngineAvailable = (): boolean => {
 // adaptive streaming, which already turns it down on a weak link.
 export const LOW_BANDWIDTH_LABEL = 'Low-bandwidth mode';
 
-// Feature 15: layout cycle order for the toolbar button.
-export type MeetingLayoutMode = 'grid' | 'speaker' | 'side';
+// Feature 15: layout cycle order for the toolbar button. Phase C2a
+// (8) adds Focus: one tap hides every face except the speaker (and
+// whatever is being shared), so a class sees only the teacher and the
+// lesson. The cycle is Grid, Speaker, Side-by-side, Focus, Grid.
+export type MeetingLayoutMode = 'grid' | 'speaker' | 'side' | 'focus';
 
 export const nextLayoutMode = (mode: MeetingLayoutMode): MeetingLayoutMode =>
-  mode === 'grid' ? 'speaker' : mode === 'speaker' ? 'side' : 'grid';
+  mode === 'grid' ? 'speaker' : mode === 'speaker' ? 'side' : mode === 'side' ? 'focus' : 'grid';
 
 export const layoutModeLabel = (mode: MeetingLayoutMode): string =>
-  mode === 'grid' ? 'Speaker' : mode === 'speaker' ? 'Side-by-side' : 'Grid';
+  mode === 'grid' ? 'Speaker' : mode === 'speaker' ? 'Side-by-side' : mode === 'side' ? 'Focus' : 'Grid';
 
 export const layoutModeHint = (mode: MeetingLayoutMode): string =>
   mode === 'grid'
     ? 'Switch to Speaker view (spotlight on the speaker)'
     : mode === 'speaker'
       ? 'Switch to Side-by-side view (spotlight beside the others)'
-      : 'Switch to Grid view';
+      : mode === 'side'
+        ? 'Switch to Focus view (only the speaker and the shared screen)'
+        : 'Switch to Grid view';

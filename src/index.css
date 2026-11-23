@@ -9,7 +9,7 @@
   --color-accent: #FABD02;       /* Sol de Minas */
   --color-accent-rgb: 250, 189, 2;
   /* Hover shade of the accent, and the text colour that reads on it
-     (black on light accents, white on dark ones — set by applyAccentColor). */
+     (black on light accents, white on dark ones, set by applyAccentColor). */
   --color-accent-hover: #e5ad02;
   --color-on-accent: #000;
   
@@ -228,9 +228,9 @@
 [data-ui-style="minimalism"] .top-navbar-btn:hover { color: #171717 !important; background: #f4f4f5 !important; }
 [data-ui-style="minimalism"] .top-navbar-btn.active { background: #171717 !important; color: #ffffff !important; }
 
-/* Maximalism Theme — bold and loud, but READABLE: a deep violet base
-   with vivid cyan/pink accents and white text. (The old palette — hot
-   pink app background, mint sidebar, yellow cards, black text — clashed
+/* Maximalism Theme, bold and loud, but READABLE: a deep violet base
+   with vivid cyan/pink accents and white text. (The old palette, hot
+   pink app background, mint sidebar, yellow cards, black text, clashed
    everywhere and made panels unreadable.) */
 [data-ui-style="maximalism"] {
   --bg-app: #170f2e;
@@ -276,7 +276,7 @@
 
 
 /* ==========================================================================
-   Fix 8 — Branding polish: accent + fonts reach the sidebar, and the
+   Fix 8, Branding polish: accent + fonts reach the sidebar, and the
    theme effects become real visual languages.
    --------------------------------------------------------------------------
    Root causes found:
@@ -284,7 +284,7 @@
      the accent never touched it. It is now driven by --color-accent.
    - NO element carried the class "app-sidebar" (the <aside> is
      .sidebar-desktop), so every [data-ui-style="..."] .app-sidebar rule in
-     this file was dead code — the themes never touched the sidebar at all.
+     this file was dead code, the themes never touched the sidebar at all.
      App.tsx now adds the class, and these rules come alive.
    - The DEFAULT theme (glassmorphism) had no [data-ui-style] rule set at
      all, so it looked like plain flat white: frosted panels need a
@@ -296,7 +296,7 @@
    shade derived from the accent in theme.ts (deriveSidebarShades, applied
    by applyAccentColor as --sidebar-deep / --sidebar-deeper / --bg-sidebar),
    with the fallbacks below keeping the old navy when no accent is saved.
-   The <aside> in App.tsx carries the same gradient inline — it beats this
+   The <aside> in App.tsx carries the same gradient inline, it beats this
    class rule, so the two agree. Accent-tinted hover, and the active pill
    in the accent itself with readable on-accent text (black on light
    accents, white on dark ones).
@@ -322,7 +322,7 @@
 }
 .app-sidebar .sidebar-btn.active svg { color: var(--color-on-accent); }
 /* Tier card picks up the accent as a solid badge.
-   Fix 9 — the badge was a 22% translucent accent wash with forced white
+   Fix 9, the badge was a 22% translucent accent wash with forced white
    text: on light accents (gold) white text on a pale wash was unreadable.
    Solid accent + on-accent text reads in every theme and matches the
    active pill exactly. */
@@ -449,7 +449,7 @@
 .theme-swatch-minimalism { background: #ffffff; box-shadow: none; }
 .theme-swatch-maximalism { background: linear-gradient(135deg, #7c3aed, #f472b6 55%, #22d3ee); border-color: transparent; box-shadow: 3px 3px 0 #0f0a24; }
 
-/* Top Navbar Menu — the header-only layout (Branding & Layout > Navbar
+/* Top Navbar Menu, the header-only layout (Branding & Layout > Navbar
    Scaffolding). The same navigation items as the left sidebar, rendered
    as a horizontal bar under the app header. Scrolls horizontally on
    narrow screens instead of hiding. */
@@ -497,7 +497,7 @@
   transition: all var(--transition-fast);
 }
 .top-navbar-btn:hover { color: white; background: rgba(255, 255, 255, 0.08); }
-/* Fix 9 — this was var(--color-secondary): it sits AFTER the Fix 8 accent
+/* Fix 9, this was var(--color-secondary): it sits AFTER the Fix 8 accent
    rule above at the same specificity, so the hardcoded secondary won and
    the top-navbar active pill never matched the selected accent. */
 .top-navbar-btn.active { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
@@ -548,14 +548,14 @@ h1, h2, h3, h4, h5, h6 {
   text-align: left;
 }
 
-/* Refined scrollbars — thin, theme-matched, same treatment everywhere.
+/* Refined scrollbars, thin, theme-matched, same treatment everywhere.
    Why the old rule looked chunky: the thumb used the flat secondary blue
    (#7082BE) at full strength (opacity does not apply to scrollbar
    pseudo-elements, so the 0.5 was ignored), which reads as a bright stripe
    on the dark navy sidebar. The new thumb is a faint translucent tone that
    matches its surface and brightens slightly on hover; the track stays
    transparent. Native scrolling, keyboard scrolling and touch scrolling
-   are untouched — this is visual only. */
+   are untouched, this is visual only. */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -763,7 +763,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Meeting-room top bar: the header is always dark, but .premium-btn-secondary
-   inherits the theme text colour — in the light theme that is dark navy on a
+   inherits the theme text colour, in the light theme that is dark navy on a
    dark bar, so Minimize / Invite & Info showed as faint empty outlines.
    Force light-on-dark colours here so the header buttons stay legible in
    every theme. */
@@ -926,7 +926,7 @@ h1, h2, h3, h4, h5, h6 {
    on .meeting-grid, but the grid is a flex container, so they did
    nothing; the sizing lives here and in the component's margin:auto
    tile wrapper, which centres tiles when they fit and scrolls from the
-   top — never clipping the first tiles — when 3+ overflow the height.) */
+   top, never clipping the first tiles, when 3+ overflow the height.) */
 @media (max-width: 480px) and (orientation: portrait) {
   .meeting-grid .meeting-card:not(.spotlight) {
     flex: 1 1 100% !important;
@@ -1023,7 +1023,7 @@ h1, h2, h3, h4, h5, h6 {
      inside this container (the menu via a React fragment, so its panel
      is a direct-child div), and a plain "> div > button" rule crushed
      their item buttons to 44x44px and squeezed every menu label to zero
-     width — the labels were invisible on phones. With the class scope,
+     width, the labels were invisible on phones. With the class scope,
      no pop-up content inside this container can ever be caught again. */
   .meeting-toolbar-center > button.toolbar-control-btn,
   .meeting-toolbar-center > div > button.toolbar-control-btn {
@@ -1472,13 +1472,13 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 [data-ui-style="neumorphism"] .sidebar-btn.active {
-  /* Fix 9 — this was an 18% translucent accent wash (!important) over the
+  /* Fix 9, this was an 18% translucent accent wash (!important) over the
      navy sidebar, which rendered as a muted light blue-grey instead of
      the selected accent (Suku's screenshot: teal button / hub item vs a
      grey "Settings" pill). The pill is now the SOLID selected accent with
      readable on-accent text, exactly like every other theme. The
      neumorphic inset shadow is dropped here on purpose: on a solid vivid
-     pill it muddies the colour — colour fidelity is the point. */
+     pill it muddies the colour, colour fidelity is the point. */
   background: var(--color-accent) !important;
   color: var(--color-on-accent) !important;
   box-shadow: 0 4px 16px rgba(var(--color-accent-rgb), 0.45) !important;
@@ -1672,7 +1672,7 @@ h1, h2, h3, h4, h5, h6 {
   max-width: 170px;
 }
 
-/* Phase B (15): side-by-side layout — the spotlight tile takes the
+/* Phase B (15): side-by-side layout, the spotlight tile takes the
    left column and spans the rows; the other tiles stack in a rail on
    the right. The tiles wrapper switches to a grid inline (see
    MeetingRoom); these rules only place the tiles in that grid. */
@@ -1682,6 +1682,18 @@ h1, h2, h3, h4, h5, h6 {
 }
 .meeting-grid.side-mode .meeting-card:not(.spotlight) {
   grid-column: 2;
+}
+
+/* Phase C2a (8), Focus mode for teaching: one tap hides every face
+   except the speaker (and whatever is being shared), so a class sees
+   only the teacher and the lesson. The spotlight tile takes the full
+   width; every other tile is hidden, on desktop and on phones. */
+.meeting-grid.focus-mode .meeting-card.spotlight {
+  flex: 1 1 100%;
+  max-width: min(100%, calc((100dvh - 400px) * 16 / 9));
+}
+.meeting-grid.focus-mode .meeting-card:not(.spotlight) {
+  display: none !important;
 }
 
 /* Screen share layout responsive overrides */
@@ -1851,7 +1863,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .bl-base { position: absolute; left: -6px; right: -6px; bottom: 0; height: 11px; border-radius: 6px; background: linear-gradient(90deg, #f4b400, #FABD02 45%, #ffe08a); box-shadow: 0 0 18px rgba(250,189,2,0.55); }
 
-/* Logo finale — real GIIN logo on a glowing light panel (dark-blue mark on dark navy would vanish) */
+/* Logo finale, real GIIN logo on a glowing light panel (dark-blue mark on dark navy would vanish) */
 .bl-logo { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); opacity: 0; animation: bl-logo-finale 10s linear infinite; z-index: 1; }
 @keyframes bl-logo-finale { 0%, 72% { opacity: 0; transform: translate(-50%, -50%) scale(0.82); } 80%, 92% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 98%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.02); } }
 .bl-logo-panel { position: relative; overflow: hidden; background: linear-gradient(135deg, rgba(2,6,23,0.78) 0%, rgba(10,42,107,0.78) 100%); border: 1px solid rgba(250,189,2,0.55); border-radius: 16px; padding: 14px 24px; box-shadow: 0 0 45px rgba(250,189,2,0.85), 0 0 90px rgba(250,189,2,0.4); text-align: center; }
@@ -1888,7 +1900,7 @@ h1, h2, h3, h4, h5, h6 {
 .bl-ctl-end { background: #ef4444; }
 @keyframes bl-controls-in { 0%, 34% { opacity: 0; } 40%, 58% { opacity: 1; } 66%, 100% { opacity: 0; } }
 
-/* Logo lockup finale — new mark + GiinMeet in gold + tagline, on dark like the promo video */
+/* Logo lockup finale, new mark + GiinMeet in gold + tagline, on dark like the promo video */
 .bl-logo-name { margin-top: 8px; font-family: var(--font-heading); font-weight: 800; font-size: 1.35rem; letter-spacing: 0.02em; color: #FABD02; }
 .bl-logo-tag { margin-top: 2px; font-size: 0.75rem; color: rgba(255,255,255,0.9); letter-spacing: 0.02em; white-space: nowrap; }
 
