@@ -773,21 +773,26 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // camera/mic/screen change can never silently leave LiveKit serving a
   // stale (stopped) track. Safe to call when LiveKit is not connected —
   // it simply does nothing.
-  const publishLiveKitTrack = async (track: MediaStreamTrack, source: any) => {
+  const publishLiveKitTrack = async (track: MediaStreamTrack, source: any, attempt = 0) => {
     const room = livekitRoomRef.current;
     if (!room || !track) return;
     try {
       // A camera re-acquired while the room is reconnecting used to be
       // silently dropped (early return, never retried) — the remote side
-      // then never saw video again until the next toggle. Retry once
-      // after a short delay instead.
+      // then never saw video again until the next toggle. Retry a few
+      // times instead: a screen share that never publishes is the
+      // same failure, and the sharer cannot see that nobody sees it.
+      // Phase A (1): bounded — 5 tries, 2 s apart — then give up so a
+      // dead room cannot spin forever.
       if (room.state !== 'connected') {
-        setTimeout(() => {
-          const retryRoom = livekitRoomRef.current;
-          if (retryRoom && retryRoom.state === 'connected' && track.readyState === 'live') {
-            void publishLiveKitTrack(track, source);
-          }
-        }, 2000);
+        if (attempt < 5 && track.readyState === 'live') {
+          setTimeout(() => {
+            const retryRoom = livekitRoomRef.current;
+            if (retryRoom && track.readyState === 'live') {
+              void publishLiveKitTrack(track, source, attempt + 1);
+            }
+          }, 2000);
+        }
         return;
       }
       const existing = room.localParticipant.getTrackPublication(source);
@@ -816,11 +821,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // dull from both sides. The phone cap stays (a phone camera can
       // saturate a weak link); LiveKit still adapts down gracefully.
       const isPhoneUplink = typeof window !== 'undefined' && window.innerWidth < 768;
+      // Phase A (1): a screen share gets an explicit encoding and NO
+      // simulcast. The old code published it with SDK defaults, so on
+      // a weak link the room could stay on the lowest simulcast layer
+      // (or none) and the share looked dead or unreadable. Screen
+      // content is one layer at full quality; the server still adapts
+      // it down for weak receivers.
       const publishOptions: any = source === Track.Source.Camera
         ? isPhoneUplink
           ? { source, videoEncoding: { maxBitrate: 800_000, maxFramerate: 24 }, simulcast: true }
           : { source, videoEncoding: { maxBitrate: 1_500_000, maxFramerate: 30 }, simulcast: true }
-        : { source };
+        : source === Track.Source.ScreenShare
+          ? { source, videoEncoding: { maxBitrate: 2_500_000, maxFramerate: 30 }, simulcast: false }
+          : { source };
       await room.localParticipant.publishTrack(track, publishOptions);
     } catch (e) {
       console.warn('[LiveKit] Could not publish track:', e);
@@ -1595,7 +1608,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // A published camera that never got subscribed (adaptive
           // streaming / dynacast stall, or a subscribe that raced the
           // join) leaves the tile waiting forever — ask for it explicitly.
-          if (publication.kind === 'video' && publication.source === Track.Source.Camera && !publication.isSubscribed) {
+          // Phase A (1): the same stall hits screen shares, and a share
+          // that is published but never subscribed is exactly the
+          // "screen share is dead" report — subscribe those too.
+          if (publication.kind === 'video' && (publication.source === Track.Source.Camera || publication.source === Track.Source.ScreenShare) && !publication.isSubscribed) {
             try { publication.setSubscribed(true); } catch (e) { /* auto-subscribe will retry */ }
           }
         });
@@ -1702,7 +1718,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // forever. Publications are seeded too, for the same reason.
         room.remoteParticipants.forEach((p: any) => {
           markLivekitParticipant(p.identity, true);
-          p.trackPublications.forEach((pub: any) => noteLivekitPublication(pub, p.identity));
+          p.trackPublications.forEach((pub: any) => {
+            noteLivekitPublication(pub, p.identity);
+            // Phase A (1): a screen share published BEFORE we joined
+            // needs the same explicit subscribe as the camera above —
+            // without it, joining mid-share can leave the share
+            // published but never delivered to us.
+            if (pub?.kind === 'video' && pub?.source === Track.Source.ScreenShare && !pub.isSubscribed) {
+              try { pub.setSubscribed(true); } catch (e) { /* auto-subscribe will retry */ }
+            }
+          });
         });
 
         // Publish whatever local tracks we have right now (camera / mic /
@@ -2339,14 +2364,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Safety net: a track was just added/removed on this peer. If no offer
   // went out within ~2.5s (missed onnegotiationneeded), renegotiate
   // explicitly. `changedAt` is the time the track change happened.
+  // Phase A (1): one shot was not enough — if the connection was
+  // mid-negotiation when the screen track was added, the single check
+  // found it non-stable and gave up, so the remote side never received
+  // the screen. Retry a few times over ~8 s instead.
   const ensureRenegotiation = (peerKey: string, changedAt: number) => {
-    setTimeout(() => {
-      const pc = pcsRef.current[peerKey];
-      if (!pc || pc.signalingState === 'closed') return;
-      if (pc.signalingState !== 'stable') return;
-      if ((lastOfferAtRef.current[peerKey] || 0) >= changedAt) return;
-      void renegotiatePeer(peerKey);
-    }, 2500);
+    [2500, 5000, 8000].forEach(delay => {
+      setTimeout(() => {
+        const pc = pcsRef.current[peerKey];
+        if (!pc || pc.signalingState === 'closed') return;
+        if (pc.signalingState !== 'stable') return;
+        if ((lastOfferAtRef.current[peerKey] || 0) >= changedAt) return;
+        void renegotiatePeer(peerKey);
+      }, delay);
+    });
   };
 
   // Broadcast our current media state (mute / video / screen share) to the
@@ -4189,6 +4220,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // Publish the screen to LiveKit too, so participants connected over
       // the LiveKit engine see it -- not just the peer-to-peer ones.
       await publishLiveKitTrack(screenTrack, Track.Source.ScreenShare);
+      // Phase A (1): verify the share actually reached the video
+      // server. A publish that silently fails (room reconnecting,
+      // stale track) used to leave the sharer believing everyone could
+      // see the screen while nobody could. Retry briefly, then say so
+      // honestly instead of showing a share nobody receives. (When
+      // there is no LiveKit room — the P2P fallback — there is nothing
+      // to verify here; the P2P senders above carry the share.)
+      if (livekitRoomRef.current) {
+        let screenPublished = false;
+        for (let attempt = 0; attempt < 4 && !screenPublished; attempt++) {
+          try {
+            const pub = livekitRoomRef.current.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+            screenPublished = !!pub?.track && pub.track.readyState === 'live';
+          } catch (e) { /* publication unreadable: retry below */ }
+          if (screenPublished) break;
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 1500));
+            if (livekitScreenTrackRef.current?.readyState === 'live') {
+              await publishLiveKitTrack(livekitScreenTrackRef.current, Track.Source.ScreenShare);
+            }
+          }
+        }
+        if (!screenPublished) {
+          const msg = 'Your screen could not be shared on the video server — others cannot see it yet. Stop the share and start it again.';
+          setScreenShareError(msg);
+          triggerToast(msg);
+        }
+      }
       // System audio, when the browser provided it: published as the
       // screen-share audio source on LiveKit and added to every P2P peer
       // connection, so remotes hear the shared video's sound.
@@ -5984,7 +6043,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   if (isMinimized) {
     // Determine which stream to display in the mini window
-    const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing);
+    // Phase A (1): fall back to the screen-track map, like the main
+    // layout — a missed broadcast must not hide a live share here either.
+    const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing) || Object.keys(remoteScreenStreams)[0];
     const activeRemoteKey = Object.keys(peerStates).find(k => peerStates[k].isSpeaking) || Object.keys(remoteStreams)[0] || Object.keys(livekitRemoteStreams)[0];
 
     // Fix Round 6: the mini window used to read the P2P stream map
@@ -6994,7 +7055,17 @@ Media encrypted in transit (DTLS-SRTP).`;
           </div>
         ) : (
           (() => {
-            const hasScreenShare = isScreenSharing || Object.keys(peerStates).some(k => peerStates[k].isScreenSharing);
+            // Phase A (1): a screen share is real when a screen TRACK
+            // has arrived, not only when the sharer's broadcast flag
+            // says so. A missed broadcast (joining mid-share, a dropped
+            // announcement) used to leave the share invisible even
+            // though the track was already in the room — the layout
+            // stayed on the normal grid and the screen sat in
+            // remoteScreenStreams unused. The track map is the truth.
+            const hasScreenShare = isScreenSharing || Object.keys(peerStates).some(k => peerStates[k].isScreenSharing) || Object.keys(remoteScreenStreams).length > 0;
+            // Who is sharing: the broadcast flag first, the screen-track
+            // map second (same missed-broadcast case as above).
+            const screenSharePeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing) || Object.keys(remoteScreenStreams)[0] || null;
 
             // Speaker-layout spotlight: the pinned person if set (and still
             // in the room), else whoever is speaking, else the first remote
@@ -7518,7 +7589,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       />
                     ) : (
                       (() => {
-                        const screenPeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing);
+                        const screenPeerKey = screenSharePeerKey;
                         const screenStreamObj = screenPeerKey ? remoteScreenStreams[screenPeerKey] : null;
                         const screenPeerName = screenPeerKey ? peerStates[screenPeerKey].name : 'Remote Peer';
                         return screenStreamObj ? (
@@ -7618,9 +7689,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                       )}
                       <Monitor size={14} color="var(--color-accent)" />
                       <span>
-                        {isScreenSharing 
-                          ? 'You are sharing your screen' 
-                          : `${Object.keys(peerStates).find(k => peerStates[k].isScreenSharing) ? peerStates[Object.keys(peerStates).find(k => peerStates[k].isScreenSharing)!].name : 'Participant'} is sharing screen`}
+                        {isScreenSharing
+                          ? 'You are sharing your screen'
+                          : `${screenSharePeerKey ? (peerStates[screenSharePeerKey]?.name || 'Participant') : 'Participant'} is sharing screen`}
                       </span>
                         {isScreenSharing && (
                           <button
