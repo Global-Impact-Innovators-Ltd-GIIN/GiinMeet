@@ -1096,9 +1096,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // disabled while its request runs, so a second click cannot stack
   // another request on a degraded connection.
   const [busyControlKey, setBusyControlKey] = useState<string | null>(null);
-  // Persistent banner shown whenever the call is running peer-to-peer because
-  // the LiveKit server could not be reached. A degraded connection is never
-  // silent: the user must know video quality may be lower.
+  // Phase A (3): this notice is ONLY for genuine join failures (room
+  // full, not admitted, meeting ended/locked, link expired, breakout
+  // join failure). It is never set for a transient drop or a
+  // peer-to-peer fallback — reconnects happen quietly in the
+  // background, and the only visible sign is the small toolbar dot.
   const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
   const triggerToast = (msg: string) => {
     setToastMessage(msg);
@@ -1207,7 +1209,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Connect to LiveKit SFU Engine
   // Way back from P2P: once LiveKit fails the session is stuck on the
   // peer-to-peer mesh (the connect effect early-returns unless the engine
-  // is LIVEKIT). The degraded banner offers this retry; it re-runs the
+  // is LIVEKIT). The join-error card offers this retry; it re-runs the
   // connect effect, which fetches a fresh token, so a fixed server is
   // picked up without rejoining the meeting.
   const handleRetryLiveKit = () => {
@@ -1457,7 +1459,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // (host tier: Free 50 / Pro 100 / Enterprise 250), never a
           // hardcoded number.
           if (typeof data.maxCapacity === 'number') setRoomCapacity(data.maxCapacity);
-          setConnectionNotice(data.message || 'This meeting room is full. You cannot join the video yet — wait for someone to leave, then press "Retry video server".');
+          setConnectionNotice(data.message || 'This meeting room is full. You cannot join the video yet — wait for someone to leave, then press "Retry".');
 
           return;
         }
@@ -1475,7 +1477,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // Fix Round 7 (#6): a locked meeting is an honest stop, NOT a
           // silent peer-to-peer downgrade - a locked-out guest must not
           // end up in a P2P mesh with the room.
-          setConnectionNotice('This meeting is locked by the host - new participants cannot join right now. Wait for the host to unlock it, then press "Retry video server".');
+          setConnectionNotice('This meeting is locked by the host - new participants cannot join right now. Wait for the host to unlock it, then press "Retry".');
 
           return;
         }
@@ -1762,7 +1764,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // Say so honestly instead — the notice card offers "Retry
           // video server", and the host can end the breakouts to bring
           // everyone back to the main room.
-          setConnectionNotice(`Could not join Breakout Room ${breakoutRoom} on the video server. Check your connection, then press "Retry video server" — or ask the host to end the breakout rooms to return to the main room.`);
+          setConnectionNotice(`Could not join Breakout Room ${breakoutRoom}. Check your connection, then press "Retry" — or ask the host to end the breakout rooms to return to the main room.`);
           return;
         }
         setEngineType('P2P');
@@ -2755,7 +2757,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setBreakoutRoomsCount(roomsCount);
     setBreakoutBroadcast(null);
     setBreakoutTimeRemaining(durationMinutes * 60);
-    alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes. Breakout rooms run on the video server, like the main room.`);
+    alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes. Breakout rooms work just like the main room.`);
   };
 
   const handleEndBreakouts = async () => {
@@ -4243,7 +4245,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           }
         }
         if (!screenPublished) {
-          const msg = 'Your screen could not be shared on the video server — others cannot see it yet. Stop the share and start it again.';
+          const msg = 'Your screen could not be shared — others cannot see it yet. Stop the share and start it again.';
           setScreenShareError(msg);
           triggerToast(msg);
         }
@@ -7284,7 +7286,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                   <span
                     style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)' }}
-                    title={engineType === 'LIVEKIT' ? 'Connected through the LiveKit server' : 'Connected direct peer-to-peer (LiveKit unavailable)'}
+                    title="Video connection"
                   />
                 </div>
                 {activeReactions.filter(r => r.senderKey === myKey).map(r => (
@@ -7511,22 +7513,24 @@ Media encrypted in transit (DTLS-SRTP).`;
                     );
                   })()}
 
-                  {/* Reconnecting overlay status */}
+                  {/* Phase A (3): a peer whose connection is healing
+                      gets a small pulsing dot only — no words, no
+                      dimming overlay. Reconnects happen quietly. */}
                   {pState.isReconnecting && (
-                    <div style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: '100%',
-                      backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      zIndex: 15
-                    }}>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-accent)', fontWeight: 600 }}>Reconnecting...</span>
-                    </div>
+                    <span
+                      title="Connection healing"
+                      style={{
+                        position: 'absolute',
+                        top: '10px',
+                        left: '10px',
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        backgroundColor: 'var(--color-accent)',
+                        animation: 'pulse-red 1.5s infinite',
+                        zIndex: 15
+                      }}
+                    />
                   )}
 
                   {pState.isSpeaking && !pState.isMuted && (
@@ -7575,7 +7579,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       return (
                         <span
                           style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: pState.isReconnecting ? 'var(--color-accent)' : !hasConnection ? '#64748B' : '#EF4444' }}
-                          title={pState.isReconnecting ? 'Reconnecting...' : !hasConnection ? 'Connection lost' : `Unstable connection (latency ${pState.latency} ms)`}
+                          title={pState.isReconnecting ? 'Connection healing' : !hasConnection ? 'Connection lost' : 'Weak connection'}
                         />
                       );
                     })()}
@@ -8513,7 +8517,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Breakout Rooms</span>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                  Breakout rooms run on the video server, like the main room — each room is its own LiveKit room, so video quality holds with several people in a room.
+                  Breakout rooms work just like the main room — each room is separate, so video quality holds with several people in a room.
                 </span>
                 {breakoutTimeRemaining === null ? (
                   <>
@@ -9950,7 +9954,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 onClick={handleRetryLiveKit}
                 className="premium-btn premium-btn-secondary"
                 style={{ padding: '0.35rem 0.7rem', fontSize: '0.75rem', borderRadius: '6px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                title="The room is on a direct connection because the video server could not be reached. Try the video server again."
+                title="The room is on a direct connection. Try the video again."
               >
                 Retry video
               </button>
@@ -11178,9 +11182,9 @@ Media encrypted in transit (DTLS-SRTP).`;
             <button
               onClick={handleRetryLiveKit}
               style={{ marginTop: '1rem', backgroundColor: 'var(--color-accent)', color: 'black', border: 'none', borderRadius: '6px', padding: '0.5rem 1rem', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' }}
-              title="Try connecting to the video server again with a fresh token"
+              title="Try joining the video again"
             >
-              Retry video server
+              Retry
             </button>
           )}
         </div>
