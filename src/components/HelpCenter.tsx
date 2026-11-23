@@ -19,7 +19,7 @@ export const HelpCenter: React.FC = () => {
   
   // Bot Chat States
   const [botMessages, setBotMessages] = useState<Message[]>([
-    { sender: 'Bot', text: 'Hello! I am GIIN Bot, your virtual assistant. How can I help you today? You can ask me about upgrading to Pro, screen sharing, or security features.', time: 'Just now' }
+    { sender: 'Bot', text: t('help.hello_i_am_giin_bot'), time: 'Just now' }
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isBotTyping, setIsBotTyping] = useState(false);
@@ -131,8 +131,8 @@ export const HelpCenter: React.FC = () => {
             <HelpCircle size={22} />
           </div>
           <div>
-            <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', margin: 0, lineHeight: 1.2, color: '#FFFFFF' }}>Frequently Asked Questions</h2>
-            <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.75)', margin: '0.25rem 0 0' }}>Browse common user issues or use the search bar to find answers.</p>
+            <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', margin: 0, lineHeight: 1.2, color: '#FFFFFF' }}>{t('help.frequently_asked_questions')}</h2>
+            <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.75)', margin: '0.25rem 0 0' }}>{t('help.browse_common_user_issues_or')}</p>
           </div>
         </div>
 
@@ -141,7 +141,7 @@ export const HelpCenter: React.FC = () => {
           <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input 
             type="text" 
-            placeholder="Search FAQs..." 
+            placeholder={t('help.search_faqs')} 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="premium-input"
@@ -206,7 +206,7 @@ export const HelpCenter: React.FC = () => {
           })}
           {filteredFaqs.length === 0 && (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0' }}>
-              No matches found for your query.
+              {t('help.no_matches_found_for_your')}
             </div>
           )}
         </div>
@@ -219,8 +219,8 @@ export const HelpCenter: React.FC = () => {
         }}>
           <Bot size={22} color="var(--color-accent)" style={{ flexShrink: 0 }} />
           <div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-main)' }}>Still need help?</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Ask GIIN Bot on the right — it answers questions about Pro, screen sharing, and security.</div>
+            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-main)' }}>{t('help.still_need_help')}</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{t('help.ask_giin_bot_on_the')}</div>
           </div>
         </div>
       </div>
@@ -250,10 +250,10 @@ export const HelpCenter: React.FC = () => {
             <Bot size={22} color="var(--color-accent)" />
           </div>
           <div>
-            <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)' }}>Customer Service Bot</h3>
+            <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)' }}>{t('help.customer_service_bot')}</h3>
             <span style={{ fontSize: '0.75rem', color: '#10B981', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span>Helper Bot Online</span>
+              <span>{t('help.helper_bot_online')}</span>
             </span>
           </div>
         </div>
@@ -291,7 +291,7 @@ export const HelpCenter: React.FC = () => {
           {/* Typing simulation */}
           {isBotTyping && (
             <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.85rem', borderRadius: '12px', backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-color)' }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Bot is typing</span>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{t('help.bot_is_typing')}</span>
               <div style={{ display: 'flex', gap: '2px' }}>
                 <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: 'var(--text-muted)', animation: 'wave-animation 1s infinite' }} />
                 <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: 'var(--text-muted)', animation: 'wave-animation 1s infinite 0.2s' }} />
@@ -307,7 +307,7 @@ export const HelpCenter: React.FC = () => {
         <form onSubmit={handleSendMessage} style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '0.75rem' }}>
           <input 
             type="text" 
-            placeholder="Ask GIIN Bot a question..." 
+            placeholder={t('help.ask_giin_bot_a_question')} 
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             className="premium-input"

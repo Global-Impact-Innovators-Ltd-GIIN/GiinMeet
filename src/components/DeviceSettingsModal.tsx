@@ -58,7 +58,8 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
       zIndex: 15000,
       backdropFilter: 'blur(8px)',
       animation: 'fade-in 0.2s ease-out'
-    }}>
+    }}
+      onClick={onClose}>
       <div style={{
         backgroundColor: '#0F172A',
         border: '1px solid #1E293B',
@@ -76,7 +77,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'white', margin: 0, fontFamily: 'var(--font-heading)' }}>
-            Audio & Video Devices
+            {t('device.audio_video_devices')}
           </h3>
           <button
             onClick={onClose}
@@ -96,7 +97,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
         </div>
 
         <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>
-          Select and test your input and output hardware devices for the call.
+          {t('device.select_and_test_your_input')}
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -104,7 +105,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
           <div>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'white', marginBottom: '0.5rem' }}>
               <Camera size={16} color="var(--color-primary)" />
-              <span>Camera (Video Input)</span>
+              <span>{t('device.camera_video_input')}</span>
             </label>
             <select
               value={selectedCamera}
@@ -117,7 +118,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
                   {device.label || `Camera (${device.deviceId.substring(0, 5)})`}
                 </option>
               ))}
-              {cameras.length === 0 && <option value="">No cameras detected</option>}
+              {cameras.length === 0 && <option value="">{t('device.no_cameras_detected')}</option>}
             </select>
           </div>
 
@@ -125,7 +126,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
           <div>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'white', marginBottom: '0.5rem' }}>
               <Mic size={16} color="var(--color-primary)" />
-              <span>Microphone (Audio Input)</span>
+              <span>{t('device.microphone_audio_input')}</span>
             </label>
             <select
               value={selectedMic}
@@ -138,7 +139,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
                   {device.label || `Microphone (${device.deviceId.substring(0, 5)})`}
                 </option>
               ))}
-              {mics.length === 0 && <option value="">No microphones detected</option>}
+              {mics.length === 0 && <option value="">{t('device.no_microphones_detected')}</option>}
             </select>
           </div>
 
@@ -146,7 +147,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
           <div>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'white', marginBottom: '0.5rem' }}>
               <Volume2 size={16} color="var(--color-primary)" />
-              <span>Speaker (Audio Output)</span>
+              <span>{t('device.speaker_audio_output')}</span>
             </label>
             <select
               value={selectedSpeaker}
@@ -159,10 +160,10 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
                   {device.label || `Speaker (${device.deviceId.substring(0, 5)})`}
                 </option>
               ))}
-              {speakers.length === 0 && <option value="">No speakers detected (Using default)</option>}
+              {speakers.length === 0 && <option value="">{t('device.no_speakers_detected_using_default')}</option>}
             </select>
             <span style={{ fontSize: '0.65rem', color: '#64748B', marginTop: '0.25rem', display: 'block' }}>
-              Note: Speaker routing (setSinkId) is supported on Chrome, Edge, and Firefox.
+              {t('device.note_speaker_routing_setsinkid_is')}
             </span>
           </div>
         </div>
@@ -174,7 +175,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
             className="premium-btn premium-btn-primary"
             style={{ padding: '0.5rem 1.5rem', fontWeight: 600 }}
           >
-            Done
+            {t('agenda.timerDone')}
           </button>
         </div>
       </div>

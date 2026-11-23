@@ -440,12 +440,12 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   // Fix Round 8 (#1): the first blocker, in the order the user meets
   // it on the screen, name, connection, camera, microphone.
   const firstBlocker = (): { key: string; text: string } | null => {
-    if (!displayName.trim()) return { key: 'name', text: 'Enter your display name above, the host and other participants will see this name.' };
-    if (networkStatus === 'fail' && !proceedDespiteNetwork) return { key: 'network', text: 'The connection check failed. Tap "Continue anyway" in the amber box above, or press Retry checks.' };
-    if (networkStatus === 'checking') return { key: 'network', text: 'The connection check is still running, give it a moment, or press Retry checks.' };
-    if (cameraStatus === 'checking' || micStatus === 'checking') return { key: cameraStatus === 'checking' ? 'camera' : 'mic', text: 'The camera/microphone check is still running, give it a moment, or tick "Join without camera / microphone" below.' };
-    if (cameraStatus === 'fail' && !joinWithoutDevices) return { key: 'camera', text: 'Your camera is not working, press Retry, or tick "Join without camera / microphone" below.' };
-    if (micStatus === 'fail' && !joinWithoutDevices) return { key: 'mic', text: 'Your microphone is not working, press Retry, or tick "Join without camera / microphone" below.' };
+    if (!displayName.trim()) return { key: 'name', text: t('prejoin.enter_your_display_name_above') };
+    if (networkStatus === 'fail' && !proceedDespiteNetwork) return { key: 'network', text: t('prejoin.the_connection_check_failed_tap') };
+    if (networkStatus === 'checking') return { key: 'network', text: t('prejoin.the_connection_check_is_still') };
+    if (cameraStatus === 'checking' || micStatus === 'checking') return { key: cameraStatus === 'checking' ? 'camera' : 'mic', text: t('prejoin.the_camera_microphone_check_is') };
+    if (cameraStatus === 'fail' && !joinWithoutDevices) return { key: 'camera', text: t('prejoin.your_camera_is_not_working') };
+    if (micStatus === 'fail' && !joinWithoutDevices) return { key: 'mic', text: t('prejoin.your_microphone_is_not_working') };
     return null;
   };
 
@@ -463,7 +463,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
     setBlockerMessage(blocker.text);
     setHighlightKey(blocker.key);
     window.setTimeout(() => setHighlightKey(null), 4000);
-    const targetId = blocker.key === 'name' ? 'pjc-name-field' : `pjc-${blocker.key}-row`;
+    const targetId = blocker.key === 'name' ? 'pjc-name-field' : t('prejoin.pjc_row', { v1: blocker.key });
     const el = document.getElementById(targetId);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     if (blocker.key === 'name') nameInputRef.current?.focus();
@@ -544,11 +544,11 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
           <button onClick={onBack} className="premium-btn premium-btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <ArrowLeft size={16} />
-            <span>Back</span>
+            <span>{t('common.back')}</span>
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10B981', fontSize: '0.8rem', fontWeight: 700 }}>
             <ShieldCheck size={16} />
-            <span>CHECK BEFORE YOU JOIN</span>
+            <span>{t('prejoin.check_before_you_join')}</span>
           </div>
         </div>
 
@@ -557,7 +557,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             {t('prejoin.title')}, {meetingTitle}
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0.35rem 0 0' }}>
-            A quick check so you join with working camera, microphone and sound. Nothing here joins the meeting yet.
+            {t('prejoin.a_quick_check_so_you')}
           </p>
         </div>
 
@@ -592,14 +592,14 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
           <input
             type="text"
             className="premium-input"
-            placeholder="Your name, as others will see it"
+            placeholder={t('prejoin.your_name_as_others_will')}
             ref={nameInputRef}
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             style={{ height: '46px' }}
           />
-          {!displayName.trim() && <span style={{ display: 'block', fontSize: '0.75rem', color: '#FCA5A5', marginTop: '0.4rem' }}>Enter a name to continue, the host and other participants will see this name.</span>}
-          {!user && <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>No account needed. Just your name, and you are in. If this meeting has a passcode or a waiting room, the next step asks for it.</span>}
+          {!displayName.trim() && <span style={{ display: 'block', fontSize: '0.75rem', color: '#FCA5A5', marginTop: '0.4rem' }}>{t('prejoin.enter_a_name_to_continue')}</span>}
+          {!user && <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>{t('prejoin.no_account_needed_just_your')}</span>}
         </div>
 
         {/* Checks */}
@@ -608,7 +608,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             id="pjc-camera-row"
             highlight={highlightKey === 'camera'}
             icon={<Video size={16} />}
-            title="Camera"
+            title={t('prejoin.camera')}
             status={cameraStatus}
             detail={cameraStatus === 'pass' ? 'Camera is live and showing your preview above.' : cameraStatus === 'checking' ? 'Starting your camera…' : 'Your camera is not working.'}
             fix={cameraStatus === 'fail' ? cameraError : undefined}
@@ -620,7 +620,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             id="pjc-mic-row"
             highlight={highlightKey === 'mic'}
             icon={<Mic size={16} />}
-            title="Microphone"
+            title={t('prejoin.microphone')}
             status={micStatus}
             detail={micStatus === 'pass' ? (micHeard ? 'Microphone is live, your voice is registering on the meter. Speak to test it.' : 'Microphone is live. Speak now, the meter below should move.') : micStatus === 'checking' ? 'Starting your microphone…' : 'Your microphone is not working.'}
             fix={micStatus === 'fail' ? micError : undefined}
@@ -635,23 +635,23 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
 
           <Row
             icon={<Volume2 size={16} />}
-            title="Speakers"
+            title={t('prejoin.speakers')}
             status={speakerFailed ? 'fail' : speakerHeard ? 'pass' : speakerStatus}
             detail={speakerHeard ? 'You confirmed the test sound, your speakers work.' : speakerSkipped ? 'Speaker test skipped, speakers are not required to join.' : speakerPlayed ? "Test sound played, tap 'I heard it' or 'I didn't hear it' below." : 'Play the test sound and confirm you hear it.'}
             fix={speakerFailed ? 'You did not hear the test sound, check your volume, that the right speakers/headphones are selected, and that the browser tab is not muted, then play it again.' : undefined}
           >
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
               <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={playSpeakerTest}>
-                <Volume2 size={14} /> Play test sound
+                <Volume2 size={14} /> {t('prejoin.play_test_sound')}
               </button>
               <button type="button" className="premium-btn premium-btn-accent" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => resolveSpeaker(true)}>
-                I heard it
+                {t('prejoin.i_heard_it')}
               </button>
               <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => resolveSpeaker(false)}>
-                I didn&apos;t hear it
+                {t('prejoin.i_didn_apos_t_hear')}
               </button>
               <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={skipSpeaker}>
-                Skip this test
+                {t('prejoin.skip_this_test')}
               </button>
             </div>
           </Row>
@@ -660,9 +660,9 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             id="pjc-network-row"
             highlight={highlightKey === 'network'}
             icon={networkStatus === 'fail' ? <WifiOff size={16} /> : <Wifi size={16} />}
-            title="Connection"
+            title={t('prejoin.connection')}
             status={networkStatus}
-            detail={networkStatus === 'pass' ? `You are online${networkMs !== null ? `, server answered in ${networkMs} ms` : ''}.` : networkStatus === 'checking' ? 'Checking your connection…' : 'You appear to be offline, check your Wi-Fi or mobile data, then press Retry.'}
+            detail={networkStatus === 'pass' ? t('prejoin.you_are_online', { v1: networkMs !== null ? t('prejoin.server_answered_in', { v1: networkMs }) : '' }) : networkStatus === 'checking' ? 'Checking your connection…' : 'You appear to be offline, check your Wi-Fi or mobile data, then press Retry.'}
           />
         </div>
 
@@ -674,7 +674,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
           <input type="checkbox" checked={joinWithoutDevices} onChange={() => setJoinWithoutDevices(!joinWithoutDevices)} style={{ marginTop: '3px' }} />
           <span>
             <strong>{t('prejoin.joinWithoutDevices')}</strong>
-            <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>You will join with video and audio off. You can turn them on later from inside the meeting if the device starts working.</span>
+            <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('prejoin.you_will_join_with_video')}</span>
           </span>
         </label>
 
@@ -684,10 +684,10 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             anyway. */}
         {networkStatus === 'fail' && !proceedDespiteNetwork && (
           <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', border: '1px solid #F59E0B', borderRadius: 8, background: '#FFFBEB', color: '#92400E', fontSize: '0.9rem' }}>
-            <strong>Network check failed.</strong> We could not reach the video servers from this device, so the call may have trouble connecting - but the check itself can fail even when the meeting works. You can continue and try joining; if the video does not connect, check your connection and try again.
+            <strong>{t('prejoin.network_check_failed')}</strong> {t('prejoin.we_could_not_reach_the')}
             <div style={{ marginTop: '0.5rem' }}>
               <button type="button" onClick={() => setProceedDespiteNetwork(true)} style={{ padding: '0.5rem 0.9rem', borderRadius: 6, border: 'none', background: '#D97706', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
-                Continue anyway
+                {t('prejoin.continue_anyway')}
               </button>
             </div>
           </div>
@@ -698,7 +698,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             so it is reachable without scrolling to the very end. */}
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', position: 'sticky', bottom: 0, backgroundColor: 'var(--bg-app)', paddingTop: '0.5rem', paddingBottom: '0.25rem', zIndex: 5 }}>
           <button type="button" className="premium-btn premium-btn-secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setRunId((n) => n + 1)}>
-            <RefreshCw size={16} /> Retry checks
+            <RefreshCw size={16} /> {t('prejoin.retry_checks')}
           </button>
           <button
             type="button"

@@ -125,12 +125,12 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
           style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
         >
           <ArrowLeft size={16} />
-          <span>Exit Lobby</span>
+          <span>{t('lobby.exit_lobby')}</span>
         </button>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10B981', fontSize: '0.8rem', fontWeight: 700 }}>
           <ShieldCheck size={16} />
-          <span>SECURE ENCRYPTED MEETING · DTLS-SRTP</span>
+          <span>{t('lobby.secure_encrypted_meeting_dtls_srtp')}</span>
         </div>
       </div>
 
@@ -192,8 +192,8 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
                   {getParticipantInitials(currentUser?.name)}
                 </div>
                 <div>
-                  <h4 style={{ color: 'white', fontSize: '1rem', margin: '0 0 0.25rem 0' }}>Camera is Off</h4>
-                  <p style={{ fontSize: '0.8rem', margin: 0 }}>Configure devices before entering</p>
+                  <h4 style={{ color: 'white', fontSize: '1rem', margin: '0 0 0.25rem 0' }}>{t('lobby.camera_is_off')}</h4>
+                  <p style={{ fontSize: '0.8rem', margin: 0 }}>{t('lobby.configure_devices_before_entering')}</p>
                 </div>
               </div>
             )}
@@ -272,7 +272,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
                   backdropFilter: 'blur(8px)',
                   transition: 'all 0.2s'
                 }}
-                title="Device Settings"
+                title={t('lobby.device_settings')}
               >
                 <Sliders size={20} />
               </button>
@@ -300,7 +300,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
             </div>
           </div>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-            Verify your microphone and webcam settings before entering the virtualization grid.
+            {t('lobby.verify_your_microphone_and_webcam')}
           </span>
           {cameraError && (
             <div style={{ fontSize: '0.8rem', color: '#FCA5A5', backgroundColor: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '8px', padding: '0.75rem 1rem', lineHeight: 1.45, textAlign: 'left' }}>
@@ -323,7 +323,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
                 <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)' }}>{brandName}</span>
               </div>
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
-                Virtual Meeting Room
+                {t('lobby.virtual_meeting_room')}
               </span>
               <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', marginTop: '0.25rem', marginBottom: '0.5rem' }}>
                 {meetingTitle}
@@ -347,7 +347,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
               flexDirection: 'column',
               gap: '0.5rem'
             }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Share Invitation Link</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('lobby.share_invitation_link')}</span>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <input 
                   type="text" 
@@ -367,13 +367,13 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
                   onClick={handleCopyLink}
                   className={`premium-btn ${copied ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
                   style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem', height: '34px', flexShrink: 0 }}
-                  title="Copy Meeting Link"
+                  title={t('lobby.copy_meeting_link')}
                 >
                   {copied ? <Check size={14} /> : <Copy size={14} />}
                 </button>
               </div>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                The passcode is included in the link, so guests join without typing it, they only see a passcode prompt if the link&apos;s code is wrong or missing.
+                {t('lobby.the_passcode_is_included_in')}
               </span>
             </div>
 
@@ -394,7 +394,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
                 boxShadow: 'var(--shadow-premium)'
               }}
             >
-              <span>Join Meeting Room</span>
+              <span>{t('lobby.join_meeting_room')}</span>
               <ArrowRight size={18} />
             </button>
           </div>
@@ -408,15 +408,15 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span>Media encrypted in transit (DTLS-SRTP)</span>
+              <span>{t('lobby.media_encrypted_in_transit_dtls')}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span>Pre-Admission Waitroom & Privacy Controls</span>
+              <span>{t('lobby.pre_admission_waitroom_privacy_controls')}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span>LiveKit-powered video infrastructure</span>
+              <span>{t('lobby.livekit_powered_video_infrastructure')}</span>
             </div>
           </div>
 

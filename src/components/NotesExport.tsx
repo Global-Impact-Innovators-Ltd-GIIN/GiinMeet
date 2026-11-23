@@ -38,26 +38,13 @@ function escapeHtml(value: string): string {
 
 function buildWordHtml(title: string, dateText: string, data: ExportData): string {
   const section = (heading: string, body: string) =>
-    body ? `<h2 style="font-size:15pt;color:#00205B;margin:18pt 0 6pt 0;">${escapeHtml(heading)}</h2>${body}` : '';
-  const para = (text: string) => `<p style="font-size:11pt;line-height:1.5;margin:0 0 6pt 0;">${escapeHtml(text)}</p>`;
+    body ? t('export.h2_style_font_size', { v1: escapeHtml(heading), v2: body }) : '';
+  const para = (text: string) => t('export.p_style_font_size', { v1: escapeHtml(text) });
   const list = (items: string[]) =>
     items.length > 0
-      ? `<ul style="font-size:11pt;line-height:1.5;">${items.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`
+      ? t('export.ul_style_font_size', { v1: items.map((i) => `<li>${escapeHtml(i)}</li>`).join('') })
       : '';
-  return `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body style="font-family:Calibri,Arial,sans-serif;">
-<h1 style="font-size:20pt;color:#00205B;margin:0 0 4pt 0;">${escapeHtml(title)}</h1>
-<p style="font-size:11pt;color:#666;margin:0 0 12pt 0;">GiinMeet meeting notes, ${escapeHtml(dateText)}</p>
-${section('Summary', para(data.summaryText || 'No summary was generated for this meeting.'))}
-${section('Decisions', list(data.decisions))}
-${section('Action items', list(data.actionItems))}
-${section('Notes', data.notes.map(para).join(''))}
-${section(
-    'Transcript',
-    data.transcriptLines.length > 0
-      ? data.transcriptLines.map((l) => para(`${l.name} (${l.time}): ${l.text}`)).join('')
-      : para('No transcript was saved for this meeting.'),
-  )}
-</body></html>`;
+  return t('export.doctype_html_html_xmlns', { v1: escapeHtml(title), v2: escapeHtml(title), v3: escapeHtml(dateText), v4: section('Summary', para(data.summaryText || 'No summary was generated for this meeting.')), v5: section('Decisions', list(data.decisions)), v6: section('Action items', list(data.actionItems)), v7: section('Notes', data.notes.map(para).join('')), v8: section('Transcript', data.transcriptLines.length > 0 ? data.transcriptLines.map((l) => para(`${l.name} (${l.time}): ${l.text}`)).join('') : para('No transcript was saved for this meeting.')) });
 }
 
 function downloadPdf(title: string, dateText: string, data: ExportData): void {
@@ -80,7 +67,7 @@ function downloadPdf(title: string, dateText: string, data: ExportData): void {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.setTextColor(110, 110, 110);
-  doc.text(`GiinMeet meeting notes, ${dateText}`, margin, y);
+  doc.text(t('export.giinmeet_meeting_notes', { v1: dateText }), margin, y);
   y += 10;
   const heading = (text: string) => {
     ensureSpace(14);
@@ -138,7 +125,7 @@ function downloadPdf(title: string, dateText: string, data: ExportData): void {
     data.transcriptLines.forEach((l) => body(`${l.name} (${l.time}): ${l.text}`));
   }
   const safeTitle = title.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'meeting';
-  doc.save(`GiinMeet-Notes-${safeTitle}.pdf`);
+  doc.save(t('export.giinmeet_notes_pdf', { v1: safeTitle }));
 }
 
 export const NotesExport: React.FC<Props> = ({ meetingId, meetingTitle, meetingDate }) => {
@@ -197,7 +184,7 @@ export const NotesExport: React.FC<Props> = ({ meetingId, meetingTitle, meetingD
     const a = document.createElement('a');
     a.href = url;
     const safeTitle = meetingTitle.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'meeting';
-    a.download = `GiinMeet-Notes-${safeTitle}.doc`;
+    a.download = t('export.giinmeet_notes_doc', { v1: safeTitle });
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

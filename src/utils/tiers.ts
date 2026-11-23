@@ -86,6 +86,22 @@ export const tierForProfile = (profile: { is_premium?: boolean | null; plan_tier
 export const tierForPremium = (isPremium: boolean | null | undefined): PlanTier =>
   isPremium ? 'pro' : 'free';
 
+/** Developer API (keys and webhooks) is a PAID feature, not a free
+ *  one. Default: Pro and Enterprise can create keys and webhooks,
+ *  Free cannot. SUKU TO CONFIRM: does Pro get API access, or
+ *  Enterprise only? If Enterprise only, change `pro` below to false;
+ *  the server route check and the panel lock both read this one map,
+ *  so one line changes the whole product. No pricing is invented here. */
+export const TIER_CAN_USE_DEVELOPER_API: Record<PlanTier, boolean> = {
+  free: false,
+  pro: true,
+  enterprise: true,
+};
+
+/** Can this tier create API keys and webhooks? */
+export const canUseDeveloperApi = (tier: PlanTier): boolean =>
+  TIER_CAN_USE_DEVELOPER_API[tier];
+
 /** Participant limit for a host profile row. */
 export const tierLimitForProfile = (profile: { is_premium?: boolean | null; plan_tier?: string | null } | null | undefined): number =>
   TIER_LIMITS[tierForProfile(profile)];

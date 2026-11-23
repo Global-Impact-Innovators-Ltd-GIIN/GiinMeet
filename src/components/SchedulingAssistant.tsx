@@ -65,7 +65,7 @@ export default function SchedulingAssistant({
 
   const handleSuggest = async () => {
     if (days.length === 0) {
-      setStatus('Pick at least one day you are free.');
+      setStatus(t('assist.pick_at_least_one_day'));
       return;
     }
     setBusy(true);
@@ -131,7 +131,7 @@ export default function SchedulingAssistant({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
-      setStatus('Copy did not work, select the link and copy it by hand.');
+      setStatus(t('assist.copy_did_not_work_select'));
     }
   };
 
@@ -167,26 +167,25 @@ export default function SchedulingAssistant({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 style={{ fontSize: '1.25rem', margin: '0 0 0.25rem', fontFamily: 'var(--font-heading)' }}>
-          Find a time that works
+          {t('assist.find_a_time_that_works')}
         </h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0 0 1rem', lineHeight: 1.5 }}>
-          Tell us when you are free. We check your connected calendars and your GiinMeet meetings, then suggest
-          times. No calendar connected? It still works from the hours you state here.
+          {t('assist.tell_us_when_you_are')}
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>Meeting title</label>
+            <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>{t('assist.meeting_title')}</label>
             <input
               type="text"
               className="premium-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Weekly Operations Sync"
+              placeholder={t('assist.e_g_weekly_operations_sync')}
             />
           </div>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 140px', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>Length (minutes)</label>
+              <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>{t('assist.length_minutes')}</label>
               <input
                 type="number"
                 min={15}
@@ -198,16 +197,16 @@ export default function SchedulingAssistant({
               />
             </div>
             <div style={{ flex: '1 1 140px', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>From</label>
+              <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>{t('assist.from')}</label>
               <input type="date" className="premium-input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
             </div>
             <div style={{ flex: '1 1 140px', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>To</label>
+              <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>{t('assist.to_label')}</label>
               <input type="date" className="premium-input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>I am free on</span>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{t('assist.i_am_free_on')}</span>
             <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
               {DAY_LABELS.map((label, day) => (
                 <button
@@ -241,13 +240,13 @@ export default function SchedulingAssistant({
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>Attendee emails (optional, for the poll)</label>
+            <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>{t('assist.attendee_emails_optional_for_the')}</label>
             <input
               type="text"
               className="premium-input"
               value={emails}
               onChange={(e) => setEmails(e.target.value)}
-              placeholder="name@example.com, another@example.com"
+              placeholder={t('assist.name_example_com_another_example')}
             />
           </div>
           <button
@@ -264,7 +263,7 @@ export default function SchedulingAssistant({
               <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
                 Suggested times
                 {usedCalendars.length > 0
-                  ? ` (checked against ${usedCalendars.map((p) => (p === 'google' ? 'Google Calendar' : 'Outlook')).join(' and ')})`
+                  ? t('assist.checked_against', { v1: usedCalendars.map((p) => (p === 'google' ? 'Google Calendar' : 'Outlook')).join(' and ') })
                   : ' (no calendar connected)'}
               </span>
               {slots.map((s) => (
@@ -284,7 +283,7 @@ export default function SchedulingAssistant({
                     style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', flexShrink: 0 }}
                     onClick={() => onUseSlot(s.start, title, duration)}
                   >
-                    Use this time
+                    {t('assist.use_this_time')}
                   </button>
                 </div>
               ))}
@@ -294,13 +293,13 @@ export default function SchedulingAssistant({
                 disabled={busy}
                 onClick={() => void handleCreatePoll()}
               >
-                Ask attendees to vote on these times
+                {t('assist.ask_attendees_to_vote_on')}
               </button>
             </div>
           )}
           {poll && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '0.85rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>Poll created, share this link</span>
+              <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{t('assist.poll_created_share_this_link')}</span>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <input type="text" readOnly value={poll.link} className="premium-input" style={{ flex: '1 1 200px', minWidth: 0, fontSize: '0.8rem' }} />
                 <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => void copyPollLink()}>
@@ -308,20 +307,20 @@ export default function SchedulingAssistant({
                 </button>
               </div>
               <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
-                Anyone with the link can vote, no account needed. The poll stays open for 14 days.
+                {t('assist.anyone_with_the_link_can')}
               </p>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.78rem' }} onClick={() => void handleRefreshVotes()}>
-                  Refresh votes
+                  {t('assist.refresh_votes')}
                 </button>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  {pollVotes.length === 0 ? 'No votes yet.' : `${pollVotes.length} ${pollVotes.length === 1 ? 'person has' : 'people have'} voted: ${pollVotes.map((v: any) => v.voter_name).join(', ')}`}
+                  {pollVotes.length === 0 ? t('assist.no_votes_yet') : t(pollVotes.length === 1 ? 'assist.one_person_voted' : 'assist.people_voted', { v1: pollVotes.length, v2: pollVotes.map((v: any) => v.voter_name).join(', ') })}
                 </span>
               </div>
             </div>
           )}
           <button type="button" className="premium-btn premium-btn-secondary" onClick={onClose}>
-            Done
+            {t('agenda.timerDone')}
           </button>
         </div>
       </div>

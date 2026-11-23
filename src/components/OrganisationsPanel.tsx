@@ -51,7 +51,7 @@ export const OrganisationsPanel: React.FC = () => {
 
   const createOrg = async () => {
     if (!newName.trim() || !newSlug.trim()) {
-      setNotice({ kind: 'error', text: 'Give the organisation a name and a short name.' });
+      setNotice({ kind: 'error', text: t('org.give_the_organisation_a_name') });
       return;
     }
     setBusy(true);
@@ -61,7 +61,7 @@ export const OrganisationsPanel: React.FC = () => {
       setNewName('');
       setNewSlug('');
       await load();
-      setNotice({ kind: 'ok', text: 'Organisation created. You are its admin, set its brand below.' });
+      setNotice({ kind: 'ok', text: t('org.organisation_created_you_are_its') });
     } catch (e: any) {
       setNotice({ kind: 'error', text: e?.message || 'Could not create the organisation.' });
     } finally {
@@ -95,7 +95,7 @@ export const OrganisationsPanel: React.FC = () => {
 
   const addMember = async (org: Org) => {
     if (!newMemberEmail.trim()) {
-      setNotice({ kind: 'error', text: 'Enter the email of a GiinMeet account to add.' });
+      setNotice({ kind: 'error', text: t('org.enter_the_email_of_a') });
       return;
     }
     setBusy(true);
@@ -105,7 +105,7 @@ export const OrganisationsPanel: React.FC = () => {
       setNewMemberEmail('');
       const list = await giinApi.getOrganisationMembers(org.id);
       setMembersByOrg((prev) => ({ ...prev, [org.id]: list }));
-      setNotice({ kind: 'ok', text: `${newMemberEmail.trim()} is now a ${newMemberRole} of ${org.name}.` });
+      setNotice({ kind: 'ok', text: t('org.member_added', { v1: newMemberEmail.trim(), v2: newMemberRole, v3: org.name }) });
     } catch (e: any) {
       setNotice({ kind: 'error', text: e?.message || 'Could not add the member.' });
     } finally {
@@ -125,7 +125,7 @@ export const OrganisationsPanel: React.FC = () => {
       });
       setEditingId('');
       await load();
-      setNotice({ kind: 'ok', text: `Brand saved for ${org.name}. Its waiting rooms and invites carry it now.` });
+      setNotice({ kind: 'ok', text: t('org.brand_saved_for_its_waiting', { v1: org.name }) });
     } catch (e: any) {
       setNotice({ kind: 'error', text: e?.message || 'Could not save the brand.' });
     } finally {
@@ -136,10 +136,10 @@ export const OrganisationsPanel: React.FC = () => {
   return (
     <div className="glass-panel" style={{ padding: '1.25rem' }}>
       <h3 style={{ fontSize: '1.05rem', margin: '0 0 0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <Building2 size={18} /> Organisations
+        <Building2 size={18} /> {t('org.organisations')}
       </h3>
       <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0 0 1rem' }}>
-        A client or school sees its own name, logo and colours across its rooms, waiting room and invites, with a small powered by GiinMeet mark. Only an organisation admin can change its brand.
+        {t('org.your_clients_see_their_own')}
       </p>
       {notice && (
         <p style={{ fontSize: '0.85rem', margin: '0 0 0.75rem', color: notice.kind === 'error' ? '#FCA5A5' : '#6EE7B7', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
@@ -147,11 +147,11 @@ export const OrganisationsPanel: React.FC = () => {
         </p>
       )}
       {loading ? (
-        <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Loading your organisations…</p>
+        <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{t('org.loading_your_organisations')}</p>
       ) : (
         <>
           {orgs.length === 0 ? (
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>You belong to no organisation yet. Create one below to white-label its meetings.</p>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{t('org.no_organisation_yet_create_one')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
               {orgs.map((org) => {
@@ -175,22 +175,22 @@ export const OrganisationsPanel: React.FC = () => {
                       </div>
                       {canEdit && !editing && (
                         <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.9rem', fontSize: '0.8rem' }} disabled={busy} onClick={() => startEditing(org)}>
-                          Edit brand
+                          {t('org.edit_brand')}
                         </button>
                       )}
                     </div>
                     {editing && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.75rem', maxWidth: '560px' }}>
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                          Name
+                          {t('org.name')}
                           <input className="premium-input" value={draft.name} disabled={busy} onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ height: '40px' }} />
                         </label>
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                          Logo URL
+                          {t('org.logo_url')}
                           <input className="premium-input" type="url" value={draft.logoUrl} disabled={busy} onChange={(e) => setDraft({ ...draft, logoUrl: e.target.value })} placeholder="https://.../logo.png" style={{ height: '40px' }} />
                         </label>
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                          Accent colour
+                          {t('org.accent_colour')}
                           <input
                             type="color"
                             value={/^#[0-9a-fA-F]{6}$/.test(draft.accentColor) ? draft.accentColor : '#3B82F6'}
@@ -200,15 +200,15 @@ export const OrganisationsPanel: React.FC = () => {
                           />
                         </label>
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                          Slogan
-                          <input className="premium-input" value={draft.slogan} disabled={busy} onChange={(e) => setDraft({ ...draft, slogan: e.target.value })} placeholder="One line under the name" style={{ height: '40px' }} />
+                          {t('org.slogan')}
+                          <input className="premium-input" value={draft.slogan} disabled={busy} onChange={(e) => setDraft({ ...draft, slogan: e.target.value })} placeholder={t('org.one_line_under_the_name')} style={{ height: '40px' }} />
                         </label>
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
                           <button type="button" className="premium-btn premium-btn-primary" style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }} disabled={busy} onClick={() => void saveBrand(org)}>
-                            Save brand
+                            {t('org.save_brand')}
                           </button>
                           <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }} disabled={busy} onClick={() => setEditingId('')}>
-                            Cancel
+                            {t('common.cancel')}
                           </button>
                         </div>
                       </div>
@@ -221,7 +221,7 @@ export const OrganisationsPanel: React.FC = () => {
                         {membersOpenId === org.id && (
                           <div style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             {(membersByOrg[org.id] || []).length === 0 ? (
-                              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>No members listed yet.</p>
+                              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>{t('org.no_members_listed_yet')}</p>
                             ) : (
                               membersByOrg[org.id].map((m) => (
                                 <div key={m.userId} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.85rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.4rem' }}>
@@ -237,15 +237,15 @@ export const OrganisationsPanel: React.FC = () => {
                                 value={newMemberEmail}
                                 disabled={busy}
                                 onChange={(e) => setNewMemberEmail(e.target.value)}
-                                placeholder="member@email.com (must already have a GiinMeet account)"
+                                placeholder={t('org.member_email_com_must_already')}
                                 style={{ height: '40px', flex: '2 1 220px' }}
                               />
                               <select className="premium-input" value={newMemberRole} disabled={busy} onChange={(e) => setNewMemberRole(e.target.value as 'admin' | 'member')} style={{ height: '40px', flex: '0 1 120px' }}>
-                                <option value="member">Member</option>
-                                <option value="admin">Admin</option>
+                                <option value="member">{t('org.member')}</option>
+                                <option value="admin">{t('org.admin')}</option>
                               </select>
                               <button type="button" className="premium-btn premium-btn-primary" style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }} disabled={busy} onClick={() => void addMember(org)}>
-                                Add member
+                                {t('org.add_member')}
                               </button>
                             </div>
                           </div>
@@ -260,7 +260,7 @@ export const OrganisationsPanel: React.FC = () => {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxWidth: '560px', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
             <h4 style={{ fontSize: '0.95rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Plus size={15} /> Create an organisation
+              <Plus size={15} /> {t('org.create_an_organisation')}
             </h4>
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <input
@@ -268,7 +268,7 @@ export const OrganisationsPanel: React.FC = () => {
                 value={newName}
                 disabled={busy}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="Organisation name, e.g. Kigali High School"
+                placeholder={t('org.organisation_name_e_g_kigali')}
                 style={{ height: '44px', flex: '2 1 220px' }}
               />
               <input
@@ -276,7 +276,7 @@ export const OrganisationsPanel: React.FC = () => {
                 value={newSlug}
                 disabled={busy}
                 onChange={(e) => setNewSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                placeholder="Short name, e.g. kigali-high"
+                placeholder={t('org.short_name_e_g_kigali')}
                 style={{ height: '44px', flex: '1 1 160px' }}
               />
               <button type="button" className="premium-btn premium-btn-primary" disabled={busy} onClick={() => void createOrg()} style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}>
@@ -284,7 +284,7 @@ export const OrganisationsPanel: React.FC = () => {
               </button>
             </div>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              The short name is 3 to 30 lowercase letters, digits or hyphens, and must be unique. You become the organisation admin.
+              {t('org.the_short_name_is_3')}
             </span>
           </div>
         </>

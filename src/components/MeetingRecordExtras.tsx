@@ -69,7 +69,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
   const handleDeleteNote = async (id: string) => {
     const result: any = await giinApi.deleteMeetingNote(meetingId, id);
     if (result?.ok) setNotes((prev) => prev.filter((n) => n.id !== id));
-    else setNote('That note could not be deleted.');
+    else setNote(t('record.that_note_could_not_be'));
   };
 
   const handleAddFile = async () => {
@@ -102,7 +102,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
   const handleDeleteFile = async (id: string) => {
     const result: any = await giinApi.deleteMeetingFile(meetingId, id);
     if (result?.ok) setFiles((prev) => prev.filter((f) => f.id !== id));
-    else setNote('That file could not be removed.');
+    else setNote(t('record.that_file_could_not_be'));
   };
 
   const fmtDuration = (secs: number | null) => {
@@ -118,7 +118,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
   };
 
   if (loading) {
-    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Loading notes and files…</p>;
+    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('record.loading_notes_and_files')}</p>;
   }
 
   return (
@@ -129,7 +129,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>NOTES</span>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
           {notes.length === 0 && (
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No notes yet. Add one below, it is shared with everyone who can read this meeting record.</p>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('record.no_notes_yet_add_one')}</p>
           )}
           {notes.map((n) => (
             <div key={n.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.8rem', lineHeight: 1.45 }}>
@@ -139,7 +139,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
                 type="button"
                 className="premium-btn premium-btn-secondary"
                 style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: '#EF4444', flexShrink: 0 }}
-                title="Delete this note"
+                title={t('record.delete_this_note')}
                 onClick={() => void handleDeleteNote(n.id)}
               >
                 <Trash2 size={12} />
@@ -150,7 +150,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
             <textarea
               value={newNote}
               onChange={(e) => setNewNote(e.target.value)}
-              placeholder="Add a note for this meeting…"
+              placeholder={t('record.add_a_note_for_this')}
               maxLength={5000}
               rows={2}
               style={{ flex: '1 1 220px', minWidth: 0, padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem', resize: 'vertical' }}
@@ -169,14 +169,13 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
       </div>
 
       <div>
-        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>RECORDINGS AND FILES</span>
+        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('record.recordings_and_files')}</span>
         <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.35rem 0 0.5rem', lineHeight: 1.5 }}>
-          GiinMeet does not store cloud recordings. If you recorded this meeting on your own device,
-          register it here so it can be found again.
+          {t('record.giinmeet_does_not_store_cloud')}
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {files.length === 0 && !showFileForm && (
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No recordings or files registered for this meeting.</p>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('record.no_recordings_or_files_registered')}</p>
           )}
           {files.map((f) => (
             <div key={f.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.8rem', lineHeight: 1.45 }}>
@@ -198,7 +197,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
                 type="button"
                 className="premium-btn premium-btn-secondary"
                 style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: '#EF4444', flexShrink: 0 }}
-                title="Remove this entry"
+                title={t('record.remove_this_entry')}
                 onClick={() => void handleDeleteFile(f.id)}
               >
                 <Trash2 size={12} />
@@ -211,7 +210,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
                 type="text"
                 value={fileName}
                 onChange={(e) => setFileName(e.target.value)}
-                placeholder="Recording file name, e.g. team-standup-2026-11-23.mp4"
+                placeholder={t('record.recording_file_name_e_g')}
                 maxLength={300}
                 style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem' }}
               />
@@ -221,7 +220,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
                   min={0}
                   value={fileMinutes}
                   onChange={(e) => setFileMinutes(e.target.value)}
-                  placeholder="Length (minutes)"
+                  placeholder={t('record.length_minutes')}
                   style={{ flex: '1 1 120px', minWidth: 0, padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem' }}
                 />
                 <input
@@ -229,7 +228,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
                   min={0}
                   value={fileSizeMb}
                   onChange={(e) => setFileSizeMb(e.target.value)}
-                  placeholder="Size (MB)"
+                  placeholder={t('record.size_mb')}
                   style={{ flex: '1 1 120px', minWidth: 0, padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem' }}
                 />
               </div>
@@ -237,7 +236,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
                 type="text"
                 value={fileWhere}
                 onChange={(e) => setFileWhere(e.target.value)}
-                placeholder="Where it is kept, e.g. Laptop, Videos folder (optional)"
+                placeholder={t('record.where_it_is_kept_e')}
                 maxLength={500}
                 style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem' }}
               />
@@ -257,7 +256,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
                   style={{ padding: '0.45rem 0.9rem', fontSize: '0.8rem' }}
                   onClick={() => setShowFileForm(false)}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>
@@ -268,7 +267,7 @@ export const MeetingRecordExtras: React.FC<Props> = ({ meetingId }) => {
               style={{ alignSelf: 'flex-start', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
               onClick={() => setShowFileForm(true)}
             >
-              <Plus size={13} /> Register a local recording
+              <Plus size={13} /> {t('record.register_a_local_recording')}
             </button>
           )}
         </div>

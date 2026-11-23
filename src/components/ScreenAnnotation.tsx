@@ -289,7 +289,7 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({
                 display: 'flex',
                 alignItems: 'center'
               }}
-              title="Pen Drawing Mode"
+              title={t('annot.pen_drawing_mode')}
             >
               <Edit2 size={14} color={toolMode === 'pen' ? 'var(--color-accent)' : 'white'} />
             </button>
@@ -307,7 +307,7 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({
                 display: 'flex',
                 alignItems: 'center'
               }}
-              title="Laser Pointer Spotlight"
+              title={t('annot.laser_pointer_spotlight')}
             >
               <Sparkles size={14} color={toolMode === 'laser' ? 'var(--color-accent)' : 'white'} />
             </button>
@@ -362,7 +362,7 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({
                 alignItems: 'center',
                 padding: '0.25rem'
               }}
-              title="Clear All Annotations"
+              title={t('annot.clear_all_annotations')}
             >
               <Trash2 size={15} />
             </button>
@@ -378,7 +378,7 @@ export const ScreenAnnotation: React.FC<ScreenAnnotationProps> = ({
                 alignItems: 'center',
                 padding: '0.25rem'
               }}
-              title="Turn Off Annotation Overlay"
+              title={t('annot.turn_off_annotation_overlay')}
             >
               <X size={15} />
             </button>

@@ -32,7 +32,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
   // Collaborative minutes text state
   const [minutesText, setMinutesText] = useState(
     initialNotes ||
-    (`# Meeting Minutes: ${meetingTitle || 'GIIN MEET Alignment'}\n\n` +
+    (t('ws.meeting_minutes', { v1: meetingTitle || 'GIIN MEET Alignment' }) +
      `## Discussion Notes:\n- `)
   );
 
@@ -295,7 +295,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
           }}
         >
           <Edit size={12} />
-          <span>Notes</span>
+          <span>{t('common.notes')}</span>
         </button>
 
         <button
@@ -317,7 +317,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
           }}
         >
           <CheckSquare size={12} />
-          <span>Actions</span>
+          <span>{t('ws.actions')}</span>
         </button>
 
         <button
@@ -339,7 +339,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
           }}
         >
           <Palette size={12} />
-          <span>Canvas</span>
+          <span>{t('ws.canvas')}</span>
         </button>
       </div>
 
@@ -360,7 +360,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
             }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <Cpu size={12} />
-                <span>AI MEETING ASSISTANT</span>
+                <span>{t('ws.ai_meeting_assistant')}</span>
               </span>
               
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
@@ -409,16 +409,16 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
             </div>
 
             <div className="flex-between">
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>COLLABORATIVE MINUTES</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>{t('ws.collaborative_minutes')}</span>
               <button 
                 onClick={() => {
                   navigator.clipboard.writeText(minutesText);
-                  alert('Notes copied to clipboard!');
+                  alert(t('ws.notes_copied_to_clipboard'));
                 }}
                 style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.75rem' }}
               >
                 <ClipboardCopy size={12} />
-                <span>Copy</span>
+                <span>{t('common.copy')}</span>
               </button>
             </div>
             
@@ -465,11 +465,11 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
               borderRadius: '6px',
               backgroundColor: 'var(--bg-app)'
             }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-main)' }}>ASSIGN NEW TASK</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-main)' }}>{t('ws.assign_new_task')}</span>
               
               <input 
                 type="text" 
-                placeholder="Task description..."
+                placeholder={t('ws.task_description')}
                 value={taskText}
                 onChange={(e) => setTaskText(e.target.value)}
                 className="premium-input"
@@ -503,7 +503,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
 
               <button type="submit" className="premium-btn premium-btn-primary" style={{ padding: '0.4rem', fontSize: '0.8rem', borderRadius: '4px' }}>
                 <Plus size={14} />
-                <span>Add Task</span>
+                <span>{t('ws.add_task')}</span>
               </button>
             </form>
 
@@ -558,7 +558,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
                 ))}
                 {actionItems.length === 0 && (
                   <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.75rem', padding: '1rem 0' }}>
-                    No items assigned.
+                    {t('ws.no_items_assigned')}
                   </p>
                 )}
               </div>
@@ -570,7 +570,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
         {activeTab === 'whiteboard' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%' }}>
             <div className="flex-between">
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>COLLABORATIVE CANVAS</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>{t('ws.collaborative_canvas')}</span>
               <button 
                 type="button"
                 onClick={handleClearCanvas}
@@ -587,7 +587,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
                 }}
               >
                 <Trash2 size={12} />
-                <span>Clear Canvas</span>
+                <span>{t('ws.clear_canvas')}</span>
               </button>
             </div>
 
@@ -624,7 +624,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
 
             {/* Canvas controls */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}>
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>BRUSH COLOR</span>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('ws.brush_color')}</span>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 {['#FABD02', '#EF4444', '#3B82F6', '#10B981', '#FFFFFF'].map(c => (
                   <button
@@ -645,7 +645,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
                 ))}
               </div>
 
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', marginTop: '0.25rem' }}>BRUSH SIZE</span>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', marginTop: '0.25rem' }}>{t('ws.brush_size')}</span>
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                 {[2, 5, 10].map(s => (
                   <button
@@ -696,7 +696,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
           style={{ flex: 1, fontSize: '0.8rem', padding: '0.5rem', borderRadius: '4px' }}
         >
           <Save size={14} />
-          <span>Save Workspace</span>
+          <span>{t('ws.save_workspace')}</span>
         </button>
         
         <button 
@@ -704,7 +704,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
           className="premium-btn premium-btn-secondary" 
           style={{ fontSize: '0.8rem', padding: '0.5rem', borderRadius: '4px' }}
         >
-          Close
+          {t('common.close')}
         </button>
       </div>
     </div>

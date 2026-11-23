@@ -112,7 +112,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
         accentColor: brandAccent.trim() || undefined,
       });
       await loadTeams();
-      setNotice({ kind: 'ok', text: 'Team brand saved. The waiting room and the room carry it now.' });
+      setNotice({ kind: 'ok', text: t('team.team_brand_saved_the_waiting') });
     } catch (e: any) {
       setNotice({ kind: 'error', text: e?.message || 'Could not save the team brand.' });
     } finally {
@@ -175,7 +175,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
       const list = await loadTeams();
       setSelectedTeamId(team.id);
       if (!list.some((t) => t.id === team.id)) setTeams((prev) => [...prev, team]);
-      setNotice({ kind: 'ok', text: `Team “${team.name}” created, you are its admin.` });
+      setNotice({ kind: 'ok', text: t('team.team_created_you_are_its', { v1: team.name }) });
     } catch (err: any) {
       fail(err, 'Could not create the team.');
     } finally {
@@ -192,7 +192,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
       const added = await giinApi.addTeamMember(selectedTeam.id, addEmail.trim());
       setAddEmail('');
       await loadTeamDetail(selectedTeam.id);
-      setNotice({ kind: 'ok', text: `${added.name || added.email} joined “${selectedTeam.name}”.` });
+      setNotice({ kind: 'ok', text: t('team.member_joined', { v1: added.name || added.email, v2: selectedTeam.name }) });
     } catch (err: any) {
       fail(err, 'Could not add the member.');
     } finally {
@@ -202,13 +202,13 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
 
   const handleRemoveMember = async (m: TeamMember) => {
     if (!selectedTeam) return;
-    if (!window.confirm(`Remove ${m.name || m.email} from “${selectedTeam.name}”? They will no longer see or join the team's meetings.`)) return;
+    if (!window.confirm(t('team.remove_from_they_will_no', { v1: m.name || m.email, v2: selectedTeam.name }))) return;
     setBusy(true);
     setNotice(null);
     try {
       await giinApi.removeTeamMember(selectedTeam.id, m.user_id);
       await loadTeamDetail(selectedTeam.id);
-      setNotice({ kind: 'ok', text: `${m.name || m.email} was removed from the team.` });
+      setNotice({ kind: 'ok', text: t('team.was_removed_from_the_team', { v1: m.name || m.email }) });
     } catch (err: any) {
       fail(err, 'Could not remove the member.');
     } finally {
@@ -218,12 +218,12 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
 
   const handleLeave = async () => {
     if (!selectedTeam) return;
-    if (!window.confirm(`Leave “${selectedTeam.name}”? You will no longer see or join its meetings.`)) return;
+    if (!window.confirm(t('team.leave_you_will_no_longer', { v1: selectedTeam.name }))) return;
     setBusy(true);
     setNotice(null);
     try {
       await giinApi.leaveTeam(selectedTeam.id);
-      setNotice({ kind: 'ok', text: `You left “${selectedTeam.name}”.` });
+      setNotice({ kind: 'ok', text: t('team.you_left', { v1: selectedTeam.name }) });
       setSelectedTeamId(null);
       await loadTeams();
     } catch (err: any) {
@@ -235,12 +235,12 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
 
   const handleDeleteTeam = async () => {
     if (!selectedTeam) return;
-    if (!window.confirm(`Delete “${selectedTeam.name}” for everyone? Its members lose access, and its past meetings become ordinary personal meetings of their hosts.`)) return;
+    if (!window.confirm(t('team.delete_for_everyone_its_members', { v1: selectedTeam.name }))) return;
     setBusy(true);
     setNotice(null);
     try {
       await giinApi.deleteTeam(selectedTeam.id);
-      setNotice({ kind: 'ok', text: `Team “${selectedTeam.name}” deleted.` });
+      setNotice({ kind: 'ok', text: t('team.team_deleted', { v1: selectedTeam.name }) });
       setSelectedTeamId(null);
       await loadTeams();
     } catch (err: any) {
@@ -257,7 +257,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
     try {
       const next = await giinApi.updateTeamSettings(selectedTeam.id, patch);
       setSettings(next);
-      setNotice({ kind: 'ok', text: 'Team settings saved, they apply to meetings scheduled from now on.' });
+      setNotice({ kind: 'ok', text: t('team.team_settings_saved_they_apply') });
     } catch (err: any) {
       fail(err, 'Could not save the team settings.');
     } finally {
@@ -283,7 +283,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
         setSchedTime('');
         setSchedPasscode('');
         await loadTeamDetail(selectedTeam.id);
-        setNotice({ kind: 'ok', text: `Team meeting scheduled, every member of “${selectedTeam.name}” can see it on their dashboard.` });
+        setNotice({ kind: 'ok', text: t('team.team_meeting_scheduled_every_member', { v1: selectedTeam.name }) });
       }
     } catch (err: any) {
       fail(err, 'Could not schedule the team meeting.');
@@ -295,7 +295,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
   if (loading) {
     return (
       <div className="dashboard-container" style={{ flex: 1, padding: '1.5rem' }}>
-        <p style={{ color: 'var(--text-muted)' }}>Loading your teams…</p>
+        <p style={{ color: 'var(--text-muted)' }}>{t('team.loading_your_teams')}</p>
       </div>
     );
   }
@@ -304,10 +304,10 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
     <div className="dashboard-container" style={{ animation: 'slide-in var(--transition-normal)', flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <div>
         <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Users size={22} /> Team Workspaces
+          <Users size={22} /> {t('team.team_workspaces')}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-          Shared spaces for a team, its members, its meetings, and its settings. Team meetings use the same video call as a personal meeting; only team members can see or join them.
+          {t('team.shared_spaces_for_a_team')}
         </p>
       </div>
 
@@ -317,7 +317,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
             <AlertCircle size={16} color="var(--color-accent)" /> {TEAMS_NOT_SET_UP_MESSAGE}
           </p>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-            The Teams view is ready, but the database tables do not exist yet, so no team can be created or listed until then. Nothing here is faked.
+            {t('team.the_teams_view_is_ready')}
           </p>
         </div>
       )}
@@ -330,26 +330,26 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
 
       {/* Create a team */}
       <div className="glass-panel" style={{ padding: '1.25rem' }}>
-        <h3 style={{ fontSize: '1.05rem', marginBottom: '0.75rem' }}>Create a team</h3>
+        <h3 style={{ fontSize: '1.05rem', marginBottom: '0.75rem' }}>{t('team.create_a_team')}</h3>
         <form onSubmit={handleCreateTeam} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <input
             className="premium-input"
-            placeholder="Team name, e.g. GIIN Engineering"
+            placeholder={t('team.team_name_e_g_giin')}
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
             disabled={supported === false || busy}
             style={{ flex: 1, minWidth: '220px', height: '44px' }}
           />
           <button type="submit" className="premium-btn premium-btn-primary" disabled={supported === false || busy || !createName.trim()} style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Plus size={16} /> Create team
+            <Plus size={16} /> {t('team.create_team')}
           </button>
         </form>
-        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>You become the team's admin. Admins add and remove members and change the team's settings.</p>
+        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>{t('team.you_become_the_teams_admin')}</p>
       </div>
 
       {supported !== false && teams.length === 0 && (
         <div className="glass-panel" style={{ padding: '1.25rem' }}>
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>You are not in any team yet. Create one above, or ask a team admin to add you with your GiinMeet email.</p>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{t('team.you_are_not_in_any')}</p>
         </div>
       )}
 
@@ -386,16 +386,16 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                   <h3 style={{ fontSize: '1.15rem' }}>{selectedTeam.name}</h3>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} disabled={busy} onClick={() => void loadTeamDetail(selectedTeam.id)}>
-                      <RefreshCw size={14} /> Refresh
+                      <RefreshCw size={14} /> {t('team.refresh')}
                     </button>
                     {!isCreator && (
                       <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} disabled={busy} onClick={() => void handleLeave()}>
-                        <LogOut size={14} /> Leave team
+                        <LogOut size={14} /> {t('team.leave_team')}
                       </button>
                     )}
                     {isCreator && (
                       <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', color: '#FCA5A5' }} disabled={busy} onClick={() => void handleDeleteTeam()}>
-                        <Trash2 size={14} /> Delete team
+                        <Trash2 size={14} /> {t('team.delete_team')}
                       </button>
                     )}
                   </div>
@@ -413,20 +413,20 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                     style={{ padding: '0.55rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
                     disabled={busy || roomBusy}
                     onClick={() => void openTeamRoom()}
-                    title="Join the team's own room, no scheduling needed"
+                    title={t('team.join_the_teams_own_room')}
                   >
                     <Play size={15} /> {roomBusy ? 'Opening room...' : 'Open team room'}
                   </button>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>One tap, the whole team joins the same room.</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('team.one_tap_the_whole_team')}</span>
                 </div>
                 {notice && (
                   <p style={{ fontSize: '0.85rem', marginTop: '0.75rem', color: notice.kind === 'error' ? '#FCA5A5' : '#6EE7B7' }}>{notice.text}</p>
                 )}
 
                 {/* Members */}
-                <h4 style={{ fontSize: '0.95rem', marginTop: '1.25rem', marginBottom: '0.5rem' }}>Members</h4>
+                <h4 style={{ fontSize: '0.95rem', marginTop: '1.25rem', marginBottom: '0.5rem' }}>{t('team.members')}</h4>
                 {members.length === 0 ? (
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No members loaded.</p>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('team.no_members_loaded')}</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {members.map((m) => (
@@ -437,8 +437,8 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                         </div>
                         <span className={`badge ${m.role === 'admin' ? 'badge-premium' : 'badge-info'}`}>{m.role === 'admin' ? 'Admin' : 'Member'}</span>
                         {isAdmin && user?.id !== m.user_id && selectedTeam.created_by !== m.user_id && (
-                          <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} disabled={busy} onClick={() => void handleRemoveMember(m)} title={`Remove ${m.name || m.email} from the team`}>
-                            Remove
+                          <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} disabled={busy} onClick={() => void handleRemoveMember(m)} title={t('team.remove_from_the_team', { v1: m.name || m.email })}>
+                            {t('team.remove')}
                           </button>
                         )}
                       </div>
@@ -449,7 +449,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                 {/* Add member (admin only) */}
                 {isAdmin && (
                   <form onSubmit={handleAddMember} style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Add a member by email</label>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>{t('team.add_a_member_by_email')}</label>
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <input
                         className="premium-input"
@@ -461,7 +461,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                         style={{ flex: 1, minWidth: '220px', height: '44px' }}
                       />
                       <button type="submit" className="premium-btn premium-btn-primary" disabled={busy || !addEmail.trim()} style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <UserPlus size={16} /> Add member
+                        <UserPlus size={16} /> {t('team.add_member')}
                       </button>
                     </div>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
@@ -480,17 +480,17 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                   </form>
                 )}
                 {!isAdmin && (
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>Only a team admin can add or remove members.</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>{t('team.only_a_team_admin_can')}</p>
                 )}
               </div>
 
               {/* Shared settings */}
               <div className="glass-panel" style={{ padding: '1.25rem' }}>
-                <h4 style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>Shared settings</h4>
+                <h4 style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>{t('team.shared_settings')}</h4>
                 {settings ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '560px' }}>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                      Who can start meetings in this team
+                      {t('team.who_can_start_meetings_in')}
                       <select
                         className="premium-input"
                         value={settings.who_can_start}
@@ -498,8 +498,8 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                         onChange={(e) => void handleSaveSettings({ who_can_start: e.target.value as 'any_member' | 'admin_only' })}
                         style={{ height: '44px' }}
                       >
-                        <option value="any_member">Any member</option>
-                        <option value="admin_only">Admins only</option>
+                        <option value="any_member">{t('team.any_member')}</option>
+                        <option value="admin_only">{t('team.admins_only')}</option>
                       </select>
                     </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.85rem', fontWeight: 600, cursor: isAdmin ? 'pointer' : 'default' }}>
@@ -509,10 +509,10 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                         disabled={!isAdmin || busy}
                         onChange={(e) => void handleSaveSettings({ default_require_waiting_room: e.target.checked })}
                       />
-                      New team meetings use a waiting room by default
+                      {t('team.new_team_meetings_use_a')}
                     </label>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                      Default meeting duration
+                      {t('team.default_meeting_duration')}
                       <select
                         className="premium-input"
                         value={clampDurationToTier(settings.default_duration, planTier)}
@@ -525,20 +525,20 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                         ))}
                       </select>
                     </label>
-                    {!isAdmin && <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Only a team admin can change these settings.</p>}
+                    {!isAdmin && <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('team.only_a_team_admin_can_2')}</p>}
                   </div>
                 ) : (
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Settings could not be loaded.</p>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('team.settings_could_not_be_loaded')}</p>
                 )}
                 {/* Phase D (44): team branding, admin only. */}
                 {isAdmin && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '560px', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-                    <h4 style={{ fontSize: '0.95rem', margin: 0 }}>Team branding</h4>
+                    <h4 style={{ fontSize: '0.95rem', margin: 0 }}>{t('team.team_branding')}</h4>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-                      The team's logo and colour show in the waiting room and in the room, so guests see the team, not just GiinMeet.
+                      {t('team.the_teams_logo_and_colour')}
                     </p>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                      Logo URL
+                      {t('team.logo_url')}
                       <input
                         className="premium-input"
                         type="url"
@@ -550,7 +550,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                       />
                     </label>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                      Accent colour
+                      {t('team.accent_colour')}
                       <input
                         type="color"
                         value={/^#[0-9a-fA-F]{6}$/.test(brandAccent) ? brandAccent : '#3B82F6'}
@@ -561,7 +561,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                     </label>
                     <div>
                       <button type="button" className="premium-btn premium-btn-primary" disabled={busy} onClick={() => void saveTeamBrand()} style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}>
-                        Save team brand
+                        {t('team.save_team_brand')}
                       </button>
                     </div>
                   </div>
@@ -570,16 +570,16 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
 
               {/* Schedule a team meeting */}
               <div className="glass-panel" style={{ padding: '1.25rem' }}>
-                <h4 style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>Schedule a team meeting</h4>
+                <h4 style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>{t('team.schedule_a_team_meeting')}</h4>
                 {!canSchedule ? (
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    This team only lets admins start meetings, and you are a member. Ask an admin to schedule it, or to change the setting above.
+                    {t('team.this_team_only_lets_admins')}
                   </p>
                 ) : (
                   <form onSubmit={handleScheduleTeamMeeting} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '560px' }}>
                     <input
                       className="premium-input"
-                      placeholder="Meeting title"
+                      placeholder={t('team.meeting_title')}
                       value={schedTitle}
                       onChange={(e) => setSchedTitle(e.target.value)}
                       disabled={busy}
@@ -602,7 +602,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                           if (e.target.checked && !schedPasscode) setSchedPasscode(generateMeetingPasscode());
                         }}
                       />
-                      Protect with a passcode
+                      {t('team.protect_with_a_passcode')}
                     </label>
                     {schedPasscodeEnabled && (
                       <input
@@ -610,7 +610,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                         value={schedPasscode}
                         onChange={(e) => setSchedPasscode(e.target.value.toUpperCase())}
                         disabled={busy}
-                        placeholder="Passcode"
+                        placeholder={t('team.passcode')}
                         style={{ height: '44px' }}
                       />
                     )}
@@ -631,7 +631,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
               <div className="glass-panel" style={{ padding: '1.25rem' }}>
                 <h4 style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>Team meetings ({teamMeetings.length})</h4>
                 {teamMeetings.length === 0 ? (
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No meetings in this team yet, schedule one above.</p>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('team.no_meetings_in_this_team')}</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     {(() => {

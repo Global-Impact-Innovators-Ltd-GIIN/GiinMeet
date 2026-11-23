@@ -15,6 +15,7 @@ import {
   errorWithSecurity,
   getAdminClient,
   getCaller,
+  canCallerUseDeveloperApi,
   internalError,
   isUuid,
   jsonWithSecurity,
@@ -54,6 +55,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'create') {
+      // Developer API is a paid feature: Free cannot create keys or
+      // webhooks. The check is server-side, on the caller's profile
+      // tier, so hiding the button is never the only defence.
+      const allowed = await canCallerUseDeveloperApi(admin, user.id);
+      if (!allowed) {
+        return errorWithSecurity('UPGRADE_REQUIRED', 'API keys are a Pro feature. Upgrade your plan to create API keys.', 403);
+      }
       const name = cleanText(body.name, 60) || 'GiinMeet API key';
       const rawKey = 'giin_live_' + randomBytes(24).toString('hex');
       const { data, error } = await admin

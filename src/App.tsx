@@ -18,6 +18,7 @@ import { LibrarySection } from './components/LibrarySection';
 import { ScheduleSection } from './components/ScheduleSection';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { t, useUiLanguage } from './i18n';
+import { useClickOutside } from './hooks/useClickOutside';
 import { Waitroom } from './components/Waitroom';
 import { PreJoinCheck } from './components/PreJoinCheck';
 import { MeetingLobby } from './components/MeetingLobby';
@@ -662,7 +663,7 @@ function App() {
                     };
                     if (newMsg.user_id !== user.id) {
                       if (hasMention) {
-                        triggerInAppNotification(`${newMsg.sender_name} (Mentioned You)`, text);
+                        triggerInAppNotification(t('app.mentioned_you', { v1: newMsg.sender_name }), text);
                       }
                     }
                     setThreads(current => {
@@ -686,7 +687,7 @@ function App() {
                 if (!isCurrent && newMsg.user_id !== user.id) {
                   if (isGroup) {
                     if (hasMention) {
-                      triggerInAppNotification(`${newMsg.sender_name} (Mentioned You)`, text);
+                      triggerInAppNotification(t('app.mentioned_you', { v1: newMsg.sender_name }), text);
                     }
                   } else {
                     triggerInAppNotification(t.name, text);
@@ -844,7 +845,7 @@ function App() {
         // Self-healing check: if profile is not found in database, insert it
         if (!profile) {
           const isPersonalDomain = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'aol.com', 'zoho.com', 'mail.com'].includes(domain.toLowerCase());
-          const workspaceName = isPersonalDomain ? 'Personal Workspace' : `${domain.split('.')[0].toUpperCase()} Enterprise Workspace`;
+          const workspaceName = isPersonalDomain ? 'Personal Workspace' : t('app.enterprise_workspace', { v1: domain.split('.')[0].toUpperCase() });
           const fullName = session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User';
 
           const newProfile = {
@@ -960,7 +961,7 @@ function App() {
         // Self-healing check: if profile is not found in database, insert it
         if (!profile) {
           const isPersonalDomain = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'aol.com', 'zoho.com', 'mail.com'].includes(domain.toLowerCase());
-          const workspaceName = isPersonalDomain ? 'Personal Workspace' : `${domain.split('.')[0].toUpperCase()} Enterprise Workspace`;
+          const workspaceName = isPersonalDomain ? 'Personal Workspace' : t('app.enterprise_workspace', { v1: domain.split('.')[0].toUpperCase() });
           const fullName = session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Giin User';
 
           const newProfile = {
@@ -1189,6 +1190,8 @@ function App() {
   const [notifications, setNotifications] = useState<{ id: string; text: string; time: string; read: boolean; meetingId?: string; meetingTitle?: string; targetView?: string }[]>([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const notifRef = useClickOutside<HTMLDivElement>(() => setShowNotifDropdown(false), showNotifDropdown);
+  const profileRef = useClickOutside<HTMLDivElement>(() => setShowProfileDropdown(false), showProfileDropdown);
 
   // Effect to apply theme variable class
   useEffect(() => {
@@ -1289,13 +1292,13 @@ function App() {
       let showAlert = true;
       interval = setInterval(() => {
         document.title = showAlert
-          ? `💬 (${totalUnreadMessages}) New Message!`
+          ? t('app.new_message', { v1: totalUnreadMessages })
           : brandName;
         showAlert = !showAlert;
       }, 1500);
     } else {
       document.title = totalUnreadMessages > 0
-        ? `💬 (${totalUnreadMessages}) ${brandName} | Chat`
+        ? t('app.unread_chat_title', { v1: totalUnreadMessages, v2: brandName })
         : brandName;
     }
     return () => {
@@ -1385,13 +1388,13 @@ function App() {
             joinId = rawInput;
           }
           if (!joinId) {
-            window.alert('That meeting code or link was not recognised. Paste the full invite link or the meeting ID (the long code with dashes), a 6-character passcode alone is not enough to find a meeting.');
+            window.alert(t('app.that_meeting_code_or_link'));
             return;
           }
           // Fetch existing meeting details
           const { data } = await giinApi.getMeetingDetails(joinId);
           if (!data) {
-            window.alert('That meeting could not be found. It may have been deleted, check the link or code and try again.');
+            window.alert(t('app.that_meeting_could_not_be'));
             return;
           }
           // Only the meeting's creator / admin may (re)start it as host.
@@ -1538,14 +1541,14 @@ function App() {
         }
       } catch (err: any) {
         console.error('Failed to start meeting/call:', err);
-        window.alert(`Could not start the meeting: ${err?.message || 'the meeting could not be saved.'} Please check your connection and try again.`);
+        window.alert(t('app.could_not_start_the_meeting', { v1: err?.message || 'the meeting could not be saved.' }));
       }
     } else {
       // Guests cannot start meetings: hosting needs a signed-in account so the
       // meeting, its passcode and its video room can be stored. Never invent a
       // local-only meeting, it could never connect.
       console.warn('[GiinMeet] A guest tried to start a meeting. Sign-in is required to host a meeting.');
-      window.alert('Sign in to start a meeting. Guests can join a meeting from an invite link.');
+      window.alert(t('app.sign_in_to_start_a'));
       return;
     }
 
@@ -1588,7 +1591,7 @@ function App() {
           // send the host to the dashboard while the meeting keeps
           // running. Stay in the room and say so plainly - the host
           // retries from the meeting (End for everyone).
-          window.alert('Could not end the meeting - it is still running and you are still the host. Please check your connection and try ending it again from the meeting.');
+          window.alert(t('app.could_not_end_the_meeting'));
           return;
         }
       }
@@ -1693,7 +1696,7 @@ function App() {
         }
       }
 
-      setActiveCallTitle(`Call with ${incomingCall.callerName}`);
+      setActiveCallTitle(t('app.call_with', { v1: incomingCall.callerName }));
       setActiveMeetingId(incomingCall.meetingId);
       setCurrentView('meeting');
       setIncomingCall(null);
@@ -1786,10 +1789,10 @@ function App() {
   // Cancelled on the server and dropped from the history here, so a
   // cancelled meeting never renders again.
   const handleCancelMeeting = async (meetingId: string, title: string) => {
-    if (!window.confirm(`Cancel "${title}"? Guests with the link will no longer be able to join.`)) return;
+    if (!window.confirm(t('app.cancel_guests_with_the_link', { v1: title }))) return;
     const { error } = await giinApi.updateMeetingStatus(meetingId, 'Cancelled');
     if (error) {
-      window.alert('Could not cancel the meeting, please try again.');
+      window.alert(t('app.could_not_cancel_the_meeting'));
       return;
     }
     setMeetingHistory(prev => prev.filter(m => m.id !== meetingId));
@@ -1802,7 +1805,7 @@ function App() {
   // and upcoming Scheduled meetings are refused by the server (cancel
   // an upcoming meeting instead).
   const handleDeleteMeeting = async (meetingId: string, title: string) => {
-    if (!window.confirm(`Delete "${title}" from your history? It will no longer appear in Meeting Logs & History. The meeting record is kept for audit, nothing else is deleted.`)) return;
+    if (!window.confirm(t('app.delete_from_your_history_it', { v1: title }))) return;
     try {
       await giinApi.deleteMeetingFromHistory(meetingId);
     } catch (e: any) {
@@ -1823,7 +1826,7 @@ function App() {
       return sid === seriesId && m.status === 'Scheduled';
     });
     if (seriesMeetings.length === 0) return;
-    if (!window.confirm(`Cancel the whole series "${title}"? ${seriesMeetings.length} upcoming meeting${seriesMeetings.length === 1 ? '' : 's'} will be cancelled.`)) return;
+    if (!window.confirm(t('app.cancel_the_whole_series_upcoming', { v1: title, v2: seriesMeetings.length, v3: seriesMeetings.length === 1 ? '' : 's' }))) return;
     const { count, error } = await giinApi.cancelSeries(seriesId);
     if (error) {
       // No series columns yet, cancel the known instances one by one.
@@ -1833,7 +1836,7 @@ function App() {
         if (oneError) failed++;
       }
       if (failed > 0) {
-        window.alert(`Could not cancel ${failed} of the ${seriesMeetings.length} meetings, please try again.`);
+        window.alert(t('app.could_not_cancel_of_the', { v1: failed, v2: seriesMeetings.length }));
       }
     } else if (count === 0) {
       // The server found nothing (columns missing or rows already gone) ,
@@ -1850,7 +1853,7 @@ function App() {
 
   const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number }; teamId?: string; teamName?: string; e2eeEnabled?: boolean; organisationId?: string | null }) => {
     if (!user || !user.id) {
-      window.alert('Sign in to schedule a meeting.');
+      window.alert(t('app.sign_in_to_schedule_a'));
       return null;
     }
     // The dashboard can show a cached user after the live session has
@@ -1860,11 +1863,11 @@ function App() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) {
-        window.alert('Your session has expired. Please sign in again to schedule a meeting.');
+        window.alert(t('app.your_session_has_expired_please'));
         return null;
       }
       if (session.user.id !== user.id) {
-        window.alert('You are signed in with a different account than this dashboard shows. Please sign out and sign in again to schedule a meeting.');
+        window.alert(t('app.you_are_signed_in_with'));
         return null;
       }
     } catch (e) {
@@ -1949,7 +1952,7 @@ function App() {
 
       const newNotif = {
         id: Math.random().toString(36).substr(2, 9),
-        text: `Scheduled new meeting: "${finalMeet.title}"`,
+        text: t('app.scheduled_new_meeting', { v1: finalMeet.title }),
         time: 'Just now',
         read: false,
         meetingId: finalMeet.id,
@@ -1962,10 +1965,10 @@ function App() {
       console.error('Failed to schedule meeting in database:', err);
       const msg = String(err?.message || '');
       if (msg.toLowerCase().includes('row-level security')) {
-        window.alert('Could not schedule the meeting: your session has expired. Please sign in again and try scheduling once more.');
+        window.alert(t('app.could_not_schedule_the_meeting'));
         return null;
       }
-      window.alert(`Could not schedule the meeting: ${err?.message || 'the meeting could not be saved.'} Please check your connection and try again.`);
+      window.alert(t('app.could_not_schedule_the_meeting_2', { v1: err?.message || 'the meeting could not be saved.' }));
       return null;
     }
   };
@@ -1989,7 +1992,7 @@ function App() {
     
     const newNotif = {
       id: Math.random().toString(36).substr(2, 9),
-      text: `Connected to ${authenticatedUser.workspaceName} directory!`,
+      text: t('app.connected_to_directory', { v1: authenticatedUser.workspaceName }),
       time: 'Just now',
       read: false,
         targetView: 'dashboard',
@@ -2004,7 +2007,7 @@ function App() {
   const handleSaveWorkspaceData = async (notes: string, actionItemsCount: number) => {
     const newNotif = {
       id: Math.random().toString(36).substr(2, 9),
-      text: `Synced collaborative notes: Saved ${actionItemsCount} action tasks.`,
+      text: t('app.synced_collaborative_notes_saved_action', { v1: actionItemsCount }),
       time: 'Just now',
       read: false,
         targetView: 'dashboard',
@@ -2020,7 +2023,7 @@ function App() {
     }
 
     setMeetingHistory(prev => 
-      prev.map(m => m.status === 'In Progress' ? { ...m, duration: `Saved notes (${actionItemsCount} tasks)` } : m)
+      prev.map(m => m.status === 'In Progress' ? { ...m, duration: t('app.saved_notes_tasks', { v1: actionItemsCount }) } : m)
     );
   };
 
@@ -2106,8 +2109,8 @@ function App() {
     return (
       <div style={{ width: '100vw', height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-app)', padding: '1.5rem' }}>
         <div className="glass-panel" style={{ padding: '2rem', maxWidth: '420px', width: '100%', textAlign: 'center' }}>
-          <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', fontFamily: 'var(--font-heading)' }}>Opening your personal room…</h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Finding the room and starting your session. This takes a moment.</p>
+          <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', fontFamily: 'var(--font-heading)' }}>{t('app.opening_your_personal_room')}</h2>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('app.finding_the_room_and_starting')}</p>
         </div>
       </div>
     );
@@ -2303,11 +2306,11 @@ function App() {
               justifyContent: 'center',
               textAlign: 'center'
             }}
-            title="Go to Dashboard"
+            title={t('app.go_to_dashboard')}
           >
             <img 
               src={logoUrl} 
-              alt="GiinMeet Logo" 
+              alt={t('app.giinmeet_logo')} 
               style={{
                 width: isSidebarCollapsed ? '48px' : '84px',
                 height: isSidebarCollapsed ? '48px' : '84px',
@@ -2365,7 +2368,7 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
-              title="Dashboard"
+              title={t('nav.dashboard')}
             >
               <Home size={18} />
               {!isSidebarCollapsed && <span>{t('nav.dashboard')}</span>}
@@ -2390,7 +2393,7 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
-              title="Team Workspaces"
+              title={t('app.team_workspaces')}
             >
               <Users size={18} />
               {!isSidebarCollapsed && <span>{t('nav.teams')}</span>}
@@ -2414,7 +2417,7 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
-              title="Chat Center"
+              title={t('nav.chats')}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: isSidebarCollapsed ? '0' : '0.75rem', position: 'relative' }}>
                 <MessageSquare size={18} />
@@ -2472,7 +2475,7 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
-              title="Contacts"
+              title={t('nav.contacts')}
             >
               <Users size={18} />
               {!isSidebarCollapsed && <span>{t('nav.contacts')}</span>}
@@ -2547,7 +2550,7 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
-              title="Help & Support"
+              title={t('app.help_support')}
             >
               <HelpCircle size={18} />
               {!isSidebarCollapsed && <span>{t('nav.help')}</span>}
@@ -2577,7 +2580,7 @@ function App() {
                 }}
               >
                 <Shield size={18} color="rgba(255,255,255,0.6)" />
-                {!isSidebarCollapsed && <span>Superadmin Portal</span>}
+                {!isSidebarCollapsed && <span>{t('app.superadmin_portal')}</span>}
               </button>
             )}
 
@@ -2600,7 +2603,7 @@ function App() {
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
-              title="Settings"
+              title={t('nav.settings')}
             >
               <SettingsIcon size={18} />
               {!isSidebarCollapsed && <span>{t('nav.settings')}</span>}
@@ -2629,7 +2632,7 @@ function App() {
                 marginLeft: 'auto',
                 marginRight: 'auto'
               }}
-              title="Upgrade Account"
+              title={t('app.upgrade_account')}
             >
               <CreditCard size={18} color="var(--color-accent)" />
             </div>
@@ -2647,7 +2650,7 @@ function App() {
               }}
             >
               <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
-                <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Current Tier</span>
+                <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>{t('app.current_tier')}</span>
                 {isPremium ? (
                   <span className="badge badge-premium" style={{ border: 'none', scale: '0.85' }}>Pro</span>
                 ) : (
@@ -2677,9 +2680,9 @@ function App() {
         {/* Top Navbar Menu, the header-only layout: the same navigation
             items as the left sidebar, rendered as a horizontal bar. */}
         {currentView !== 'meeting' && layoutStyle === 'header-only' && (
-          <nav className="top-navbar" aria-label="Main navigation">
+          <nav className="top-navbar" aria-label={t('app.main_navigation')}>
             <div className="top-navbar-brand">
-              <img src={logoUrl} alt="GiinMeet logo" />
+              <img src={logoUrl} alt={t('app.giinmeet_logo_2')} />
               <span>{brandName}</span>
             </div>
             <div className="top-navbar-links">
@@ -2706,7 +2709,7 @@ function App() {
               </button>
               {user?.is_superadmin && (
                 <button onClick={() => { window.location.href = '/superadmin'; }} className="top-navbar-btn">
-                  <Shield size={16} /> Superadmin Portal
+                  <Shield size={16} /> {t('app.superadmin_portal')}
                 </button>
               )}
               <button onClick={() => setCurrentView('settings')} className={`top-navbar-btn ${currentView === 'settings' ? 'active' : ''}`}>
@@ -2742,11 +2745,11 @@ function App() {
                   gap: '0.5rem',
                   cursor: 'pointer'
                 }}
-                title="Go to Dashboard"
+                title={t('app.go_to_dashboard')}
               >
                 <img 
                   src={logoUrl} 
-                  alt="GiinMeet Logo" 
+                  alt={t('app.giinmeet_logo')} 
                   style={{
                     width: '56px',
                     height: '56px',
@@ -2778,7 +2781,7 @@ function App() {
                   className="premium-btn premium-btn-primary" 
                   style={{ padding: '0.5rem 1.25rem', fontSize: '0.85rem', borderRadius: '6px' }}
                 >
-                  Start Instant Meeting
+                  {t('app.start_instant_meeting')}
                 </button>
               )}
 
@@ -2802,7 +2805,7 @@ function App() {
               </button>
 
               {/* Notification Dropper */}
-              <div style={{ position: 'relative' }}>
+              <div ref={notifRef} style={{ position: 'relative' }}>
                 <button 
                   onClick={() => {
                     setShowNotifDropdown(!showNotifDropdown);
@@ -2859,12 +2862,12 @@ function App() {
                     gap: '0.75rem'
                   }}>
                     <div className="flex-between">
-                      <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Alerts & Notifications</span>
+                      <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{t('app.alerts_notifications')}</span>
                       <button 
                         onClick={clearNotifications}
                         style={{ background: 'none', border: 'none', fontSize: '0.75rem', color: 'var(--color-secondary)', cursor: 'pointer' }}
                       >
-                        Clear All
+                        {t('app.clear_all')}
                       </button>
                     </div>
                     <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)' }} />
@@ -2887,7 +2890,7 @@ function App() {
                       ))}
                       {notifications.length === 0 && (
                         <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
-                          No new notifications.
+                          {t('app.no_new_notifications')}
                         </div>
                       )}
                     </div>
@@ -2896,7 +2899,7 @@ function App() {
               </div>
 
               {/* Profile Dropper */}
-              <div style={{ position: 'relative' }}>
+              <div ref={profileRef} style={{ position: 'relative' }}>
                 <div 
                   onClick={() => {
                     setShowProfileDropdown(!showProfileDropdown);
@@ -2974,7 +2977,7 @@ function App() {
                       }}
                     >
                       <User size={14} />
-                      <span>My Profile</span>
+                      <span>{t('app.my_profile')}</span>
                     </button>
                     <button 
                       onClick={() => {
@@ -2994,7 +2997,7 @@ function App() {
                       }}
                     >
                       <CreditCard size={14} />
-                      <span>Billing & Plans</span>
+                      <span>{t('app.billing_plans')}</span>
                     </button>
                     <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)', margin: '0.25rem 0' }} />
                     <button 
@@ -3021,7 +3024,7 @@ function App() {
                       }}
                     >
                       <LogOut size={14} color="#EF4444" />
-                      <span>Log Out</span>
+                      <span>{t('app.log_out')}</span>
                     </button>
                   </div>
                 )}
@@ -3125,7 +3128,7 @@ function App() {
           )}
 
           {currentView === 'schedule' && (
-            <ScheduleSection meetings={meetingHistory} />
+            <ScheduleSection meetings={meetingHistory} onNavigate={setCurrentView} onStartMeeting={handleStartCall} />
           )}
 
           {currentView === 'contacts' && (
@@ -3165,6 +3168,8 @@ function App() {
 
           {currentView === 'settings' && (
             <Settings
+              planTier={planTier}
+              onNavigate={setCurrentView}
               isDarkMode={isDarkMode}
               isSuperadmin={user?.is_superadmin}
               onToggleTheme={handleToggleTheme}
@@ -3479,12 +3484,12 @@ function App() {
               Calling {dialingState.targetUserName}
             </h3>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: 0 }}>
-              Connecting secure call...
+              {t('app.connecting_secure_call')}
             </p>
             <div className="calling-overlay-buttons">
               <button onClick={handleCancelCall} className="calling-overlay-btn calling-btn-decline" style={{ margin: '0 auto', maxWidth: '200px' }}>
                 <PhoneOff size={18} />
-                <span>Cancel</span>
+                <span>{t('common.cancel')}</span>
               </button>
             </div>
           </div>
@@ -3499,22 +3504,22 @@ function App() {
               {incomingCall.callerName.split(' ').map(n => n[0]).join('').toUpperCase()}
             </div>
             <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: 'white', fontFamily: 'var(--font-heading)' }}>
-              Incoming Call
+              {t('app.incoming_call')}
             </h3>
             <p style={{ fontSize: '1rem', color: 'white', fontWeight: 600, margin: '0 0 0.25rem 0' }}>
               {incomingCall.callerName}
             </p>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-              Secure Meeting Room
+              {t('app.secure_meeting_room')}
             </p>
             <div className="calling-overlay-buttons">
               <button onClick={handleDeclineCall} className="calling-overlay-btn calling-btn-decline">
                 <PhoneOff size={18} />
-                <span>Decline</span>
+                <span>{t('app.decline')}</span>
               </button>
               <button onClick={handleAcceptCall} className="calling-overlay-btn calling-btn-accept">
                 <Phone size={18} />
-                <span>Accept</span>
+                <span>{t('app.accept')}</span>
               </button>
             </div>
           </div>

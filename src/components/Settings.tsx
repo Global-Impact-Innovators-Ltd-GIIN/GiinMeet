@@ -8,8 +8,13 @@ import {
 import { supabase } from '../supabaseClient';
 import { applyAccentColor, applyBorderRadius, applyFont, applyGlassOpacity, applyUiStyle } from '../utils/theme';
 import { probeBrandSupport, loadWorkspaceBrand, saveWorkspaceBrand, resetWorkspaceBrand, DEFAULT_BRAND_NAME, DEFAULT_BRAND_SLOGAN, DEFAULT_BRAND_ACCENT, DEFAULT_BRAND_ACCENT_HOVER, type WorkspaceBrand } from '../utils/brand';
+import { OrganisationsPanel } from './OrganisationsPanel';
+import { ApiDeveloperPanel } from './ApiDeveloperPanel';
+import type { PlanTier } from '../utils/tiers';
 
 interface SettingsProps {
+  planTier?: PlanTier;
+  onNavigate?: (view: string) => void;
   isDarkMode: boolean;
   onToggleTheme: () => void;
   userName: string;
@@ -87,6 +92,8 @@ const SectionCard = ({ icon: Icon, title, subtitle, children }: { icon?: any; ti
 );
 
 export const Settings: React.FC<SettingsProps> = ({
+  planTier = 'free',
+  onNavigate,
   isDarkMode,
   onToggleTheme,
   userName,
@@ -103,7 +110,7 @@ export const Settings: React.FC<SettingsProps> = ({
   userSocialHandles = {},
   onUpdateProfile,
 }) => {
-  const [activeCategory, setActiveCategory] = useState<'profile' | 'branding' | 'workspace' | 'devices' | 'shortcuts' | 'security' | 'diagnostics' | 'notifications' | 'meetings'>('profile');
+  const [activeCategory, setActiveCategory] = useState<'profile' | 'branding' | 'workspace' | 'devices' | 'shortcuts' | 'security' | 'diagnostics' | 'notifications' | 'meetings' | 'organisations' | 'developer'>('profile');
   
   // Profile settings state
   const [name, setName] = useState(userName);
@@ -191,7 +198,7 @@ export const Settings: React.FC<SettingsProps> = ({
     setIsSpatialAudioEnabled(enabled);
     localStorage.setItem('giin_spatial_audio', enabled ? 'true' : 'false');
     window.dispatchEvent(new Event('giin_spatial_audio_changed'));
-    triggerToast(`Spatial Audio ${enabled ? 'enabled' : 'disabled'}`);
+    triggerToast(t('set.spatial_audio', { v1: enabled ? 'enabled' : 'disabled' }));
   };
 
   // Fix Round 6: these two join presets were dead checkboxes — no
@@ -203,13 +210,13 @@ export const Settings: React.FC<SettingsProps> = ({
   const handleToggleMuteOnJoin = (enabled: boolean) => {
     setMuteOnJoin(enabled);
     try { localStorage.setItem('giin_mute_on_join', enabled ? 'true' : 'false'); } catch (e) {}
-    triggerToast(`Join muted ${enabled ? 'enabled' : 'disabled'}`);
+    triggerToast(t('set.join_muted', { v1: enabled ? 'enabled' : 'disabled' }));
   };
 
   const handleToggleVideoOffOnJoin = (enabled: boolean) => {
     setVideoOffOnJoin(enabled);
     try { localStorage.setItem('giin_video_off_on_join', enabled ? 'true' : 'false'); } catch (e) {}
-    triggerToast(`Join with camera off ${enabled ? 'enabled' : 'disabled'}`);
+    triggerToast(t('set.join_with_camera_off', { v1: enabled ? 'enabled' : 'disabled' }));
   };
 
   // Interactive keyboard shortcuts customizer states
@@ -303,7 +310,7 @@ export const Settings: React.FC<SettingsProps> = ({
         setHotkeyChat(pressedKey);
         localStorage.setItem('giin_hotkey_chat', pressedKey);
       }
-      triggerToast(`Hotkey for ${recordingHotkey} bound to [ ${e.key.toUpperCase()} ]`);
+      triggerToast(t('set.hotkey_for_bound_to', { v1: recordingHotkey, v2: e.key.toUpperCase() }));
       setRecordingHotkey(null);
     };
 
@@ -438,13 +445,13 @@ export const Settings: React.FC<SettingsProps> = ({
       tiktok,
       github
     });
-    triggerToast('Profile settings saved successfully!');
+    triggerToast(t('set.profile_settings_saved_successfully'));
   };
 
   const handleWorkspaceSave = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateProfile(name, email, avatarUrl, role, timezone, location, userSkills, phone, workspaceName, domain, userSocialHandles);
-    triggerToast('Workspace configuration applied successfully!');
+    triggerToast(t('set.workspace_configuration_applied_successf'));
   };
 
   // Avatar Image Compression uploader
@@ -498,7 +505,7 @@ export const Settings: React.FC<SettingsProps> = ({
       setLogoPreview(base64);
       localStorage.setItem('giin_custom_logo', base64);
       window.dispatchEvent(new Event('giin_logo_changed'));
-      triggerToast('Custom brand logo applied successfully!');
+      triggerToast(t('set.custom_brand_logo_applied_successfully'));
     };
     reader.readAsDataURL(file);
   };
@@ -507,7 +514,7 @@ export const Settings: React.FC<SettingsProps> = ({
     setLogoPreview('');
     localStorage.removeItem('giin_custom_logo');
     window.dispatchEvent(new Event('giin_logo_changed'));
-    triggerToast('Brand logo reset to default.');
+    triggerToast(t('set.brand_logo_reset_to_default'));
   };
 
   // Theme accent applier — state + persistence here, variable application
@@ -518,7 +525,7 @@ export const Settings: React.FC<SettingsProps> = ({
     localStorage.setItem('giin_accent_color', primary);
     localStorage.setItem('giin_accent_hover', hover);
     applyAccentColor(primary, hover);
-    triggerToast('Brand accent color updated globally!');
+    triggerToast(t('set.brand_accent_color_updated_globally'));
   };
 
   const selectGlassOpacity = (level: string) => {
@@ -527,7 +534,7 @@ export const Settings: React.FC<SettingsProps> = ({
     // Shared levels: none = solid, frosted = 12px blur, ultra-clear =
     // 24px blur on a mostly see-through panel (distinct, in that order).
     applyGlassOpacity(level, isDarkMode);
-    triggerToast('Glassmorphism aesthetics opacity updated!');
+    triggerToast(t('set.glassmorphism_aesthetics_opacity_updated'));
   };
 
   const saveBrandingConfig = (watermark: string, layout: string) => {
@@ -541,7 +548,7 @@ export const Settings: React.FC<SettingsProps> = ({
     // only took effect after a full reload (and the layout never did).
     window.dispatchEvent(new Event('giin_layout_changed'));
     window.dispatchEvent(new Event('giin_watermark_changed'));
-    triggerToast('Advanced branding configuration saved!');
+    triggerToast(t('set.advanced_branding_configuration_saved'));
   };
 
   const handleUpdateBrandingText = (name: string, slogan: string) => {
@@ -550,7 +557,7 @@ export const Settings: React.FC<SettingsProps> = ({
     localStorage.setItem('giin_brand_name', name);
     localStorage.setItem('giin_brand_slogan', slogan);
     window.dispatchEvent(new Event('giin_branding_changed'));
-    triggerToast('Brand identity updated!');
+    triggerToast(t('set.brand_identity_updated'));
   };
 
   // Phase 3 (Feature 4) — publish the brand currently shown on
@@ -577,7 +584,7 @@ export const Settings: React.FC<SettingsProps> = ({
       accent_color: accentColor,
       accent_hover: localStorage.getItem('giin_accent_hover') || accentColor,
     });
-    triggerToast(`Shared brand published — everyone now sees ${brandNameState || DEFAULT_BRAND_NAME}.`);
+    triggerToast(t('set.shared_brand_published_everyone_now', { v1: brandNameState || DEFAULT_BRAND_NAME }));
   };
 
   // Remove the shared brand: everyone goes back to the default
@@ -601,7 +608,7 @@ export const Settings: React.FC<SettingsProps> = ({
     applyAccentColor(DEFAULT_BRAND_ACCENT, DEFAULT_BRAND_ACCENT_HOVER);
     window.dispatchEvent(new Event('giin_logo_changed'));
     window.dispatchEvent(new Event('giin_branding_changed'));
-    triggerToast('Shared brand removed — everyone sees the default GiinMeet brand again.');
+    triggerToast(t('set.shared_brand_removed_everyone_sees'));
   };
 
   const handleUpdateFont = (heading: string, body: string) => {
@@ -610,21 +617,21 @@ export const Settings: React.FC<SettingsProps> = ({
     localStorage.setItem('giin_font_heading', heading);
     localStorage.setItem('giin_font_body', body);
     applyFont(heading, body);
-    triggerToast('Typography style updated!');
+    triggerToast(t('set.typography_style_updated'));
   };
 
   const handleUpdateBorderRadius = (radius: string) => {
     setBorderRadiusVal(radius);
     localStorage.setItem('giin_border_radius', radius);
     applyBorderRadius(parseInt(radius, 10));
-    triggerToast('Corner shape updated!');
+    triggerToast(t('set.corner_shape_updated'));
   };
 
   const handleUpdateUiStyle = (style: string) => {
     setUiStyle(style);
     localStorage.setItem('giin_ui_style', style);
     applyUiStyle(style, isDarkMode);
-    triggerToast('UI Style effect applied!');
+    triggerToast(t('set.ui_style_effect_applied'));
   };
 
   const handleUpdateWatermarkSettings = (opacity: string, scale: string) => {
@@ -635,7 +642,7 @@ export const Settings: React.FC<SettingsProps> = ({
     // Live-apply: MeetingRoom listens for this and re-renders the
     // video-feed watermark at the new size/opacity immediately.
     window.dispatchEvent(new Event('giin_watermark_changed'));
-    triggerToast('Watermark geometry saved!');
+    triggerToast(t('set.watermark_geometry_saved'));
   };
 
   // Toggle camera hardware test
@@ -658,7 +665,7 @@ export const Settings: React.FC<SettingsProps> = ({
         }
       } catch (err) {
         console.error('Camera access failed:', err);
-        triggerToast('Failed to access camera stream.');
+        triggerToast(t('set.failed_to_access_camera_stream'));
       }
     }
   };
@@ -688,7 +695,7 @@ export const Settings: React.FC<SettingsProps> = ({
         setupAudioVisualizer(stream);
       } catch (err) {
         console.error('Microphone access failed:', err);
-        triggerToast('Failed to access microphone stream.');
+        triggerToast(t('set.failed_to_access_microphone_stream'));
       }
     }
   };
@@ -736,7 +743,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleRevokeSession = (sessionId: string) => {
     setActiveSessions(prev => prev.filter(s => s.id !== sessionId));
-    triggerToast('Active Session terminated successfully.');
+    triggerToast(t('set.active_session_terminated_successfully'));
   };
 
   // Ping test
@@ -753,7 +760,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
       setLogs(prev => [
         ...prev,
-        `[PING] Supabase Endpoint resolved in ${duration}ms (Optimal connection)`,
+        t('set.ping_supabase_endpoint_resolved', { v1: duration }),
         `[DB] Cache sync response -> 200 OK (Profiles table read verified)`,
         `[SYS] Transport encryption active (DTLS-SRTP)`,
         `[STATUS] System health is currently 100% OPERATIONAL`
@@ -761,8 +768,8 @@ export const Settings: React.FC<SettingsProps> = ({
     } catch (err: any) {
       setLogs(prev => [
         ...prev,
-        `[WARNING] Supabase Endpoint resolved in ${Date.now() - startTime}ms`,
-        `[ERROR] Profiles read fail: ${err.message}`,
+        t('set.warning_supabase_endpoint_resolved', { v1: Date.now() - startTime }),
+        t('set.error_profiles_read_fail', { v1: err.message }),
         `[STATUS] Local server active, database operation restricted (Offline / RLS checked)`
       ]);
     } finally {
@@ -787,13 +794,13 @@ export const Settings: React.FC<SettingsProps> = ({
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-    triggerToast('Workspace configuration exported successfully!');
+    triggerToast(t('set.workspace_configuration_exported_success'));
   };
 
   const handleClearCache = () => {
-    if (window.confirm("Are you sure you want to flush all local storage configurations? This will clear local layout and cache settings, but will keep remote profiles intact.")) {
+    if (window.confirm(t('set.are_you_sure_you_want'))) {
       localStorage.clear();
-      triggerToast('Local cache cleared! Reloading system engine...');
+      triggerToast(t('set.local_cache_cleared_reloading_system'));
       setTimeout(() => window.location.reload(), 1500);
     }
   };
@@ -809,6 +816,8 @@ export const Settings: React.FC<SettingsProps> = ({
     { id: 'diagnostics', name: 'System Telemetry', icon: Terminal, desc: 'Pings, scrolling terminals, CPU graphs' },
     { id: 'notifications', name: 'Notifications', icon: Bell, desc: 'Alert channels & push filters' },
     { id: 'meetings', name: 'Meeting Defaults', icon: Sliders, desc: 'Microphone & camera preset switches' },
+    { id: 'organisations', name: 'Organisations', icon: Building2, desc: 'White-label brands and members' },
+    { id: 'developer', name: 'Developer', icon: Code, desc: 'API keys and webhooks' },
   ];
 
   return (
@@ -826,7 +835,7 @@ export const Settings: React.FC<SettingsProps> = ({
       <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', height: 'fit-content', minHeight: 0, maxHeight: '100%', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1.25rem', paddingLeft: '0.25rem' }}>
           <Activity size={20} color="var(--color-primary)" />
-          <h2 style={{ fontSize: '1.3rem', fontFamily: 'var(--font-heading)' }}>Settings Hub</h2>
+          <h2 style={{ fontSize: '1.3rem', fontFamily: 'var(--font-heading)' }}>{t('set.settings_hub')}</h2>
         </div>
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', maxHeight: '420px', overflowY: 'auto' }}>
@@ -867,7 +876,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
         {/* Theme toggler */}
         <div className="flex-between" style={{ padding: '0.25rem 0.5rem' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Dark Theme</span>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{t('set.dark_theme')}</span>
           <button 
             onClick={onToggleTheme}
             style={{
@@ -894,10 +903,10 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Profile Details */}
         {activeCategory === 'profile' && (
           <div>
-            <PanelHeader icon={User} title="Profile Coordinates" subtitle="Update your corporate identification details, job specs, and contact numbers." />
+            <PanelHeader icon={User} title={t('set.profile_coordinates')} subtitle="Update your corporate identification details, job specs, and contact numbers." />
             
             <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '780px', width: '100%' }}>
-              <SectionCard icon={Camera} title="Profile Photo" subtitle="Your avatar shown across meetings and chat.">
+              <SectionCard icon={Camera} title={t('set.profile_photo')} subtitle="Your avatar shown across meetings and chat.">
               {/* Picture Upload */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
                 <input 
@@ -937,106 +946,106 @@ export const Settings: React.FC<SettingsProps> = ({
                     className="premium-btn premium-btn-secondary" 
                     style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem' }}
                   >
-                    Change Photo
+                    {t('set.change_photo')}
                   </button>
-                  <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>PNG, JPG or JPEG up to 5MB.</span>
+                  <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>{t('set.png_jpg_or_jpeg_up')}</span>
                 </div>
               </div>
               </SectionCard>
 
-              <SectionCard icon={User} title="Identity" subtitle="How your name and role appear to other participants.">
+              <SectionCard icon={User} title={t('set.identity')} subtitle="How your name and role appear to other participants.">
               <div className="stg-grid-2">
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Display Name</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.display_name')}</label>
                   <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="premium-input" required />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Job Title / Role</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.job_title_role')}</label>
                   <input type="text" value={role} onChange={(e) => setRole(e.target.value)} className="premium-input" />
                 </div>
               </div>
               <div style={{ marginTop: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Organisation (company, school or church)</label>
-                <input type="text" value={organisation} onChange={(e) => setOrganisation(e.target.value)} placeholder="e.g. Global Impact Innovators" maxLength={80} className="premium-input" />
-                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Shown as a small badge next to your name in meetings. Leave it blank for no badge.</span>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.organisation_company_school_or_church')}</label>
+                <input type="text" value={organisation} onChange={(e) => setOrganisation(e.target.value)} placeholder={t('set.e_g_global_impact_innovators')} maxLength={80} className="premium-input" />
+                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>{t('set.shown_as_a_small_badge')}</span>
               </div>
               </SectionCard>
 
-              <SectionCard icon={Smartphone} title="Contact Details" subtitle="Where we reach you — shown in full, never clipped.">
+              <SectionCard icon={Smartphone} title={t('set.contact_details')} subtitle="Where we reach you — shown in full, never clipped.">
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Email Address</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.email_address')}</label>
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="premium-input" required />
               </div>
               <div className="stg-grid-2" style={{ marginTop: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Phone Number</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.phone_number')}</label>
                   <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className="premium-input" />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Office Location</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.office_location')}</label>
                   <input type="text" value={location} onChange={(e) => setLocation(e.target.value)} className="premium-input" />
                 </div>
               </div>
               </SectionCard>
 
-              <SectionCard icon={Activity} title="Work & Time" subtitle="Your timezone sets meeting times across the platform.">
+              <SectionCard icon={Activity} title={t('set.work_time')} subtitle="Your timezone sets meeting times across the platform.">
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Primary Timezone</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.primary_timezone')}</label>
                 <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="premium-input">
-                  <option value="America/New_York">Eastern Time (New York)</option>
-                  <option value="America/Chicago">Central Time (Chicago)</option>
-                  <option value="America/Denver">Mountain Time (Denver)</option>
-                  <option value="America/Los_Angeles">Pacific Time (Los Angeles)</option>
-                  <option value="Europe/London">Greenwich Mean Time (London)</option>
-                  <option value="Europe/Berlin">Central European Time (Berlin)</option>
-                  <option value="Asia/Singapore">Singapore Standard Time (Singapore)</option>
-                  <option value="Asia/Tokyo">Japan Standard Time (Tokyo)</option>
-                  <option value="UTC">UTC / Coordinated Universal Time</option>
+                  <option value="America/New_York">{t('set.eastern_time_new_york')}</option>
+                  <option value="America/Chicago">{t('set.central_time_chicago')}</option>
+                  <option value="America/Denver">{t('set.mountain_time_denver')}</option>
+                  <option value="America/Los_Angeles">{t('set.pacific_time_los_angeles')}</option>
+                  <option value="Europe/London">{t('set.greenwich_mean_time_london')}</option>
+                  <option value="Europe/Berlin">{t('set.central_european_time_berlin')}</option>
+                  <option value="Asia/Singapore">{t('set.singapore_standard_time_singapore')}</option>
+                  <option value="Asia/Tokyo">{t('set.japan_standard_time_tokyo')}</option>
+                  <option value="UTC">{t('set.utc_coordinated_universal_time')}</option>
                 </select>
               </div>
               </SectionCard>
 
-              <SectionCard icon={Zap} title="Professional Skills" subtitle="Comma-separated — shown on your profile.">
+              <SectionCard icon={Zap} title={t('set.professional_skills')} subtitle="Comma-separated — shown on your profile.">
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Professional Skills (comma-separated)</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.professional_skills_comma_separated')}</label>
                 <input 
                   type="text" 
                   value={skillsText} 
                   onChange={(e) => setSkillsText(e.target.value)} 
                   className="premium-input" 
-                  placeholder="e.g. React, WebRTC, Devops" 
+                  placeholder={t('set.e_g_react_webrtc_devops')} 
                 />
               </div>
               </SectionCard>
 
-              <SectionCard icon={Globe} title="Social Directory" subtitle="Your public profiles, linked from your workspace directory.">
+              <SectionCard icon={Globe} title={t('set.social_directory')} subtitle="Your public profiles, linked from your workspace directory.">
               <div className="stg-grid-2">
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>LinkedIn Profile URL</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.linkedin_profile_url')}</label>
                   <input type="url" placeholder="https://linkedin.com/in/username" value={linkedin} onChange={(e) => setLinkedin(e.target.value)} className="premium-input" />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>GitHub Profile URL</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.github_profile_url')}</label>
                   <input type="url" placeholder="https://github.com/username" value={github} onChange={(e) => setGithub(e.target.value)} className="premium-input" />
                 </div>
               </div>
               <div className="stg-grid-2" style={{ marginTop: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>X (Twitter) Profile URL</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.x_twitter_profile_url')}</label>
                   <input type="url" placeholder="https://x.com/username" value={twitter} onChange={(e) => setTwitter(e.target.value)} className="premium-input" />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Instagram Profile URL</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.instagram_profile_url')}</label>
                   <input type="url" placeholder="https://instagram.com/username" value={instagram} onChange={(e) => setInstagram(e.target.value)} className="premium-input" />
                 </div>
               </div>
               <div className="stg-grid-2" style={{ marginTop: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Facebook Profile URL</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.facebook_profile_url')}</label>
                   <input type="url" placeholder="https://facebook.com/username" value={facebook} onChange={(e) => setFacebook(e.target.value)} className="premium-input" />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>TikTok Profile URL</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.tiktok_profile_url')}</label>
                   <input type="url" placeholder="https://tiktok.com/@username" value={tiktok} onChange={(e) => setTikTok(e.target.value)} className="premium-input" />
                 </div>
               </div>
@@ -1044,7 +1053,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
               <button type="submit" className="premium-btn premium-btn-accent" style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem', marginTop: '0.25rem' }}>
                 <Save size={16} />
-                <span>Save Profile Coordinates</span>
+                <span>{t('set.save_profile_coordinates')}</span>
               </button>
             </form>
           </div>
@@ -1053,28 +1062,28 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Branding & Custom Logo */}
         {activeCategory === 'branding' && (
           <div>
-            <PanelHeader icon={ImageIcon} title="Branding & Aesthetic Styles" subtitle="Customize global branding themes, accent colors, custom logo headers, and meeting layouts." />
+            <PanelHeader icon={ImageIcon} title={t('set.branding_aesthetic_styles')} subtitle="Customize global branding themes, accent colors, custom logo headers, and meeting layouts." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '780px', width: '100%' }}>
               
               {/* Shared workspace brand (Phase 3, Feature 4) */}
-              <SectionCard icon={Globe} title="Shared Workspace Brand" subtitle="The logo, name, tagline and accent everyone sees — on every device, including the sign-in screen, waiting room and lobby.">
+              <SectionCard icon={Globe} title={t('set.shared_workspace_brand')} subtitle="The logo, name, tagline and accent everyone sees — on every device, including the sign-in screen, waiting room and lobby.">
                 {brandNotSetUp ? (
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-                    Shared branding is not set up yet — run giinmeet_phase3_brand.sql in the Supabase SQL Editor first. Until then, the branding below applies to this device only.
+                    {t('set.shared_branding_is_not_set')}
                   </p>
                 ) : !brandSetupKnown ? (
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>Loading the shared brand…</p>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>{t('set.loading_the_shared_brand')}</p>
                 ) : sharedBrand ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     {sharedBrand.logo_url && (
-                      <img src={sharedBrand.logo_url} alt="Shared brand logo" style={{ width: '40px', height: '40px', objectFit: 'contain', borderRadius: '6px', backgroundColor: '#090D16' }} />
+                      <img src={sharedBrand.logo_url} alt={t('set.shared_brand_logo')} style={{ width: '40px', height: '40px', objectFit: 'contain', borderRadius: '6px', backgroundColor: '#090D16' }} />
                     )}
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: '0.9rem', fontWeight: 700 }}>{sharedBrand.brand_name}</div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{sharedBrand.slogan}</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                        Accent <span style={{ display: 'inline-block', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: sharedBrand.accent_color, verticalAlign: '-1px' }} /> {sharedBrand.accent_color}
+                        {t('set.accent')} <span style={{ display: 'inline-block', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: sharedBrand.accent_color, verticalAlign: '-1px' }} /> {sharedBrand.accent_color}
                       </div>
                     </div>
                   </div>
@@ -1090,23 +1099,23 @@ export const Settings: React.FC<SettingsProps> = ({
                     </button>
                     {sharedBrand && (
                       <button type="button" onClick={removeSharedBrand} disabled={publishingBrand} className="premium-btn premium-btn-danger" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
-                        Remove shared brand
+                        {t('set.remove_shared_brand')}
                       </button>
                     )}
                   </div>
                 )}
                 {!isSuperadmin && sharedBrand && (
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: '0.75rem 0 0' }}>
-                    Set by your workspace admin — the name, tagline and logo below are locked to the shared brand.
+                    {t('set.set_by_your_workspace_admin')}
                   </p>
                 )}
               </SectionCard>
 
               {/* Brand Identity Details */}
-              <SectionCard icon={Type} title="Brand Identity Texts" subtitle="The name and tagline shown across the platform.">
+              <SectionCard icon={Type} title={t('set.brand_identity_texts')} subtitle="The name and tagline shown across the platform.">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Company/App Name</label>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.company_app_name')}</label>
                     <input
                       type="text"
                       value={brandNameState}
@@ -1116,7 +1125,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Tagline / Slogan</label>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.tagline_slogan')}</label>
                     <input
                       type="text"
                       value={brandSloganState}
@@ -1129,7 +1138,7 @@ export const Settings: React.FC<SettingsProps> = ({
               </SectionCard>
 
               {/* Custom Logo Upload */}
-              <SectionCard icon={ImageIcon} title="Custom Branding Logo" subtitle="Upload your corporate brand icon to replace the default logo dynamically.">
+              <SectionCard icon={ImageIcon} title={t('set.custom_branding_logo')} subtitle="Upload your corporate brand icon to replace the default logo dynamically.">
                 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
                   <input type="file" ref={logoInputRef} onChange={handleLogoUpload} accept="image/*" style={{ display: 'none' }} />
@@ -1145,18 +1154,18 @@ export const Settings: React.FC<SettingsProps> = ({
                     overflow: 'hidden'
                   }}>
                     {logoPreview ? (
-                      <img src={logoPreview} alt="Custom Logo Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                      <img src={logoPreview} alt={t('set.custom_logo_preview')} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     ) : (
-                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Default Logo</span>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{t('set.default_logo')}</span>
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button type="button" onClick={() => logoInputRef.current?.click()} disabled={!!sharedBrand && !isSuperadmin} className="premium-btn premium-btn-primary" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
-                      Upload Brand Logo
+                      {t('set.upload_brand_logo')}
                     </button>
                     {logoPreview && (
                       <button type="button" onClick={resetToDefaultLogo} disabled={!!sharedBrand && !isSuperadmin} className="premium-btn premium-btn-danger" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
-                        Reset Default
+                        {t('set.reset_default')}
                       </button>
                     )}
                   </div>
@@ -1164,7 +1173,7 @@ export const Settings: React.FC<SettingsProps> = ({
               </SectionCard>
 
               {/* Theme Primary Accent */}
-              <SectionCard icon={Palette} title="Theme Primary Accent" subtitle="The accent colour used across buttons and highlights.">
+              <SectionCard icon={Palette} title={t('set.theme_primary_accent')} subtitle="The accent colour used across buttons and highlights.">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center', marginBottom: '1rem' }}>
                   {[
                     { name: 'Azul Brant', primary: '#3B82F6', hover: '#2563EB' },
@@ -1199,7 +1208,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 
                 {/* Custom color picker */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Custom Accent Color</span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{t('set.custom_accent_color')}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: 'auto' }}>
                     <input 
                       type="color" 
@@ -1219,16 +1228,16 @@ export const Settings: React.FC<SettingsProps> = ({
               </SectionCard>
 
               {/* UI Theme Style Effect */}
-              <SectionCard icon={Zap} title="UI Styling Theme Effect" subtitle="Choose the visual language of the whole app — tap a theme to preview it live.">
+              <SectionCard icon={Zap} title={t('set.ui_styling_theme_effect')} subtitle="Choose the visual language of the whole app — tap a theme to preview it live.">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                   {[
                     { id: 'glassmorphism', label: 'Glassmorphism' },
                     { id: 'neumorphism', label: 'Neumorphism' },
-                    { id: 'cyberpunk-glow', label: 'Cyberpunk Glow' },
-                    { id: 'flat-minimal', label: 'Flat Minimal' },
-                    { id: 'liquid-glass', label: 'Liquid Glass' },
-                    { id: 'bento-grid', label: 'Bento Grid' },
-                    { id: 'spatial-ui', label: 'Spatial UI' },
+                    { id: 'cyberpunk-glow', label: t('set.cyberpunk_glow') },
+                    { id: 'flat-minimal', label: t('set.flat_minimal') },
+                    { id: 'liquid-glass', label: t('set.liquid_glass') },
+                    { id: 'bento-grid', label: t('set.bento_grid') },
+                    { id: 'spatial-ui', label: t('set.spatial_ui') },
                     { id: 'skeuomorphism', label: 'Skeuomorphism' },
                     { id: 'minimalism', label: 'Minimalism' },
                     { id: 'maximalism', label: 'Maximalism' }
@@ -1240,7 +1249,7 @@ export const Settings: React.FC<SettingsProps> = ({
                       className={`premium-btn ${uiStyle === style.id ? 'premium-btn-primary' : 'premium-btn-secondary'}`}
                       style={{ padding: '0.5rem', fontSize: '0.75rem', justifyContent: 'center', flexDirection: 'column', alignItems: 'stretch', gap: 0 }}
                     >
-                      <span className={`theme-swatch theme-swatch-${style.id}`} aria-hidden="true" />
+                      <span className={t('set.theme_swatch_theme_swatch', { v1: style.id })} aria-hidden="true" />
                       <span style={{ textAlign: 'center' }}>{style.label}</span>
                     </button>
                   ))}
@@ -1249,12 +1258,12 @@ export const Settings: React.FC<SettingsProps> = ({
 
               {/* Glassmorphism Blur Filter (Only visible if glassmorphism is selected) */}
               {uiStyle === 'glassmorphism' && (
-                <SectionCard icon={Sliders} title="Glassmorphism Blur Filter" subtitle="How frosted the glass panels look.">
+                <SectionCard icon={Sliders} title={t('set.glassmorphism_blur_filter')} subtitle="How frosted the glass panels look.">
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     {[
-                      { id: 'frosted', label: 'Frosted Glass' },
-                      { id: 'ultra-clear', label: 'Ultra Clear' },
-                      { id: 'none', label: 'Solid Panels' }
+                      { id: 'frosted', label: t('set.frosted_glass') },
+                      { id: 'ultra-clear', label: t('set.ultra_clear') },
+                      { id: 'none', label: t('set.solid_panels') }
                     ].map((lvl) => (
                       <button
                         key={lvl.id}
@@ -1271,18 +1280,18 @@ export const Settings: React.FC<SettingsProps> = ({
               )}
 
               {/* Premium Typography (Fonts) */}
-              <SectionCard icon={Type} title="Premium Typography (Fonts)" subtitle="Heading and body fonts for the whole app — including the sidebar.">
+              <SectionCard icon={Type} title={t('set.premium_typography_fonts')} subtitle="Heading and body fonts for the whole app — including the sidebar.">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {[
-                    { id: 'sleek', label: 'Sleek Sans (Outfit / Inter)', heading: 'Outfit', body: 'Inter' },
-                    { id: 'classic', label: 'Classic Serif (Playfair Display / Georgia)', heading: 'Playfair Display', body: 'Georgia' },
-                    { id: 'tech', label: 'Monospace Tech (Fira Code)', heading: 'Fira Code', body: 'Fira Code' },
-                    { id: 'modern', label: 'Elegant Modern (Montserrat)', heading: 'Montserrat', body: 'Montserrat' },
-                    { id: 'futuristic', label: 'Futuristic Glow (Orbitron / Rajdhani)', heading: 'Orbitron', body: 'Rajdhani' },
-                    { id: 'geometric', label: 'Geometric Pop (Poppins)', heading: 'Poppins', body: 'Poppins' },
-                    { id: 'grotesk', label: 'Modern Grotesk (Space Grotesk)', heading: 'Space Grotesk', body: 'Space Grotesk' },
-                    { id: 'literary', label: 'Literary Serif (Lora / Merriweather)', heading: 'Lora', body: 'Merriweather' },
-                    { id: 'rounded', label: 'Soft Rounded (Quicksand / Nunito)', heading: 'Quicksand', body: 'Nunito' }
+                    { id: 'sleek', label: t('set.sleek_sans_outfit_inter'), heading: 'Outfit', body: 'Inter' },
+                    { id: 'classic', label: t('set.classic_serif_playfair_display_georgia'), heading: 'Playfair Display', body: 'Georgia' },
+                    { id: 'tech', label: t('set.monospace_tech_fira_code'), heading: 'Fira Code', body: 'Fira Code' },
+                    { id: 'modern', label: t('set.elegant_modern_montserrat'), heading: 'Montserrat', body: 'Montserrat' },
+                    { id: 'futuristic', label: t('set.futuristic_glow_orbitron_rajdhani'), heading: 'Orbitron', body: 'Rajdhani' },
+                    { id: 'geometric', label: t('set.geometric_pop_poppins'), heading: 'Poppins', body: 'Poppins' },
+                    { id: 'grotesk', label: t('set.modern_grotesk_space_grotesk'), heading: 'Space Grotesk', body: 'Space Grotesk' },
+                    { id: 'literary', label: t('set.literary_serif_lora_merriweather'), heading: 'Lora', body: 'Merriweather' },
+                    { id: 'rounded', label: t('set.soft_rounded_quicksand_nunito'), heading: 'Quicksand', body: 'Nunito' }
                   ].map((font) => {
                     const isSelected = fontHeading === font.heading && fontBody === font.body;
                     return (
@@ -1301,13 +1310,13 @@ export const Settings: React.FC<SettingsProps> = ({
               </SectionCard>
 
               {/* Corner Shapes (Border Radius) */}
-              <SectionCard icon={Sliders} title="Corner Shapes (Border Radius)" subtitle="How sharp or rounded corners feel.">
+              <SectionCard icon={Sliders} title={t('set.corner_shapes_border_radius')} subtitle="How sharp or rounded corners feel.">
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   {[
                     { val: '0', label: 'Sharp' },
                     { val: '8', label: 'Sleek' },
                     { val: '16', label: 'Rounded' },
-                    { val: '24', label: 'Soft Pill' }
+                    { val: '24', label: t('set.soft_pill') }
                   ].map((shape) => (
                     <button
                       key={shape.val}
@@ -1323,13 +1332,13 @@ export const Settings: React.FC<SettingsProps> = ({
               </SectionCard>
 
               {/* Watermark & Layout Configuration */}
-              <SectionCard icon={Video} title="Watermark & Layout Configuration" subtitle="Logo overlays on video feeds and the navigation layout.">
+              <SectionCard icon={Video} title={t('set.watermark_layout_configuration')} subtitle="Logo overlays on video feeds and the navigation layout.">
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Video Feed Watermark</label>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.video_feed_watermark')}</label>
                   <select value={meetingWatermark} onChange={(e) => saveBrandingConfig(e.target.value, layoutStyle)} className="premium-input">
-                    <option value="branded">Branded Overlay (Top Left Logo)</option>
-                    <option value="watermark">Top-Right Logo Watermark</option>
-                    <option value="none">No Branded Overlays</option>
+                    <option value="branded">{t('set.branded_overlay_top_left_logo')}</option>
+                    <option value="watermark">{t('set.top_right_logo_watermark')}</option>
+                    <option value="none">{t('set.no_branded_overlays')}</option>
                   </select>
                 </div>
 
@@ -1365,10 +1374,10 @@ export const Settings: React.FC<SettingsProps> = ({
                 )}
 
                 <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Navbar Scaffolding Layout</label>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.navbar_scaffolding_layout')}</label>
                   <select value={layoutStyle} onChange={(e) => saveBrandingConfig(meetingWatermark, e.target.value)} className="premium-input">
-                    <option value="left-docked">Left Docked Panel (Icon Menu)</option>
-                    <option value="header-only">Top Navbar Menu (Horizontal bar)</option>
+                    <option value="left-docked">{t('set.left_docked_panel_icon_menu')}</option>
+                    <option value="header-only">{t('set.top_navbar_menu_horizontal_bar')}</option>
                   </select>
                 </div>
               </SectionCard>
@@ -1380,17 +1389,17 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Workspace Gating & Exports */}
         {activeCategory === 'workspace' && (
           <div>
-            <PanelHeader icon={Globe} title="Workspace Administration" subtitle="Manage domain registration rules, directory searches, export logs, and flush cache." />
+            <PanelHeader icon={Globe} title={t('set.workspace_administration')} subtitle="Manage domain registration rules, directory searches, export logs, and flush cache." />
             
             <form onSubmit={handleWorkspaceSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '780px', width: '100%' }}>
-              <SectionCard icon={Globe} title="Workspace Identity" subtitle="Your workspace name and subdomain.">
+              <SectionCard icon={Globe} title={t('set.workspace_identity')} subtitle="Your workspace name and subdomain.">
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Workspace Name</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.workspace_name')}</label>
                 <input type="text" value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} className="premium-input" required />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Workspace Domain Routing</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.workspace_domain_routing')}</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <input type="text" value={domain} onChange={(e) => setDomain(e.target.value)} className="premium-input" required />
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>.giinmeet.com</span>
@@ -1399,51 +1408,51 @@ export const Settings: React.FC<SettingsProps> = ({
 
               </SectionCard>
 
-              <SectionCard icon={Shield} title="Directory Security & Visibility Rules" subtitle="Who can register and see the directory.">
+              <SectionCard icon={Shield} title={t('set.directory_security_visibility_rules')} subtitle="Who can register and see the directory.">
                 
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8rem' }}>
                   <input type="checkbox" checked={gatedRegistration} onChange={() => setGatedRegistration(!gatedRegistration)} style={{ marginTop: '3px' }} />
                   <div>
-                    <strong style={{ display: 'block' }}>Enforce Domain Registration Limits</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Restrict registration access strictly to matching workspace domains.</span>
+                    <strong style={{ display: 'block' }}>{t('set.enforce_domain_registration_limits')}</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('set.restrict_registration_access_strictly_to')}</span>
                   </div>
                 </label>
 
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8rem' }}>
                   <input type="checkbox" checked={directoryVisible} onChange={() => setDirectoryVisible(!directoryVisible)} style={{ marginTop: '3px' }} />
                   <div>
-                    <strong style={{ display: 'block' }}>Public Directory Search Gating</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Allow workspace directories to query member profiles dynamically.</span>
+                    <strong style={{ display: 'block' }}>{t('set.public_directory_search_gating')}</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('set.allow_workspace_directories_to_query')}</span>
                   </div>
                 </label>
 
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8rem' }}>
                   <input type="checkbox" checked={guestWaitroomGating} onChange={() => setGuestWaitroomGating(!guestWaitroomGating)} style={{ marginTop: '3px' }} />
                   <div>
-                    <strong style={{ display: 'block' }}>Enforce Guest Waitroom Gating</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Gated guest users must wait for host approval before being admitted.</span>
+                    <strong style={{ display: 'block' }}>{t('set.enforce_guest_waitroom_gating')}</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('set.gated_guest_users_must_wait')}</span>
                   </div>
                 </label>
               </SectionCard>
 
               {/* Data Portability Tools */}
-              <SectionCard icon={Download} title="Workspace Data Portability & Resets" subtitle="Export your profile records and aesthetic settings, or clear temporary local storage configurations.">
+              <SectionCard icon={Download} title={t('set.workspace_data_portability_resets')} subtitle="Export your profile records and aesthetic settings, or clear temporary local storage configurations.">
                 
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button type="button" onClick={handleExportWorkspace} className="premium-btn premium-btn-primary" style={{ flex: 1, fontSize: '0.75rem', gap: '4px', justifyContent: 'center' }}>
                     <Download size={12} />
-                    <span>Export Data (.JSON)</span>
+                    <span>{t('set.export_data_json')}</span>
                   </button>
                   <button type="button" onClick={handleClearCache} className="premium-btn premium-btn-danger" style={{ flex: 1, fontSize: '0.75rem', gap: '4px', justifyContent: 'center' }}>
                     <Trash2 size={12} />
-                    <span>Flush App Cache</span>
+                    <span>{t('set.flush_app_cache')}</span>
                   </button>
                 </div>
               </SectionCard>
 
               <button type="submit" className="premium-btn premium-btn-accent" style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem' }}>
                 <Save size={16} />
-                <span>Save Workspace Config</span>
+                <span>{t('set.save_workspace_config')}</span>
               </button>
             </form>
           </div>
@@ -1452,44 +1461,44 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Hardware Devices & Filters */}
         {activeCategory === 'devices' && (
           <div>
-            <PanelHeader icon={Video} title="Audio, Video & Filters" subtitle="Manage hardware inputs, test microphones, and adjust audio enhancement." />
+            <PanelHeader icon={Video} title={t('set.audio_video_filters')} subtitle="Manage hardware inputs, test microphones, and adjust audio enhancement." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '780px', width: '100%' }}>
-              <SectionCard icon={Video} title="Input Sources" subtitle="Camera, microphone and speaker used in meetings.">
+              <SectionCard icon={Video} title={t('set.input_sources')} subtitle="Camera, microphone and speaker used in meetings.">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Camera Input Source</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.camera_input_source')}</label>
                   <select value={selectedCamera} onChange={(e) => { setSelectedCamera(e.target.value); try { localStorage.setItem('giin_selected_camera', e.target.value); } catch (err) {} }} className="premium-input">
                     {devicesList.cameras.map(d => (
                       <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera (${d.deviceId.substring(0, 5)})`}</option>
                     ))}
-                    {devicesList.cameras.length === 0 && <option value="">No camera detected</option>}
+                    {devicesList.cameras.length === 0 && <option value="">{t('set.no_camera_detected')}</option>}
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Microphone Input Source</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.microphone_input_source')}</label>
                   <select value={selectedMic} onChange={(e) => { setSelectedMic(e.target.value); try { localStorage.setItem('giin_selected_mic', e.target.value); } catch (err) {} }} className="premium-input">
                     {devicesList.mics.map(d => (
                       <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic (${d.deviceId.substring(0, 5)})`}</option>
                     ))}
-                    {devicesList.mics.length === 0 && <option value="">No microphone detected</option>}
+                    {devicesList.mics.length === 0 && <option value="">{t('set.no_microphone_detected')}</option>}
                   </select>
                 </div>
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Audio Output Source (Speaker)</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.audio_output_source_speaker')}</label>
                 <select value={selectedSpeaker} onChange={(e) => { setSelectedSpeaker(e.target.value); try { localStorage.setItem('giin_selected_speaker', e.target.value); } catch (err) {} }} className="premium-input">
                   {devicesList.speakers.map(d => (
                     <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker (${d.deviceId.substring(0, 5)})`}</option>
                   ))}
-                  {devicesList.speakers.length === 0 && <option value="">Default system speaker</option>}
+                  {devicesList.speakers.length === 0 && <option value="">{t('set.default_system_speaker')}</option>}
                 </select>
               </div>
               </SectionCard>
 
               {/* Audio enhancement filters */}
-              <SectionCard icon={Volume2} title="Audio Settings" subtitle="Enhancement and spatial audio for your meetings.">
+              <SectionCard icon={Volume2} title={t('set.audio_settings')} subtitle="Enhancement and spatial audio for your meetings.">
                 
 
 
@@ -1498,8 +1507,8 @@ export const Settings: React.FC<SettingsProps> = ({
                   <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '0.8rem' }}>
                     <input type="checkbox" checked={isSpatialAudioEnabled} onChange={(e) => handleToggleSpatialAudio(e.target.checked)} style={{ marginRight: '8px' }} />
                     <div>
-                      <strong style={{ display: 'block' }}>3D Spatial Audio Panning</strong>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Immersive audio panning matches speakers' positions in the meeting grid.</span>
+                      <strong style={{ display: 'block' }}>{t('set.3d_spatial_audio_panning')}</strong>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('set.immersive_audio_panning_matches_speakers')}</span>
                     </div>
                   </label>
                 </div>
@@ -1507,13 +1516,13 @@ export const Settings: React.FC<SettingsProps> = ({
               </SectionCard>
 
               {/* Live Webcam & Microphone decibels tests */}
-              <SectionCard icon={Camera} title="Hardware Tests" subtitle="Test your camera and microphone live before joining a call.">
+              <SectionCard icon={Camera} title={t('set.hardware_tests')} subtitle="Test your camera and microphone live before joining a call.">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <Camera size={14} color="var(--color-primary)" />
-                      <span>Webcam Feed</span>
+                      <span>{t('set.webcam_feed')}</span>
                     </span>
                     {cameraActive && <span className="badge badge-success">ACTIVE</span>}
                   </div>
@@ -1521,7 +1530,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     {cameraActive ? (
                       <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Camera test offline</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('set.camera_test_offline')}</span>
                     )}
                   </div>
                   <button type="button" onClick={toggleCameraTest} className={`premium-btn ${cameraActive ? 'premium-btn-danger' : 'premium-btn-primary'}`} style={{ fontSize: '0.75rem', padding: '0.4rem', justifyContent: 'center' }}>
@@ -1533,7 +1542,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <Volume2 size={14} color="var(--color-accent)" />
-                      <span>Microphone Analyzer</span>
+                      <span>{t('set.microphone_analyzer')}</span>
                     </span>
                     {micActive && <span className="badge badge-success">TESTING</span>}
                   </div>
@@ -1541,7 +1550,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     <canvas ref={canvasRef} width={280} height={140} style={{ width: '100%', height: '100%' }} />
                     {!micActive && (
                       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                        Microphone test offline
+                        {t('set.microphone_test_offline')}
                       </div>
                     )}
                   </div>
@@ -1558,17 +1567,17 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Keyboard Shortcuts */}
         {activeCategory === 'shortcuts' && (
           <div>
-            <PanelHeader icon={Keyboard} title="Keyboard Shortcuts Manager" subtitle="Bind custom keyboard keys to trigger application functions instantly during calls." />
+            <PanelHeader icon={Keyboard} title={t('set.keyboard_shortcuts_manager')} subtitle="Bind custom keyboard keys to trigger application functions instantly during calls." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '780px', width: '100%' }}>
-              <SectionCard icon={Keyboard} title="Keyboard Bindings" subtitle="Press a key to rebind each action.">
+              <SectionCard icon={Keyboard} title={t('set.keyboard_bindings')} subtitle="Press a key to rebind each action.">
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 
                 {/* Mute bind */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                   <div>
-                    <strong style={{ fontSize: '0.85rem', display: 'block' }}>Toggle Sound Microphone Mute</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Quick toggle to mute/unmute audio source.</span>
+                    <strong style={{ fontSize: '0.85rem', display: 'block' }}>{t('set.toggle_sound_microphone_mute')}</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('set.quick_toggle_to_mute_unmute')}</span>
                   </div>
                   <button 
                     type="button" 
@@ -1584,8 +1593,8 @@ export const Settings: React.FC<SettingsProps> = ({
                 {/* Cam bind */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                   <div>
-                    <strong style={{ fontSize: '0.85rem', display: 'block' }}>Toggle Video Webcam Feed</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Enable/disable your webcam feed.</span>
+                    <strong style={{ fontSize: '0.85rem', display: 'block' }}>{t('set.toggle_video_webcam_feed')}</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('set.enable_disable_your_webcam_feed')}</span>
                   </div>
                   <button 
                     type="button" 
@@ -1601,8 +1610,8 @@ export const Settings: React.FC<SettingsProps> = ({
                 {/* Chat toggle bind */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                   <div>
-                    <strong style={{ fontSize: '0.85rem', display: 'block' }}>Toggle Sidebar Chat Panel</strong>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Slide in/out active chat messages thread drawer.</span>
+                    <strong style={{ fontSize: '0.85rem', display: 'block' }}>{t('set.toggle_sidebar_chat_panel')}</strong>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('set.slide_in_out_active_chat')}</span>
                   </div>
                   <button 
                     type="button" 
@@ -1624,15 +1633,15 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Connection Security & Logins */}
         {activeCategory === 'security' && (
           <div>
-            <PanelHeader icon={Shield} title="Connection Security & Active Logins" subtitle="Review how your calls and messages are protected, and manage active device sessions." />
+            <PanelHeader icon={Shield} title={t('set.connection_security_active_logins')} subtitle="Review how your calls and messages are protected, and manage active device sessions." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '780px', width: '100%' }}>
-              <SectionCard icon={Shield} title="Protection Overview" subtitle="How your calls and messages are protected.">
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>Calls use standard WebRTC transport encryption (DTLS-SRTP). Direct messages are encrypted with AES-GCM using a key derived from the channel. This is not end-to-end encryption — there is no media end-to-end encryption in GIIN MEET yet.</p>
+              <SectionCard icon={Shield} title={t('set.protection_overview')} subtitle="How your calls and messages are protected.">
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>{t('set.calls_use_standard_webrtc_transport')}</p>
               </SectionCard>
 
               {/* Active Sessions Lists */}
-              <SectionCard icon={Smartphone} title="Active Sessions" subtitle="Devices signed in to your account — revoke any you do not recognise.">
+              <SectionCard icon={Smartphone} title={t('set.active_sessions')} subtitle="Devices signed in to your account — revoke any you do not recognise.">
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                   {activeSessions.map(session => (
@@ -1652,9 +1661,9 @@ export const Settings: React.FC<SettingsProps> = ({
                           onClick={() => handleRevokeSession(session.id)}
                           className="premium-btn premium-btn-danger" 
                           style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
-                          title="Revoke session"
+                          title={t('set.revoke_session')}
                         >
-                          Revoke
+                          {t('set.revoke')}
                         </button>
                       )}
                     </div>
@@ -1668,14 +1677,14 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Diagnostics & Telemetry Graphs */}
         {activeCategory === 'diagnostics' && (
           <div>
-            <PanelHeader icon={Terminal} title="System Terminal & Telemetry" subtitle="Monitor real-time network latencies, CPU core loads, bandwidth packets, and execute diagnostic pings." />
+            <PanelHeader icon={Terminal} title={t('set.system_terminal_telemetry')} subtitle="Monitor real-time network latencies, CPU core loads, bandwidth packets, and execute diagnostic pings." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '780px', width: '100%' }}>
-              <SectionCard icon={Terminal} title="Real-time Telemetry" subtitle="Live bandwidth, CPU and latency, plus connectivity tests.">
+              <SectionCard icon={Terminal} title={t('set.real_time_telemetry')} subtitle="Live bandwidth, CPU and latency, plus connectivity tests.">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Database size={16} color="var(--color-primary)" />
-                  <span>Real-time Telemetry Monitor</span>
+                  <span>{t('set.real_time_telemetry_monitor')}</span>
                 </span>
                 <button 
                   onClick={runPingTest} 
@@ -1684,7 +1693,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   style={{ fontSize: '0.75rem', gap: '0.35rem' }}
                 >
                   {diagnosticsRunning ? <RefreshCw size={12} className="spin" /> : <Zap size={12} />}
-                  <span>Run Connectivity Tests</span>
+                  <span>{t('set.run_connectivity_tests')}</span>
                 </button>
               </div>
 
@@ -1693,12 +1702,12 @@ export const Settings: React.FC<SettingsProps> = ({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Cpu size={12} color="var(--color-primary)" />
-                    <span>Real-time Bandwidth, CPU & Latency Plots</span>
+                    <span>{t('set.real_time_bandwidth_cpu_latency')}</span>
                   </span>
                   <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.65rem' }}>
-                    <span style={{ color: '#10B981', fontWeight: 600 }}>● CPU Load</span>
-                    <span style={{ color: '#3B82F6', fontWeight: 600 }}>● Latency (ms)</span>
-                    <span style={{ color: '#EF4444', fontWeight: 600 }}>● Packet Loss (%)</span>
+                    <span style={{ color: '#10B981', fontWeight: 600 }}>{t('set.cpu_load')}</span>
+                    <span style={{ color: '#3B82F6', fontWeight: 600 }}>{t('set.latency_ms')}</span>
+                    <span style={{ color: '#EF4444', fontWeight: 600 }}>{t('set.packet_loss')}</span>
                   </div>
                 </div>
                 <div style={{ height: '150px', position: 'relative' }}>
@@ -1708,7 +1717,7 @@ export const Settings: React.FC<SettingsProps> = ({
               </SectionCard>
 
               {/* Scrolling logs console */}
-              <SectionCard icon={Terminal} title="Diagnostics Console" subtitle="Live system log — errors in red, warnings in amber.">
+              <SectionCard icon={Terminal} title={t('set.diagnostics_console')} subtitle="Live system log — errors in red, warnings in amber.">
               <div style={{
                 height: '180px',
                 backgroundColor: '#05070B',
@@ -1740,22 +1749,22 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* Category Panel: Notifications */}
         {activeCategory === 'notifications' && (
           <div>
-            <PanelHeader icon={Bell} title="Notification Gating" subtitle="Set your email rules, desktop alerts, and communication filters." />
+            <PanelHeader icon={Bell} title={t('set.notification_gating')} subtitle="Set your email rules, desktop alerts, and communication filters." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '780px', width: '100%' }}>
-              <SectionCard icon={Bell} title="Notification Channels" subtitle="Email digests and push call alerts.">
+              <SectionCard icon={Bell} title={t('set.notification_channels')} subtitle="Email digests and push call alerts.">
               <div className="flex-between" style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                 <div>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>System Email Logs</h4>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Receive email digests containing workspace reports and bills.</p>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>{t('set.system_email_logs')}</h4>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{t('set.receive_email_digests_containing_workspa')}</p>
                 </div>
                 <input type="checkbox" defaultChecked style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
               </div>
 
               <div className="flex-between" style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                 <div>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>Push Call Alerts</h4>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Trigger audio/video notifications when users ping you.</p>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>{t('set.push_call_alerts')}</h4>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{t('set.trigger_audio_video_notifications_when')}</p>
                 </div>
                 <input type="checkbox" defaultChecked style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
               </div>
@@ -1765,24 +1774,36 @@ export const Settings: React.FC<SettingsProps> = ({
         )}
 
         {/* Category Panel: Meetings Defaults */}
+        {activeCategory === 'organisations' && (
+          <div>
+            <PanelHeader icon={Building2} title={t('set.organisations')} subtitle="White-label brands and members." />
+            <OrganisationsPanel />
+          </div>
+        )}
+        {activeCategory === 'developer' && (
+          <div>
+            <PanelHeader icon={Code} title={t('set.developer')} subtitle="API keys and webhooks." />
+            <ApiDeveloperPanel planTier={planTier} onUpgrade={() => onNavigate?.('billing')} />
+          </div>
+        )}
         {activeCategory === 'meetings' && (
           <div>
-            <PanelHeader icon={Sliders} title="Meeting Presets" subtitle="Configure active hardware switches upon joining active call channels." />
+            <PanelHeader icon={Sliders} title={t('set.meeting_presets')} subtitle="Configure active hardware switches upon joining active call channels." />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '780px', width: '100%' }}>
-              <SectionCard icon={Sliders} title="Join Presets" subtitle="Microphone and camera state when you join a meeting.">
+              <SectionCard icon={Sliders} title={t('set.join_presets')} subtitle="Microphone and camera state when you join a meeting.">
               <div className="flex-between" style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                 <div>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>Mute sound on join</h4>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Join the meeting room with microphone muted by default.</p>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>{t('set.mute_sound_on_join')}</h4>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{t('set.join_the_meeting_room_with')}</p>
                 </div>
                 <input type="checkbox" checked={muteOnJoin} onChange={(e) => handleToggleMuteOnJoin(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
               </div>
 
               <div className="flex-between" style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                 <div>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>Disable webcam on join</h4>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Start call with video feed turned off.</p>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>{t('set.disable_webcam_on_join')}</h4>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{t('set.start_call_with_video_feed')}</p>
                 </div>
                 <input type="checkbox" checked={videoOffOnJoin} onChange={(e) => handleToggleVideoOffOnJoin(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
               </div>

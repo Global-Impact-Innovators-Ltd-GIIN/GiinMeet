@@ -352,7 +352,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
           const companyName = domainParts[0].charAt(0).toUpperCase() + domainParts[0].slice(1);
           setWorkspaceDiscovery({
             domain,
-            name: `${companyName} Workspace Directory`,
+            name: t('auth.workspace_directory', { v1: companyName }),
             isPersonal: false
           });
         } else {
@@ -590,7 +590,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
       if (data?.url) {
         window.location.href = data.url;
       } else {
-        throw new Error('No redirect URL returned from Supabase OAuth.');
+        throw new Error(t('auth.no_redirect_url_returned_from'));
       }
     } catch (err: any) {
       console.error('[Auth] Google sign-in failed:', err);
@@ -622,7 +622,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
       if (data?.url) {
         window.location.href = data.url;
       } else {
-        throw new Error('No redirect URL returned from Supabase OAuth.');
+        throw new Error(t('auth.no_redirect_url_returned_from'));
       }
     } catch (err: any) {
       console.error('[Auth] Microsoft sign-in failed:', err);
@@ -774,7 +774,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         <div style={{ textAlign: 'center' }}>
           <img 
             src={logoUrl} 
-            alt="GiinMeet Logo" 
+            alt={t('auth.giinmeet_logo')} 
             style={{
               width: 'clamp(72px, 18vw, 112px)',
               height: 'clamp(72px, 18vw, 112px)',
@@ -817,7 +817,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                 transition: 'all 0.2s'
               }}
             >
-              Email Address
+              {t('auth.email_address')}
             </button>
             <button
               type="button"
@@ -835,7 +835,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                 transition: 'all 0.2s'
               }}
             >
-              Phone Number
+              {t('auth.phone_number')}
             </button>
           </div>
         )}
@@ -844,14 +844,14 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         {resetView === 'request' && (
           <form onSubmit={handleRequestReset} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>Reset your password</h3>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>{t('auth.reset_your_password')}</h3>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-                Enter the email for your account and we will send you a link to choose a new password.
+                {t('auth.enter_the_email_for_your')}
               </p>
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                Email Address
+                {t('auth.email_address')}
               </label>
               <div style={{ position: 'relative' }}>
                 <Mail size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -868,52 +868,49 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
             </div>
             {validationError && <div style={{ color: '#EF4444', fontSize: '0.8rem' }}>{validationError}</div>}
             <button type="submit" disabled={isLoading} className="premium-btn premium-btn-accent" style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}>
-              {isLoading ? <span>Sending…</span> : <span>Send Reset Link</span>}
+              {isLoading ? <span>Sending…</span> : <span>{t('auth.send_reset_link')}</span>}
             </button>
             <button type="button" onClick={() => { setResetView('none'); setValidationError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
-              Back to sign in
+              {t('auth.back_to_sign_in')}
             </button>
           </form>
         )}
 
         {resetView === 'sent' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'center' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>Check your email</h3>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>{t('auth.check_your_email')}</h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-              If an account exists for <strong style={{ color: 'white' }}>{resetEmail}</strong>, a password-reset link is on its way.
-              Open it and choose a new password. If nothing arrives within a few minutes, check spam — and note that delivery
-              needs email sending configured in the Supabase dashboard; if it is not set up, no email can arrive.
+              {t('auth.if_an_account_exists_for')} <strong style={{ color: 'white' }}>{resetEmail}</strong>{t('auth.a_password_reset_link_is')}
             </p>
             <button type="button" onClick={() => { setResetView('request'); setValidationError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
-              Send to a different email
+              {t('auth.send_to_a_different_email')}
             </button>
             <button type="button" onClick={() => { setResetView('none'); setValidationError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
-              Back to sign in
+              {t('auth.back_to_sign_in')}
             </button>
           </div>
         )}
 
         {resetView === 'expired' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'center' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>This reset link has expired</h3>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>{t('auth.this_reset_link_has_expired')}</h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-              Reset links work once and only for a short time. This one was already used, or too much time has passed.
-              Request a fresh link and it will work.
+              {t('auth.reset_links_work_once_and')}
             </p>
             <button type="button" onClick={() => { setResetView('request'); setValidationError(''); }} className="premium-btn premium-btn-accent" style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}>
-              Request a new reset link
+              {t('auth.request_a_new_reset_link')}
             </button>
             <button type="button" onClick={() => { setResetView('none'); setValidationError(''); if (onPasswordResetDone) onPasswordResetDone(); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
-              Back to sign in
+              {t('auth.back_to_sign_in')}
             </button>
           </div>
         )}
 
         {resetView === 'recover' && resetDone && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'center' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>Password updated</h3>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>{t('auth.password_updated')}</h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-              Your password has been changed. Signing you in…
+              {t('auth.your_password_has_been_changed')}
             </p>
           </div>
         )}
@@ -921,21 +918,21 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         {resetView === 'recover' && !resetDone && (
           <form onSubmit={handleSetNewPassword} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>Choose a new password</h3>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>{t('auth.choose_a_new_password')}</h3>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-                You opened the reset link — set your new password below.
+                {t('auth.you_opened_the_reset_link')}
               </p>
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                New Password
+                {t('auth.new_password')}
               </label>
               <div style={{ position: 'relative' }}>
                 <Lock size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                 <input
                   type="password"
                   className="premium-input"
-                  placeholder="At least 8 characters"
+                  placeholder={t('auth.at_least_8_characters')}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
@@ -945,14 +942,14 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                Confirm New Password
+                {t('auth.confirm_new_password')}
               </label>
               <div style={{ position: 'relative' }}>
                 <Lock size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                 <input
                   type="password"
                   className="premium-input"
-                  placeholder="Repeat the new password"
+                  placeholder={t('auth.repeat_the_new_password')}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
@@ -962,13 +959,13 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
             </div>
             {validationError && <div style={{ color: '#EF4444', fontSize: '0.8rem' }}>{validationError}</div>}
             <button type="submit" disabled={isLoading} className="premium-btn premium-btn-accent" style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}>
-              {isLoading ? <span>Saving…</span> : <span>Set New Password</span>}
+              {isLoading ? <span>Saving…</span> : <span>{t('auth.set_new_password')}</span>}
             </button>
             <button type="button" onClick={() => { setResetView('request'); setValidationError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
-              Request a new reset link
+              {t('auth.request_a_new_reset_link')}
             </button>
             <button type="button" onClick={() => { setResetView('none'); setValidationError(''); if (onPasswordResetDone) onPasswordResetDone(); }} style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
-              Back to sign in
+              {t('auth.back_to_sign_in')}
             </button>
           </form>
         )}
@@ -979,14 +976,14 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
             {!isLogin && (
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                  Full Name
+                  {t('auth.full_name')}
                 </label>
                 <div style={{ position: 'relative' }}>
                   <User size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                   <input 
                     type="text" 
                     className="premium-input" 
-                    placeholder="e.g. Sofia Brant"
+                    placeholder={t('auth.e_g_sofia_brant')}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
@@ -998,7 +995,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
 
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                Email Address (Work or Personal)
+                {t('auth.email_address_work_or_personal')}
               </label>
               <div style={{ position: 'relative' }}>
                 <Mail size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -1032,7 +1029,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                   <span>
                     {workspaceDiscovery.isPersonal 
                       ? 'Personal Account: Routing to your GIIN Personal space'
-                      : `Domain Recognized: Routing to ${workspaceDiscovery.name}`
+                      : t('auth.domain_recognized_routing_to', { v1: workspaceDiscovery.name })
                     }
                   </span>
                 </div>
@@ -1041,14 +1038,14 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
               {workspaceDiscovery?.isPersonal && (
                 <div style={{ marginTop: '0.6rem', animation: 'slide-in 0.2s ease' }}>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                    Custom Workspace Name (Optional)
+                    {t('auth.custom_workspace_name_optional')}
                   </label>
                   <div style={{ position: 'relative' }}>
                     <Globe size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input 
                       type="text" 
                       className="premium-input" 
-                      placeholder="e.g. My Study Group, Hleo's Dev Team"
+                      placeholder={t('auth.e_g_my_study_group')}
                       value={customWorkspaceName}
                       onChange={(e) => setCustomWorkspaceName(e.target.value)}
                       style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
@@ -1060,7 +1057,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
 
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                Secret Password
+                {t('auth.secret_password')}
               </label>
               <div style={{ position: 'relative' }}>
                 <Lock size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -1081,7 +1078,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                     onClick={() => { setResetEmail(email); setResetView('request'); setValidationError(''); }}
                     style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
                   >
-                    Forgot password?
+                    {t('auth.forgot_password')}
                   </button>
                 </div>
               )}
@@ -1095,7 +1092,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
               style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700, marginTop: '0.5rem' }}
             >
               {isLoading ? (
-                <span>Authenticating Workspace...</span>
+                <span>{t('auth.authenticating_workspace')}</span>
               ) : (
                 <>
                   <span>{isLogin ? 'Sign In' : 'Register Securely'}</span>
@@ -1109,7 +1106,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                 onClick={() => { setEmailCodeMode(true); setOtpCode(['', '', '', '', '', '']); setValidationError(''); }}
                 style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, alignSelf: 'center' }}
               >
-                Sign in with an email code instead
+                {t('auth.sign_in_with_an_email')}
               </button>
             )}
           </form>
@@ -1135,20 +1132,20 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
               }}
             >
               <ArrowLeft size={14} />
-              <span>Back to password sign-in</span>
+              <span>{t('auth.back_to_password_sign_in')}</span>
             </button>
 
             {!emailOtpSent ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>Sign in with an email code</h3>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: '0 0 0.25rem' }}>{t('auth.sign_in_with_an_email_2')}</h3>
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-                    We will send a 6-digit code to your email. It works for the account you already have — if you don't have one yet, create it with Sign up below.
+                    {t('auth.we_will_send_a_6')}
                   </p>
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                    Email Address
+                    {t('auth.email_address')}
                   </label>
                   <div style={{ position: 'relative' }}>
                     <Mail size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -1171,13 +1168,13 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                   className="premium-btn premium-btn-accent"
                   style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}
                 >
-                  {isLoading ? <span>Sending Code...</span> : <span>Send Email Code</span>}
+                  {isLoading ? <span>{t('auth.sending_code')}</span> : <span>{t('auth.send_email_code')}</span>}
                 </button>
               </div>
             ) : (
               <form onSubmit={handleVerifyEmailCode} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                  A 6-digit code was sent to <strong style={{ color: 'white' }}>{email}</strong>
+                  {t('auth.a_6_digit_code_was')} <strong style={{ color: 'white' }}>{email}</strong>
                 </span>
 
                 <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center' }}>
@@ -1221,12 +1218,12 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                   className="premium-btn premium-btn-accent"
                   style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}
                 >
-                  {isLoading ? <span>Verifying Code...</span> : <span>Verify & Sign In</span>}
+                  {isLoading ? <span>{t('auth.verifying_code')}</span> : <span>{t('auth.verify_sign_in')}</span>}
                 </button>
 
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   {resendTimer > 0 ? (
-                    <span>Resend code in <strong style={{ color: 'white' }}>{resendTimer}s</strong></span>
+                    <span>{t('auth.resend_code_in')} <strong style={{ color: 'white' }}>{resendTimer}s</strong></span>
                   ) : (
                     <button
                       type="button"
@@ -1251,7 +1248,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                   onClick={() => { setEmailOtpSent(false); setOtpCode(['', '', '', '', '', '']); setValidationError(''); }}
                   style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}
                 >
-                  Send to a different email
+                  {t('auth.send_to_a_different_email')}
                 </button>
               </form>
             )}
@@ -1279,7 +1276,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                 }}
               >
                 <ArrowLeft size={14} />
-                <span>Change Phone Number</span>
+                <span>{t('auth.change_phone_number')}</span>
               </button>
             )}
 
@@ -1288,14 +1285,14 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                 {!isLogin && (
                   <div>
                     <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                      Full Name
+                      {t('auth.full_name')}
                     </label>
                     <div style={{ position: 'relative' }}>
                       <User size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                       <input 
                         type="text" 
                         className="premium-input" 
-                        placeholder="e.g. Sofia Brant"
+                        placeholder={t('auth.e_g_sofia_brant')}
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
@@ -1307,7 +1304,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
 
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                    Phone Number
+                    {t('auth.phone_number')}
                   </label>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <select
@@ -1347,14 +1344,14 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
 
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                    Workspace Name (Optional)
+                    {t('auth.workspace_name_optional')}
                   </label>
                   <div style={{ position: 'relative' }}>
                     <Globe size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input 
                       type="text" 
                       className="premium-input" 
-                      placeholder="e.g. My Study Group, Hleo's Dev Team"
+                      placeholder={t('auth.e_g_my_study_group')}
                       value={customWorkspaceName}
                       onChange={(e) => setCustomWorkspaceName(e.target.value)}
                       style={{ paddingLeft: '2.5rem', backgroundColor: '#090D16', borderColor: '#1E293B', color: 'white' }}
@@ -1369,13 +1366,13 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                   className="premium-btn premium-btn-accent" 
                   style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700, marginTop: '0.5rem' }}
                 >
-                  {isLoading ? <span>Sending Code...</span> : <span>Send Verification Code</span>}
+                  {isLoading ? <span>{t('auth.sending_code')}</span> : <span>{t('auth.send_verification_code')}</span>}
                 </button>
               </div>
             ) : (
               <form onSubmit={handleVerifyOTP} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                  A 6-digit code was sent to <strong style={{ color: 'white' }}>{countryCode} {phone}</strong>
+                  {t('auth.a_6_digit_code_was')} <strong style={{ color: 'white' }}>{countryCode} {phone}</strong>
                 </span>
 
                 <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center' }}>
@@ -1419,12 +1416,12 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                   className="premium-btn premium-btn-accent" 
                   style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontWeight: 700 }}
                 >
-                  {isLoading ? <span>Verifying OTP...</span> : <span>Verify & Authenticate</span>}
+                  {isLoading ? <span>{t('auth.verifying_otp')}</span> : <span>{t('auth.verify_authenticate')}</span>}
                 </button>
 
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   {resendTimer > 0 ? (
-                    <span>Resend code in <strong style={{ color: 'white' }}>{resendTimer}s</strong></span>
+                    <span>{t('auth.resend_code_in')} <strong style={{ color: 'white' }}>{resendTimer}s</strong></span>
                   ) : (
                     <button
                       type="button"
@@ -1452,7 +1449,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
         {!otpSent && !emailCodeMode && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <div style={{ flex: 1, height: '1px', backgroundColor: '#1E293B' }} />
-            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>OR ENTER WITH SSO</span>
+            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>{t('auth.or_enter_with_sso')}</span>
             <div style={{ flex: 1, height: '1px', backgroundColor: '#1E293B' }} />
           </div>
         )}
@@ -1549,7 +1546,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                   onClick={() => { setIsLogin(false); setValidationError(''); }}
                   style={{ background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', fontWeight: 600 }}
                 >
-                  Sign Up
+                  {t('auth.sign_up')}
                 </button>
               </span>
             ) : (
@@ -1559,7 +1556,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode, onPasswo
                   onClick={() => { setIsLogin(true); setValidationError(''); }}
                   style={{ background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', fontWeight: 600 }}
                 >
-                  Sign In
+                  {t('auth.sign_in')}
                 </button>
               </span>
             )}

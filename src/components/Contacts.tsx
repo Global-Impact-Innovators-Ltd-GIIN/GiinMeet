@@ -247,7 +247,7 @@ export const Contacts: React.FC<ContactsProps> = ({
   // Load Private Notes when selected contact changes
   useEffect(() => {
     if (!selectedContactId || !currentUser) return;
-    const key = `giin_contact_notes_${currentUser.id}_${selectedContactId}`;
+    const key = t('contact.giin_contact_notes', { v1: currentUser.id, v2: selectedContactId });
     const saved = localStorage.getItem(key);
     setContactNotes(saved || '');
   }, [selectedContactId, currentUser]);
@@ -255,7 +255,7 @@ export const Contacts: React.FC<ContactsProps> = ({
   const handleNotesChange = (val: string) => {
     setContactNotes(val);
     if (selectedContactId && currentUser) {
-      const key = `giin_contact_notes_${currentUser.id}_${selectedContactId}`;
+      const key = t('contact.giin_contact_notes', { v1: currentUser.id, v2: selectedContactId });
       localStorage.setItem(key, val);
     }
   };
@@ -283,7 +283,7 @@ export const Contacts: React.FC<ContactsProps> = ({
 
         if (meetings && !error) {
           const mapped = meetings.map((m: any) => ({
-            type: `Video Meeting: ${m.title}`,
+            type: t('contact.video_meeting', { v1: m.title }),
             date: new Date(m.time).toLocaleDateString([], { 
               month: 'short', 
               day: 'numeric', 
@@ -341,7 +341,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       const dbMeet = {
         id: meetingId,
         user_id: currentUser.id,
-        title: meetingAgenda.trim() || `Meeting with ${selectedContact.name}`,
+        title: meetingAgenda.trim() || t('chat.meeting_with', { v1: selectedContact.name }),
         time: new Date(`${scheduledDate}T${convertTimeTo24h(scheduledTime)}`).toISOString(),
         duration: '30 mins',
         status: 'Scheduled' as const,
@@ -353,7 +353,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       // Create meeting in Supabase
       const { error: insertError } = await supabase.from('meetings').insert([dbMeet]);
       if (insertError) {
-        throw new Error(`Could not schedule the meeting: ${insertError.message}`);
+        throw new Error(t('contact.could_not_schedule_the_meeting', { v1: insertError.message }));
       }
 
       // Create the LiveKit room for this meeting (best-effort: retried on join).
@@ -364,7 +364,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       await giinApi.joinMeetingRoom(meetingId, selectedContact.name, selectedContactId, 'Participant', 'Waiting');
 
       // 2. Format custom invite payload
-      const invitePayload = `[MEET_INVITE:${dbMeet.title}|${scheduledDate}|${scheduledTime}|${meetingId}|${passcode}]`;
+      const invitePayload = t('contact.meet_invite', { v1: dbMeet.title, v2: scheduledDate, v3: scheduledTime, v4: meetingId, v5: passcode });
 
       // Encrypt message for DM thread
       const dmThreadId = 'dm_' + [currentUser.id, selectedContactId].sort().join('_');
@@ -378,7 +378,7 @@ export const Contacts: React.FC<ContactsProps> = ({
         user_id: currentUser.id
       });
 
-      showToast(`Invitation sent to ${selectedContact.name}!`);
+      showToast(t('contact.invitation_sent_to', { v1: selectedContact.name }));
       setShowScheduler(false);
       setMeetingAgenda('');
       setScheduledDate('');
@@ -439,7 +439,7 @@ export const Contacts: React.FC<ContactsProps> = ({
             user_id: currentUser.id
           });
 
-          showToast(`Encrypted file "${file.name}" sent to chat!`);
+          showToast(t('contact.encrypted_file_sent_to_chat', { v1: file.name }));
           resolve();
         } catch (err) {
           console.error('Failed to send file:', err);
@@ -513,7 +513,7 @@ export const Contacts: React.FC<ContactsProps> = ({
             <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input 
               type="text" 
-              placeholder="Search name or role..." 
+              placeholder={t('contact.search_name_or_role')} 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="premium-input"
@@ -526,7 +526,7 @@ export const Contacts: React.FC<ContactsProps> = ({
           /* Directory Insights Dashboard Panel */
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.25rem', animation: 'pop-in 0.2s ease' }}>
             <div style={{ padding: '1rem', borderRadius: 'var(--radius-md)', backgroundColor: 'rgba(var(--color-secondary-rgb), 0.04)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>DIRECTORY HEALTH</span>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('contact.directory_health')}</span>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <span style={{ fontSize: '1.4rem', fontWeight: 800 }}>{contacts.length} Members</span>
                 <span style={{ fontSize: '0.75rem', color: '#10B981', fontWeight: 600 }}>
@@ -536,32 +536,32 @@ export const Contacts: React.FC<ContactsProps> = ({
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>STATUS OVERVIEW</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('contact.status_overview')}</span>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
                 <div style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'var(--bg-card)' }}>
                   <span style={{ display: 'block', fontSize: '1rem', fontWeight: 700, color: '#10B981' }}>
                     {contacts.filter(c => getContactStatus(c) === 'Online').length}
                   </span>
-                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Online</span>
+                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{t('contact.online')}</span>
                 </div>
                 <div style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'var(--bg-card)' }}>
                   <span style={{ display: 'block', fontSize: '1rem', fontWeight: 700, color: '#FABD02' }}>
                     {contacts.filter(c => getContactStatus(c) === 'In a Meeting').length}
                   </span>
-                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Busy</span>
+                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{t('contact.busy')}</span>
                 </div>
                 <div style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'var(--bg-card)' }}>
                   <span style={{ display: 'block', fontSize: '1rem', fontWeight: 700, color: '#94A3B8' }}>
                     {contacts.filter(c => getContactStatus(c) === 'Offline').length}
                   </span>
-                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Offline</span>
+                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{t('contact.offline')}</span>
                 </div>
               </div>
             </div>
 
             {/* Department Split progress bars */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TEAM DISTRIBUTION</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('contact.team_distribution')}</span>
               {Object.entries(
                 contacts.reduce((acc, c) => {
                   let d = 'General Team';
@@ -590,7 +590,7 @@ export const Contacts: React.FC<ContactsProps> = ({
 
             {/* Timezone Split */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TIMEZONE LOGISTICS</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('contact.timezone_logistics')}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '180px', overflowY: 'auto' }}>
                 {Object.entries(
                   contacts.reduce((acc, c) => {
@@ -631,7 +631,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                   fontSize: '0.9rem'
                 }}
               >
-                All Contacts
+                {t('contact.all_contacts')}
               </button>
               <button 
                 onClick={() => setActiveTab('starred')}
@@ -647,7 +647,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                   fontSize: '0.9rem'
                 }}
               >
-                Starred
+                {t('contact.starred')}
               </button>
             </div>
 
@@ -748,18 +748,18 @@ export const Contacts: React.FC<ContactsProps> = ({
               ))}
               {contactsLoading && (
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0', fontSize: '0.9rem' }}>
-                  Loading contacts…
+                  {t('contact.loading_contacts')}
                 </div>
               )}
               {!contactsLoading && contactsError && (
                 <div style={{ textAlign: 'center', padding: '2rem 0', fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center' }}>
                   <span style={{ color: '#FCA5A5' }}>{contactsError}</span>
-                  <button className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 1rem', fontSize: '0.8rem' }} onClick={() => setContactsRefreshNonce(n => n + 1)}>Retry</button>
+                  <button className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 1rem', fontSize: '0.8rem' }} onClick={() => setContactsRefreshNonce(n => n + 1)}>{t('contact.retry')}</button>
                 </div>
               )}
               {!contactsLoading && !contactsError && filteredContacts.length === 0 && (
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0', fontSize: '0.9rem' }}>
-                  No contacts found
+                  {t('contact.no_contacts_found')}
                 </div>
               )}
             </div>
@@ -791,7 +791,7 @@ export const Contacts: React.FC<ContactsProps> = ({
             }}
           >
             <ArrowLeft size={20} />
-            <span>Back to Contacts</span>
+            <span>{t('contact.back_to_contacts')}</span>
           </button>
           
           {/* Header info */}
@@ -849,7 +849,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                       style={{ color: 'var(--text-muted)', transition: 'color 0.2s', display: 'flex', alignItems: 'center' }} 
                       onMouseEnter={(e) => e.currentTarget.style.color = '#0A66C2'} 
                       onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                      title="LinkedIn Profile"
+                      title={t('contact.linkedin_profile')}
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}>
                         <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
@@ -866,7 +866,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                       style={{ color: 'var(--text-muted)', transition: 'color 0.2s', display: 'flex', alignItems: 'center' }} 
                       onMouseEnter={(e) => e.currentTarget.style.color = '#fff'} 
                       onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                      title="GitHub Profile"
+                      title={t('contact.github_profile')}
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}>
                         <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
@@ -881,7 +881,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                       style={{ color: 'var(--text-muted)', transition: 'color 0.2s', display: 'flex', alignItems: 'center' }} 
                       onMouseEnter={(e) => e.currentTarget.style.color = '#1DA1F2'} 
                       onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                      title="X (Twitter) Profile"
+                      title={t('contact.x_twitter_profile')}
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}>
                         <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z" />
@@ -896,7 +896,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                       style={{ color: 'var(--text-muted)', transition: 'color 0.2s', display: 'flex', alignItems: 'center' }} 
                       onMouseEnter={(e) => e.currentTarget.style.color = '#E1306C'} 
                       onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                      title="Instagram Profile"
+                      title={t('contact.instagram_profile')}
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}>
                         <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
@@ -913,7 +913,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                       style={{ color: 'var(--text-muted)', transition: 'color 0.2s', display: 'flex', alignItems: 'center' }} 
                       onMouseEnter={(e) => e.currentTarget.style.color = '#1877F2'} 
                       onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                      title="Facebook Profile"
+                      title={t('contact.facebook_profile')}
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}>
                         <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" />
@@ -928,7 +928,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                       style={{ color: 'var(--text-muted)', transition: 'color 0.2s', display: 'flex', alignItems: 'center' }} 
                       onMouseEnter={(e) => e.currentTarget.style.color = '#00f2fe'} 
                       onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                      title="TikTok Profile"
+                      title={t('contact.tiktok_profile')}
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}>
                         <path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5" />
@@ -951,7 +951,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                   marginTop: '0.35rem',
                   fontWeight: 600
                 }}>
-                  <span>⚠️ OUTSIDE BUSINESS HOURS</span>
+                  <span>{t('contact.outside_business_hours')}</span>
                 </div>
               )}
             </div>
@@ -975,16 +975,16 @@ export const Contacts: React.FC<ContactsProps> = ({
               style={{ justifyContent: 'center', height: '46px' }}
             >
               <MessageSquare size={18} />
-              <span>Send Message</span>
+              <span>{t('contact.send_message')}</span>
             </button>
 
             <button 
-              onClick={() => onStartCall(`Call with ${selectedContact.name}`, selectedContact.id)}
+              onClick={() => onStartCall(t('app.call_with', { v1: selectedContact.name }), selectedContact.id)}
               className="premium-btn premium-btn-accent" 
               style={{ justifyContent: 'center', height: '46px' }}
             >
               <Phone size={18} />
-              <span>Call Video</span>
+              <span>{t('contact.call_video')}</span>
             </button>
 
             <button 
@@ -1005,13 +1005,13 @@ export const Contacts: React.FC<ContactsProps> = ({
             <div style={{ padding: '1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', backgroundColor: 'var(--bg-card)', display: 'flex', flexDirection: 'column', gap: '1.25rem', animation: 'pop-in 0.2s ease' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Calendar size={20} color="var(--color-primary)" />
-                <h3 style={{ fontSize: '1.05rem', fontFamily: 'var(--font-heading)', margin: 0 }}>Schedule an Encryption-Safe Meeting</h3>
+                <h3 style={{ fontSize: '1.05rem', fontFamily: 'var(--font-heading)', margin: 0 }}>{t('contact.schedule_an_encryption_safe_meeting')}</h3>
               </div>
 
               <form onSubmit={handleConfirmSchedule} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>SELECT DATE</label>
+                    <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>{t('contact.select_date')}</label>
                     <input 
                       type="date" 
                       value={scheduledDate}
@@ -1023,7 +1023,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>TIME SLOT</label>
+                    <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>{t('contact.time_slot')}</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.3rem' }}>
                       {['09:00 AM', '11:30 AM', '02:00 PM', '04:15 PM'].map(slot => (
                         <button
@@ -1049,10 +1049,10 @@ export const Contacts: React.FC<ContactsProps> = ({
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>MEETING AGENDA / TOPIC</label>
+                  <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>{t('contact.meeting_agenda_topic')}</label>
                   <input 
                     type="text" 
-                    placeholder="e.g. Q3 Roadmap review or UX Alignment"
+                    placeholder={t('contact.e_g_q3_roadmap_review')}
                     value={meetingAgenda}
                     onChange={(e) => setMeetingAgenda(e.target.value)}
                     className="premium-input"
@@ -1067,7 +1067,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                     className="premium-btn premium-btn-primary" 
                     style={{ flex: 1, justifyContent: 'center', fontSize: '0.8rem', height: '36px' }}
                   >
-                    Send Meeting Invitation
+                    {t('contact.send_meeting_invitation')}
                   </button>
                   <button 
                     type="button" 
@@ -1080,7 +1080,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                     className="premium-btn premium-btn-secondary" 
                     style={{ justifyContent: 'center', fontSize: '0.8rem', height: '36px' }}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                 </div>
               </form>
@@ -1091,13 +1091,13 @@ export const Contacts: React.FC<ContactsProps> = ({
               
               {/* Contact Details Card */}
               <div style={{ padding: '1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', backgroundColor: 'var(--bg-card)' }}>
-                <h3 style={{ fontSize: '1.1rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>Contact Information</h3>
+                <h3 style={{ fontSize: '1.1rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>{t('contact.contact_information')}</h3>
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <Mail size={16} color="var(--text-muted)" />
                     <div>
-                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Email Address</span>
+                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('contact.email_address')}</span>
                       <a href={`mailto:${selectedContact.email}`} style={{ fontSize: '0.9rem', color: 'var(--color-secondary)', textDecoration: 'none' }}>
                         {selectedContact.email}
                       </a>
@@ -1107,7 +1107,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <Smartphone size={16} color="var(--text-muted)" />
                     <div>
-                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Mobile Number</span>
+                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('contact.mobile_number')}</span>
                       <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{selectedContact.phone}</span>
                     </div>
                   </div>
@@ -1115,7 +1115,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <Briefcase size={16} color="var(--text-muted)" />
                     <div>
-                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Department</span>
+                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('contact.department')}</span>
                       <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{selectedContact.role?.split(' ')[0]} Department</span>
                     </div>
                   </div>
@@ -1124,7 +1124,7 @@ export const Contacts: React.FC<ContactsProps> = ({
 
               {/* Interaction History Card */}
               <div style={{ padding: '1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', backgroundColor: 'var(--bg-card)' }}>
-                <h3 style={{ fontSize: '1.1rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>Interaction History</h3>
+                <h3 style={{ fontSize: '1.1rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>{t('contact.interaction_history')}</h3>
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '180px', overflowY: 'auto' }}>
                   {interactionHistory.map((hist, idx) => (
@@ -1145,7 +1145,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                     </div>
                   ))}
                   {interactionHistory.length === 0 && (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No recent meeting history.</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('contact.no_recent_meeting_history')}</span>
                   )}
                 </div>
               </div>
@@ -1154,12 +1154,12 @@ export const Contacts: React.FC<ContactsProps> = ({
               <div style={{ padding: '1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', backgroundColor: 'var(--bg-card)' }}>
                 <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontFamily: 'var(--font-heading)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Lock size={16} color="var(--color-accent)" />
-                  <span>Private Memo & CRM</span>
+                  <span>{t('contact.private_memo_crm')}</span>
                 </h3>
                 <textarea 
                   value={contactNotes}
                   onChange={(e) => handleNotesChange(e.target.value)}
-                  placeholder="Write private notes, alignment details, or conversation action items here..."
+                  placeholder={t('contact.write_private_notes_alignment_details')}
                   style={{
                     width: '100%',
                     height: '100px',
@@ -1175,7 +1175,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                   }}
                 />
                 <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
-                  🔒 Invisible to others, persisted locally.
+                  {t('contact.invisible_to_others_persisted_locally')}
                 </span>
               </div>
 
@@ -1211,12 +1211,12 @@ export const Contacts: React.FC<ContactsProps> = ({
                   style={{ display: 'none' }} 
                 />
                 <Paperclip size={24} style={{ color: isDraggingFile ? 'var(--color-primary)' : 'var(--text-muted)' }} />
-                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, margin: 0 }}>E2EE Secure Vault Drop</h4>
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, margin: 0 }}>{t('contact.e2ee_secure_vault_drop')}</h4>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>
                   {isDraggingFile ? 'Drop file here to send' : 'Drag & drop file or click to upload'}
                 </p>
                 <span style={{ fontSize: '0.6rem', color: 'var(--color-secondary)' }}>
-                  Encrypted client-side in transit
+                  {t('contact.encrypted_client_side_in_transit')}
                 </span>
               </div>
 
@@ -1224,7 +1224,7 @@ export const Contacts: React.FC<ContactsProps> = ({
               <div style={{ padding: '1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', backgroundColor: 'var(--bg-card)', gridColumn: 'span 2' }}>
                 <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontFamily: 'var(--font-heading)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Shield size={16} color="var(--color-primary)" />
-                  <span>Skills & Expertise Routing</span>
+                  <span>{t('contact.skills_expertise_routing')}</span>
                 </h3>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
                   {contactSkills.map(tag => (
@@ -1254,14 +1254,14 @@ export const Contacts: React.FC<ContactsProps> = ({
                     </span>
                   ))}
                   {contactSkills.length === 0 && (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No tags added yet.</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('contact.no_tags_added_yet')}</span>
                   )}
                 </div>
                 
                 <form onSubmit={handleAddSkill} style={{ display: 'flex', gap: '0.5rem', maxWidth: '300px' }}>
                   <input 
                     type="text" 
-                    placeholder="Add tag (e.g. Figma, WebRTC)"
+                    placeholder={t('contact.add_tag_e_g_figma')}
                     value={newSkillTag}
                     onChange={(e) => setNewSkillTag(e.target.value)}
                     className="premium-input"
@@ -1273,7 +1273,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                     style={{ padding: '0 0.75rem', fontSize: '0.75rem', height: '28px', justifyContent: 'center' }}
                   >
                     <Plus size={12} />
-                    <span>Add</span>
+                    <span>{t('contact.add')}</span>
                   </button>
                 </form>
               </div>
@@ -1282,7 +1282,7 @@ export const Contacts: React.FC<ContactsProps> = ({
         </div>
       ) : (
         <div className="glass-panel flex-center" style={{ color: 'var(--text-muted)' }}>
-          Select a contact to view details.
+          {t('contact.select_a_contact_to_view')}
         </div>
       )}
 

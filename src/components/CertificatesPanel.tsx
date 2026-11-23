@@ -82,7 +82,7 @@ export function downloadCertificatePdf(
   doc.setTextColor(120, 120, 120);
   doc.text('Issued from the recorded attendance of this meeting.', pageW / 2, 186, { align: 'center' });
   const safeName = attendeeName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'attendee';
-  doc.save(`GiinMeet-Certificate-${safeName}.pdf`);
+  doc.save(t('cert.giinmeet_certificate_pdf', { v1: safeName }));
 }
 
 export const CertificatesPanel: React.FC<Props> = ({ meetingId, meetingTitle, meetingDate }) => {
@@ -103,7 +103,7 @@ export const CertificatesPanel: React.FC<Props> = ({ meetingId, meetingTitle, me
       const d = raw ? new Date(raw) : null;
       setWhen(d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) : '');
     } else if (result?.reason === 'NOT_CONFIGURED') {
-      setError('Certificates need the Phase C1 and Phase C2a database setup. Run giinmeet_phaseC1.sql, then giinmeet_phaseC2a.sql, in the Supabase SQL Editor first.');
+      setError(t('cert.certificates_need_the_phase_c1'));
     } else {
       setError(result?.message || t('cert.unavailable'));
     }

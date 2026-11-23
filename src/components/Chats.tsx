@@ -6,6 +6,7 @@ import {
   ExternalLink, Minimize2, Paintbrush, Calendar, Phone, Users, Lock, Plus
 } from 'lucide-react';
 import { giinApi, supabase } from '../supabaseClient';
+import { useClickOutside, useClickOutsideMany } from '../hooks/useClickOutside';
 import { getLocalBrandName } from '../utils/brand';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
 
@@ -344,7 +345,7 @@ const DoodleSketchpad: React.FC<{ channelId: string; self: boolean }> = ({ chann
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: self ? 'white' : 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '3px' }}>
           <span>🎨</span>
-          <span>COLLABORATIVE DOODLE</span>
+          <span>{t('chat.collaborative_doodle')}</span>
         </span>
         <button
           type="button"
@@ -358,7 +359,7 @@ const DoodleSketchpad: React.FC<{ channelId: string; self: boolean }> = ({ chann
             fontWeight: 700
           }}
         >
-          Clear
+          {t('chat.clear')}
         </button>
       </div>
 
@@ -531,6 +532,23 @@ export const Chats: React.FC<ChatsProps> = ({
   const [whisperTargetUserId, setWhisperTargetUserId] = useState<string>('');
   const [activeGroupMembers, setActiveGroupMembers] = useState<any[]>([]);
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  // Click-outside-to-close for the composer popovers. The desktop input
+  // tray holds the emoji picker and the mention list (and the plus and
+  // whisper menus), so one boundary there covers them; the plus and
+  // whisper menus also exist in the mobile composer, so they get both
+  // wrappers as boundaries.
+  const trayRef = useClickOutside<HTMLDivElement>(() => {
+    setShowEmojiPicker(false);
+    setShowMentionDropdown(false);
+    setShowPlusMenu(false);
+    setShowWhisperPicker(false);
+  }, showEmojiPicker || showMentionDropdown || showPlusMenu || showWhisperPicker);
+  const plusDesktopRef = useRef<HTMLDivElement | null>(null);
+  const plusMobileRef = useRef<HTMLDivElement | null>(null);
+  useClickOutsideMany([plusDesktopRef, plusMobileRef], () => setShowPlusMenu(false), showPlusMenu);
+  const whisperDesktopRef = useRef<HTMLDivElement | null>(null);
+  const whisperMobileRef = useRef<HTMLDivElement | null>(null);
+  useClickOutsideMany([whisperDesktopRef, whisperMobileRef], () => setShowWhisperPicker(false), showWhisperPicker);
   const [mentionSearchText, setMentionSearchText] = useState('');
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
 
@@ -610,7 +628,7 @@ export const Chats: React.FC<ChatsProps> = ({
         translationText = "Perfect, the new canvas looks amazing on mobile devices.";
       } else {
         if (/[a-zA-Z]/.test(originalText)) {
-          translationText = `[Translated]: ${originalText} (Securely decrypted translation)`;
+          translationText = t('chat.translated_securely_decrypted_translati', { v1: originalText });
         } else {
           translationText = `[Translated]: Securely decrypted and translated message contents.`;
         }
@@ -633,7 +651,7 @@ export const Chats: React.FC<ChatsProps> = ({
 
   const handleSpeechMessage = (messageId: string, text: string) => {
     if (!('speechSynthesis' in window)) {
-      alert("Text-to-speech is not supported in this browser.");
+      alert(t('chat.text_to_speech_is_not'));
       return;
     }
 
@@ -972,7 +990,7 @@ export const Chats: React.FC<ChatsProps> = ({
       setShowConversationMobile(true);
     } catch (err: any) {
       console.error('Failed to create group chat:', err);
-      alert('Failed to create group chat: ' + err.message);
+      alert(t('chat.failed_to_create_group_chat') + err.message);
     }
   };
 
@@ -1017,7 +1035,7 @@ export const Chats: React.FC<ChatsProps> = ({
   // Generate invitation link for non-registered contacts
   const handleCopyInviteLink = () => {
     const inviteLink = `${window.location.origin}/#/join`;
-    const inviteText = `Hey! Join me on ${getLocalBrandName()} for secure virtual meetings and instant chats. Sign up here: ${inviteLink}`;
+    const inviteText = t('chat.hey_join_me_on_for', { v1: getLocalBrandName(), v2: inviteLink });
     navigator.clipboard.writeText(inviteText);
     setToastMessage('Invitation copied to clipboard!');
     setTimeout(() => setToastMessage(''), 3000);
@@ -1276,7 +1294,7 @@ export const Chats: React.FC<ChatsProps> = ({
     if (!file || !user || !activeThreadId) return;
 
     if (file.size > 5 * 1024 * 1024) {
-      alert('File is too large. Please select a file under 5MB.');
+      alert(t('chat.file_is_too_large_please'));
       return;
     }
 
@@ -1367,7 +1385,7 @@ export const Chats: React.FC<ChatsProps> = ({
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <span style={{ fontSize: '0.65rem', fontWeight: 700, color: self ? 'rgba(255,255,255,0.75)' : 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Calendar Invitation
+                {t('chat.calendar_invitation')}
               </span>
               <h4 style={{ fontSize: '0.85rem', fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={agenda}>
                 {agenda}
@@ -1409,7 +1427,7 @@ export const Chats: React.FC<ChatsProps> = ({
               cursor: 'pointer'
             }}
           >
-            Join Video Call
+            {t('chat.join_video_call')}
           </button>
         </div>
       );
@@ -1532,10 +1550,10 @@ export const Chats: React.FC<ChatsProps> = ({
             </div>
             <div>
               <h4 style={{ fontSize: '0.85rem', fontWeight: 700, margin: 0, color: self ? 'white' : 'var(--text-main)' }}>
-                {self ? 'Outgoing Video Call' : `Incoming Call from ${callerName}`}
+                {self ? 'Outgoing Video Call' : t('chat.incoming_call_from', { v1: callerName })}
               </h4>
               <span style={{ fontSize: '0.7rem', color: self ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)' }}>
-                Video Call
+                {t('chat.video_call')}
               </span>
             </div>
           </div>
@@ -1556,7 +1574,7 @@ export const Chats: React.FC<ChatsProps> = ({
             }}
           >
             <Video size={14} />
-            <span>Join Video Call</span>
+            <span>{t('chat.join_video_call')}</span>
           </button>
         </div>
       );
@@ -1578,7 +1596,7 @@ export const Chats: React.FC<ChatsProps> = ({
                 style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer', transition: 'transform 0.2s' }} 
                 onClick={() => {
                   const w = window.open();
-                  if (w) w.document.write(`<img src="${fileData}" style="max-width:100%; max-height:100vh; display:block; margin:auto;" />`);
+                  if (w) w.document.write(t('chat.img_src_style_max', { v1: fileData }));
                 }}
                 onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
                 onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
@@ -1637,7 +1655,7 @@ export const Chats: React.FC<ChatsProps> = ({
                 style={{ width: '100%', height: '100%', border: 'none' }}
               >
                 <div style={{ padding: '2rem', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  PDF Preview is not supported by your browser.
+                  {t('chat.pdf_preview_is_not_supported')}
                 </div>
               </object>
             </div>
@@ -1699,7 +1717,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   fontWeight: 600
                 }}
               >
-                Download Document
+                {t('chat.download_document')}
               </a>
             </div>
           </div>
@@ -1732,7 +1750,7 @@ export const Chats: React.FC<ChatsProps> = ({
       {/* Sidebar List */}
       <div className={`glass-panel ${showConversationMobile ? 'mobile-hidden' : ''}`} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
         <div className="flex-between">
-          <h2 style={{ fontSize: '1.4rem', fontFamily: 'var(--font-heading)' }}>Conversations</h2>
+          <h2 style={{ fontSize: '1.4rem', fontFamily: 'var(--font-heading)' }}>{t('chat.conversations')}</h2>
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             <button 
               onClick={() => {
@@ -1740,14 +1758,14 @@ export const Chats: React.FC<ChatsProps> = ({
                 setSelectedGroupMembers([]);
                 setShowCreateGroupModal(true);
               }}
-              title="Create Group Chat"
+              title={t('chat.create_group_chat')}
               style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
             >
               <Users size={20} />
             </button>
             <button 
               onClick={() => setShowAddContactModal(true)}
-              title="Start Direct Chat"
+              title={t('chat.start_direct_chat')}
               style={{ background: 'none', border: 'none', color: 'var(--color-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
             >
               <PlusCircle size={20} />
@@ -1760,7 +1778,7 @@ export const Chats: React.FC<ChatsProps> = ({
           <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input 
             type="text" 
-            placeholder="Search conversations..." 
+            placeholder={t('chat.search_conversations')} 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="premium-input"
@@ -1938,20 +1956,20 @@ export const Chats: React.FC<ChatsProps> = ({
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <button 
-                  onClick={() => onStartMeeting(`Video Meet: ${activeThread.name}`, activeThread.id, true)}
+                  onClick={() => onStartMeeting(t('chat.video_meet', { v1: activeThread.name }), activeThread.id, true)}
                   className="premium-btn premium-btn-secondary" 
                   style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}
                 >
                   <Video size={16} />
-                  <span className="room-header-btn-text">Call Video</span>
+                  <span className="room-header-btn-text">{t('chat.call_video')}</span>
                 </button>
                 <button 
-                  onClick={() => onStartMeeting(`Voice Call: ${activeThread.name}`, activeThread.id, false)}
+                  onClick={() => onStartMeeting(t('chat.voice_call', { v1: activeThread.name }), activeThread.id, false)}
                   className="premium-btn premium-btn-primary" 
                   style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}
                 >
                   <Phone size={16} />
-                  <span className="room-header-btn-text">Call Voice</span>
+                  <span className="room-header-btn-text">{t('chat.call_voice')}</span>
                 </button>
                 <button 
                   onClick={() => setIsPoppedOut(!isPoppedOut)}
@@ -1970,7 +1988,7 @@ export const Chats: React.FC<ChatsProps> = ({
                 </button>
                 <button 
                   onClick={() => setShowRightPanel(!showRightPanel)}
-                  title="Conversation Details & Shared Files"
+                  title={t('chat.conversation_details_shared_files')}
                   style={{ 
                     background: 'none', 
                     border: 'none', 
@@ -1998,7 +2016,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   borderRadius: '9999px',
                   border: '1px solid var(--border-color)'
                 }}>
-                  Messages are encrypted in transit
+                  {t('chat.messages_are_encrypted_in_transit')}
                 </span>
               </div>
 
@@ -2060,7 +2078,7 @@ export const Chats: React.FC<ChatsProps> = ({
                       <button
                         type="button"
                         onClick={() => handleTranslateMessage(m.id, m.text)}
-                        title="Translate Message"
+                        title={t('chat.translate_message')}
                         style={{
                           background: 'none',
                           border: 'none',
@@ -2170,7 +2188,7 @@ export const Chats: React.FC<ChatsProps> = ({
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontWeight: 700, fontSize: '0.65rem', marginBottom: '2px', color: '#FABD02' }}>
                           <Languages size={9} />
-                          <span>SECURE TRANSLATION</span>
+                          <span>{t('chat.secure_translation')}</span>
                         </div>
                         {m.translation}
                       </div>
@@ -2220,7 +2238,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   {m.self && (
                     <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: 'var(--color-secondary)', fontSize: '0.65rem', marginTop: '0.15rem' }}>
                       <CheckCheck size={12} />
-                      <span>Delivered</span>
+                      <span>{t('chat.delivered')}</span>
                     </span>
                   )}
                 </div>
@@ -2263,7 +2281,7 @@ export const Chats: React.FC<ChatsProps> = ({
             </div>
 
             {/* Input Tray */}
-            <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--border-color)', position: 'relative' }}>
+            <div ref={trayRef} style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--border-color)', position: 'relative' }}>
               
               {/* Emoji Picker Tray (Simulated) */}
               {showEmojiPicker && (
@@ -2314,7 +2332,7 @@ export const Chats: React.FC<ChatsProps> = ({
                     marginRight: '0.25rem'
                   }}>
                     <Sparkles size={11} style={{ color: 'var(--color-accent)' }} />
-                    <span>AI SUGGESTIONS:</span>
+                    <span>{t('chat.ai_suggestions')}</span>
                   </span>
                   {getSmartReplies(activeThread.messages[activeThread.messages.length - 1].text).map((suggestion, idx) => (
                     <button
@@ -2367,7 +2385,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   animation: 'pop-in 0.15s ease'
                 }}>
                   <div style={{ padding: '0.35rem 0.5rem', fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', borderBottom: '1px solid var(--border-color)' }}>
-                    Mention Group Member
+                    {t('chat.mention_group_member')}
                   </div>
                   {activeGroupMembers
                     .filter(member => member.name.toLowerCase().includes(mentionSearchText.toLowerCase()))
@@ -2421,7 +2439,7 @@ export const Chats: React.FC<ChatsProps> = ({
                     ))}
                   {activeGroupMembers.filter(member => member.name.toLowerCase().includes(mentionSearchText.toLowerCase())).length === 0 && (
                     <div style={{ padding: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                      No members match
+                      {t('chat.no_members_match')}
                     </div>
                   )}
                 </div>
@@ -2482,8 +2500,8 @@ export const Chats: React.FC<ChatsProps> = ({
                   { label: 'B', style: { fontWeight: 'bold' }, syntax: '**', title: 'Bold' },
                   { label: 'I', style: { fontStyle: 'italic' }, syntax: '*', title: 'Italic' },
                   { label: 'S', style: { textDecoration: 'line-through' }, syntax: '~~', title: 'Strikethrough' },
-                  { label: '</>', style: { fontFamily: 'monospace' }, syntax: '`', title: 'Code Block' },
-                  { label: 'H1', style: { fontWeight: 900 }, syntax: '# ', title: 'Header 1' },
+                  { label: '</>', style: { fontFamily: 'monospace' }, syntax: '`', title: t('chat.code_block') },
+                  { label: 'H1', style: { fontWeight: 900 }, syntax: '# ', title: t('chat.header_1') },
                   { label: 'Quote', style: {}, syntax: '> ', title: 'Blockquote' }
                 ].map(tool => (
                   <button
@@ -2527,14 +2545,14 @@ export const Chats: React.FC<ChatsProps> = ({
                 />
                 
                 {/* Plus Menu Button & Popover */}
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <div ref={plusDesktopRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                   <button
                     type="button"
                     onClick={() => {
                       setShowPlusMenu(!showPlusMenu);
                       setShowWhisperPicker(false);
                     }}
-                    title="Add media & options"
+                    title={t('chat.add_media_options')}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -2579,7 +2597,7 @@ export const Chats: React.FC<ChatsProps> = ({
                         className="plus-menu-item"
                       >
                         <Smile size={16} />
-                        <span>Emojis</span>
+                        <span>{t('chat.emojis')}</span>
                       </button>
                       <button
                         type="button"
@@ -2590,7 +2608,7 @@ export const Chats: React.FC<ChatsProps> = ({
                         className="plus-menu-item"
                       >
                         <Paperclip size={16} />
-                        <span>Attachment</span>
+                        <span>{t('chat.attachment')}</span>
                       </button>
                       <button
                         type="button"
@@ -2601,7 +2619,7 @@ export const Chats: React.FC<ChatsProps> = ({
                         className="plus-menu-item"
                       >
                         <BarChart2 size={16} />
-                        <span>Create Poll</span>
+                        <span>{t('chat.create_poll')}</span>
                       </button>
                       <button
                         type="button"
@@ -2612,7 +2630,7 @@ export const Chats: React.FC<ChatsProps> = ({
                         className="plus-menu-item"
                       >
                         <Paintbrush size={16} />
-                        <span>Doodle Board</span>
+                        <span>{t('chat.doodle_board')}</span>
                       </button>
                     </div>
                   )}
@@ -2620,7 +2638,7 @@ export const Chats: React.FC<ChatsProps> = ({
 
                 {/* Globe & Lock Icons for Public/Whisper modes */}
                 {activeThread.isGroup && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', position: 'relative' }}>
+                  <div ref={whisperDesktopRef} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', position: 'relative' }}>
                     <button
                       type="button"
                       onClick={() => {
@@ -2628,7 +2646,7 @@ export const Chats: React.FC<ChatsProps> = ({
                         setShowWhisperPicker(false);
                         setShowPlusMenu(false);
                       }}
-                      title="Send Public Message"
+                      title={t('chat.send_public_message')}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -2651,7 +2669,7 @@ export const Chats: React.FC<ChatsProps> = ({
                         setShowWhisperPicker(!showWhisperPicker);
                         setShowPlusMenu(false);
                       }}
-                      title="Send Private Whisper"
+                      title={t('chat.send_private_whisper')}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -2699,7 +2717,7 @@ export const Chats: React.FC<ChatsProps> = ({
                           borderBottom: '1px solid var(--border-color)',
                           marginBottom: '0.25rem'
                         }}>
-                          Whisper Private To:
+                          {t('chat.whisper_private_to')}
                         </div>
                         {activeGroupMembers
                           .filter(member => member.id !== user?.id)
@@ -2741,7 +2759,7 @@ export const Chats: React.FC<ChatsProps> = ({
                           ))}
                         {activeGroupMembers.filter(member => member.id !== user?.id).length === 0 && (
                           <div style={{ padding: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                            No other members
+                            {t('chat.no_other_members')}
                           </div>
                         )}
                       </div>
@@ -2752,8 +2770,8 @@ export const Chats: React.FC<ChatsProps> = ({
                 <input 
                   type="text" 
                   placeholder={whisperTargetUserId 
-                    ? `Whisper secretly to ${activeGroupMembers.find(m => m.id === whisperTargetUserId)?.name}...` 
-                    : `Write your message to ${activeThread.name}...`}
+                    ? t('chat.whisper_secretly_to', { v1: activeGroupMembers.find(m => m.id === whisperTargetUserId)?.name }) 
+                    : t('chat.write_your_message_to', { v1: activeThread.name })}
                   value={chatInput}
                   onChange={(e) => {
                     setChatInput(e.target.value);
@@ -2811,10 +2829,10 @@ export const Chats: React.FC<ChatsProps> = ({
               <MessageSquare size={32} />
             </div>
             <div>
-              <h3 style={{ fontSize: '1.25rem', color: 'var(--text-main)', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>No Active Chat</h3>
-              <p style={{ fontSize: '0.85rem', maxWidth: '300px', margin: '0 auto' }}>Select a contact from the Contacts tab to start a secure encrypted direct message.</p>
+              <h3 style={{ fontSize: '1.25rem', color: 'var(--text-main)', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>{t('chat.no_active_chat')}</h3>
+              <p style={{ fontSize: '0.85rem', maxWidth: '300px', margin: '0 auto' }}>{t('chat.select_a_contact_from_the')}</p>
               <div style={{ marginTop: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--color-accent)', backgroundColor: 'rgba(250,189,2,0.1)', border: '1px solid rgba(250,189,2,0.35)', padding: '0.3rem 0.7rem', borderRadius: '9999px' }}>
-                End-to-end encrypted
+                {t('chat.end_to_end_encrypted')}
               </div>
             </div>
           </div>
@@ -2837,7 +2855,7 @@ export const Chats: React.FC<ChatsProps> = ({
           <div className="flex-between">
             <h3 style={{ fontSize: '1.1rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Info size={16} />
-              <span>Conversation Info</span>
+              <span>{t('chat.conversation_info')}</span>
             </h3>
             <button 
               onClick={() => setShowRightPanel(false)}
@@ -2887,12 +2905,12 @@ export const Chats: React.FC<ChatsProps> = ({
             </div>
             
             <button 
-              onClick={() => onStartMeeting(`Meeting with ${activeThread.name}`, activeThread.id)}
+              onClick={() => onStartMeeting(t('chat.meeting_with', { v1: activeThread.name }), activeThread.id)}
               className="premium-btn premium-btn-secondary"
               style={{ width: '100%', padding: '0.35rem 0.75rem', fontSize: '0.75rem', marginTop: '0.25rem', justifyContent: 'center' }}
             >
               <Video size={12} />
-              <span>Start Meet</span>
+              <span>{t('chat.start_meet')}</span>
             </button>
           </div>
 
@@ -2953,7 +2971,7 @@ export const Chats: React.FC<ChatsProps> = ({
                         <button
                           type="button"
                           onClick={() => setWhisperTargetUserId(member.id)}
-                          title="Whisper secretly"
+                          title={t('chat.whisper_secretly')}
                           style={{
                             background: 'none',
                             border: 'none',
@@ -2963,7 +2981,7 @@ export const Chats: React.FC<ChatsProps> = ({
                             fontWeight: 700
                           }}
                         >
-                          Whisper
+                          {t('room.whisper')}
                         </button>
                         <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>|</span>
                         <button
@@ -2971,7 +2989,7 @@ export const Chats: React.FC<ChatsProps> = ({
                           onClick={() => {
                             setChatInput(prev => `${prev}@${member.name} `);
                           }}
-                          title="Mention in chat"
+                          title={t('chat.mention_in_chat')}
                           style={{
                             background: 'none',
                             border: 'none',
@@ -2981,7 +2999,7 @@ export const Chats: React.FC<ChatsProps> = ({
                             fontWeight: 700
                           }}
                         >
-                          Mention
+                          {t('chat.mention')}
                         </button>
                       </div>
                     )}
@@ -2995,7 +3013,7 @@ export const Chats: React.FC<ChatsProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
             <h4 style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <FolderOpen size={13} />
-              <span>Shared Workspace Files</span>
+              <span>{t('chat.shared_workspace_files')}</span>
             </h4>
             
             {(() => {
@@ -3010,7 +3028,7 @@ export const Chats: React.FC<ChatsProps> = ({
                     color: 'var(--text-muted)',
                     fontSize: '0.75rem'
                   }}>
-                    No documents or media shared yet.
+                    {t('chat.no_documents_or_media_shared')}
                   </div>
                 );
               }
@@ -3065,7 +3083,7 @@ export const Chats: React.FC<ChatsProps> = ({
                         <a 
                           href={fileData} 
                           download={fileName}
-                          title="Download"
+                          title={t('common.download')}
                           style={{
                             fontSize: '0.65rem',
                             color: 'var(--color-primary)',
@@ -3074,7 +3092,7 @@ export const Chats: React.FC<ChatsProps> = ({
                             flexShrink: 0
                           }}
                         >
-                          Get
+                          {t('chat.get')}
                         </a>
                       </div>
                     );
@@ -3101,7 +3119,8 @@ export const Chats: React.FC<ChatsProps> = ({
           justifyContent: 'center',
           zIndex: 9999,
           padding: '1rem'
-        }}>
+        }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreateGroupModal(false); }}>
           <div className="glass-panel" style={{
             width: '100%',
             maxWidth: '480px',
@@ -3118,7 +3137,7 @@ export const Chats: React.FC<ChatsProps> = ({
             <div className="flex-between">
               <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Users size={20} color="var(--color-primary)" />
-                <span>Create Group Chat</span>
+                <span>{t('chat.create_group_chat')}</span>
               </h3>
               <button 
                 onClick={() => {
@@ -3135,11 +3154,11 @@ export const Chats: React.FC<ChatsProps> = ({
             <form onSubmit={handleCreateGroupChat} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
-                  GROUP CHAT NAME
+                  {t('chat.group_chat_name')}
                 </label>
                 <input 
                   type="text" 
-                  placeholder="e.g. GIIN Marketing, Design Sync..." 
+                  placeholder={t('chat.e_g_giin_marketing_design')} 
                   value={groupNameInput}
                   onChange={(e) => setGroupNameInput(e.target.value)}
                   className="premium-input"
@@ -3149,7 +3168,7 @@ export const Chats: React.FC<ChatsProps> = ({
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
-                  SELECT MEMBERS
+                  {t('chat.select_members')}
                 </label>
                 <div style={{
                   maxHeight: '200px',
@@ -3218,7 +3237,7 @@ export const Chats: React.FC<ChatsProps> = ({
                   ))}
                   {allProfilesList.length === 0 && (
                     <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '1rem 0' }}>
-                      No workspace profiles found.
+                      {t('chat.no_workspace_profiles_found')}
                     </div>
                   )}
                 </div>
@@ -3251,7 +3270,8 @@ export const Chats: React.FC<ChatsProps> = ({
           justifyContent: 'center',
           zIndex: 9999,
           padding: '1rem'
-        }}>
+        }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowAddContactModal(false); }}>
           <div className="glass-panel" style={{
             width: '100%',
             maxWidth: '440px',
@@ -3266,7 +3286,7 @@ export const Chats: React.FC<ChatsProps> = ({
             animation: 'pop-in 0.25s ease'
           }}>
             <div className="flex-between">
-              <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)' }}>Start a Chat</h3>
+              <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)' }}>{t('chat.start_a_chat')}</h3>
               <button 
                 onClick={() => {
                   setShowAddContactModal(false);
@@ -3283,11 +3303,11 @@ export const Chats: React.FC<ChatsProps> = ({
             <form onSubmit={handleSearchContact} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                  Search by Name, Email, or Phone number
+                  {t('chat.search_by_name_email_or')}
                 </label>
                 <input 
                   type="text" 
-                  placeholder="e.g. Sofia Brant, Sofia@gmail.com, or +15550192834" 
+                  placeholder={t('chat.e_g_sofia_brant_sofia')} 
                   value={queryAdd}
                   onChange={(e) => setQueryAdd(e.target.value)}
                   className="premium-input"
@@ -3296,13 +3316,13 @@ export const Chats: React.FC<ChatsProps> = ({
               </div>
 
               <button type="submit" className="premium-btn premium-btn-primary" style={{ justifyContent: 'center' }}>
-                Search
+                {t('common.search')}
               </button>
             </form>
 
             {searchStatus === 'searching' && (
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                Searching profiles directory...
+                {t('chat.searching_profiles_directory')}
               </div>
             )}
 
@@ -3351,7 +3371,7 @@ export const Chats: React.FC<ChatsProps> = ({
                       className="premium-btn premium-btn-accent" 
                       style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
                     >
-                      Chat
+                      {t('room.chat')}
                     </button>
                   </div>
                 ))}
@@ -3370,14 +3390,14 @@ export const Chats: React.FC<ChatsProps> = ({
                 textAlign: 'center'
               }}>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  This contact is not currently using GiinMeet.
+                  {t('chat.this_contact_is_not_currently')}
                 </p>
                 <button 
                   onClick={handleCopyInviteLink}
                   className="premium-btn premium-btn-secondary" 
                   style={{ justifyContent: 'center', width: '100%' }}
                 >
-                  Copy Invitation Link
+                  {t('chat.copy_invitation_link')}
                 </button>
               </div>
             )}
@@ -3400,7 +3420,8 @@ export const Chats: React.FC<ChatsProps> = ({
           justifyContent: 'center',
           zIndex: 9999,
           padding: '1rem'
-        }}>
+        }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreatePollModal(false); }}>
           <div className="glass-panel" style={{
             width: '100%',
             maxWidth: '440px',
@@ -3417,7 +3438,7 @@ export const Chats: React.FC<ChatsProps> = ({
             <div className="flex-between">
               <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span>📊</span>
-                <span>Create a Quick Poll</span>
+                <span>{t('chat.create_a_quick_poll')}</span>
               </h3>
               <button 
                 onClick={() => {
@@ -3437,11 +3458,11 @@ export const Chats: React.FC<ChatsProps> = ({
             <form onSubmit={handleCreatePoll} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
-                  POLL QUESTION
+                  {t('chat.poll_question')}
                 </label>
                 <input 
                   type="text" 
-                  placeholder="e.g., Which timeline works best for the rollout?" 
+                  placeholder={t('chat.e_g_which_timeline_works')} 
                   value={pollQuestion}
                   onChange={(e) => setPollQuestion(e.target.value)}
                   className="premium-input"
@@ -3451,11 +3472,11 @@ export const Chats: React.FC<ChatsProps> = ({
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
-                  OPTION 1 *
+                  {t('chat.option_1')}
                 </label>
                 <input 
                   type="text" 
-                  placeholder="e.g., Monday next week" 
+                  placeholder={t('chat.e_g_monday_next_week')} 
                   value={pollOption1}
                   onChange={(e) => setPollOption1(e.target.value)}
                   className="premium-input"
@@ -3465,11 +3486,11 @@ export const Chats: React.FC<ChatsProps> = ({
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
-                  OPTION 2 *
+                  {t('chat.option_2')}
                 </label>
                 <input 
                   type="text" 
-                  placeholder="e.g., Wednesday next week" 
+                  placeholder={t('chat.e_g_wednesday_next_week')} 
                   value={pollOption2}
                   onChange={(e) => setPollOption2(e.target.value)}
                   className="premium-input"
@@ -3479,11 +3500,11 @@ export const Chats: React.FC<ChatsProps> = ({
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
-                  OPTION 3 (OPTIONAL)
+                  {t('chat.option_3_optional')}
                 </label>
                 <input 
                   type="text" 
-                  placeholder="e.g., Friday next week" 
+                  placeholder={t('chat.e_g_friday_next_week')} 
                   value={pollOption3}
                   onChange={(e) => setPollOption3(e.target.value)}
                   className="premium-input"
@@ -3492,11 +3513,11 @@ export const Chats: React.FC<ChatsProps> = ({
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
-                  OPTION 4 (OPTIONAL)
+                  {t('chat.option_4_optional')}
                 </label>
                 <input 
                   type="text" 
-                  placeholder="e.g., Hold off on rollout" 
+                  placeholder={t('chat.e_g_hold_off_on')} 
                   value={pollOption4}
                   onChange={(e) => setPollOption4(e.target.value)}
                   className="premium-input"
@@ -3504,7 +3525,7 @@ export const Chats: React.FC<ChatsProps> = ({
               </div>
 
               <button type="submit" className="premium-btn premium-btn-primary" style={{ justifyContent: 'center', marginTop: '0.5rem', fontWeight: 700 }}>
-                Launch Poll
+                {t('chat.launch_poll')}
               </button>
             </form>
           </div>
@@ -3518,7 +3539,7 @@ export const Chats: React.FC<ChatsProps> = ({
             /* Pulsing Chat Head Bubble */
             <div 
               onClick={() => setIsHudMinimized(false)}
-              title={`Expand Chat with ${activeThread.name}`}
+              title={t('chat.expand_chat_with', { v1: activeThread.name })}
               style={{
                 position: 'fixed',
                 left: `${hudPosition.x + 300}px`,
@@ -3617,21 +3638,21 @@ export const Chats: React.FC<ChatsProps> = ({
                   </div>
                   <div>
                     <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white', margin: 0 }}>{activeThread.name}</h4>
-                    <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.75)', display: 'block', lineHeight: 1 }}>Floating HUD</span>
+                    <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.75)', display: 'block', lineHeight: 1 }}>{t('chat.floating_hud')}</span>
                   </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <button 
                     onClick={() => setIsHudMinimized(true)}
-                    title="Minimize to Chat Head"
+                    title={t('chat.minimize_to_chat_head')}
                     style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1rem', fontWeight: 'bold', padding: '0.15rem' }}
                   >
                     &ndash;
                   </button>
                   <button 
                     onClick={() => setIsPoppedOut(false)}
-                    title="Dock Chat back to layout"
+                    title={t('chat.dock_chat_back_to_layout')}
                     style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center' }}
                   >
                     <Minimize2 size={12} />
@@ -3658,7 +3679,7 @@ export const Chats: React.FC<ChatsProps> = ({
                       borderRadius: '9999px',
                       border: '1px solid var(--border-color)'
                     }}>
-                      Messages are encrypted in transit
+                      {t('chat.messages_are_encrypted_in_transit')}
                     </span>
                   </div>
 
@@ -3844,14 +3865,14 @@ export const Chats: React.FC<ChatsProps> = ({
 
                   <form onSubmit={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', position: 'relative' }}>
                     {/* Plus Menu Button & Popover */}
-                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <div ref={plusMobileRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                       <button
                         type="button"
                         onClick={() => {
                           setShowPlusMenu(!showPlusMenu);
                           setShowWhisperPicker(false);
                         }}
-                        title="Add media & options"
+                        title={t('chat.add_media_options')}
                         style={{
                           background: 'none',
                           border: 'none',
@@ -3896,7 +3917,7 @@ export const Chats: React.FC<ChatsProps> = ({
                             className="plus-menu-item"
                           >
                             <Smile size={14} />
-                            <span>Emojis</span>
+                            <span>{t('chat.emojis')}</span>
                           </button>
                           <button
                             type="button"
@@ -3907,7 +3928,7 @@ export const Chats: React.FC<ChatsProps> = ({
                             className="plus-menu-item"
                           >
                             <Paperclip size={14} />
-                            <span>Attachment</span>
+                            <span>{t('chat.attachment')}</span>
                           </button>
                           <button
                             type="button"
@@ -3918,7 +3939,7 @@ export const Chats: React.FC<ChatsProps> = ({
                             className="plus-menu-item"
                           >
                             <BarChart2 size={14} />
-                            <span>Create Poll</span>
+                            <span>{t('chat.create_poll')}</span>
                           </button>
                           <button
                             type="button"
@@ -3929,7 +3950,7 @@ export const Chats: React.FC<ChatsProps> = ({
                             className="plus-menu-item"
                           >
                             <Paintbrush size={14} />
-                            <span>Doodle Board</span>
+                            <span>{t('chat.doodle_board')}</span>
                           </button>
                         </div>
                       )}
@@ -3937,7 +3958,7 @@ export const Chats: React.FC<ChatsProps> = ({
 
                     {/* Globe & Lock Icons for Public/Whisper modes */}
                     {activeThread.isGroup && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', position: 'relative' }}>
+                      <div ref={whisperMobileRef} style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', position: 'relative' }}>
                         <button
                           type="button"
                           onClick={() => {
@@ -3945,7 +3966,7 @@ export const Chats: React.FC<ChatsProps> = ({
                             setShowWhisperPicker(false);
                             setShowPlusMenu(false);
                           }}
-                          title="Send Public Message"
+                          title={t('chat.send_public_message')}
                           style={{
                             background: 'none',
                             border: 'none',
@@ -3968,7 +3989,7 @@ export const Chats: React.FC<ChatsProps> = ({
                             setShowWhisperPicker(!showWhisperPicker);
                             setShowPlusMenu(false);
                           }}
-                          title="Send Private Whisper"
+                          title={t('chat.send_private_whisper')}
                           style={{
                             background: 'none',
                             border: 'none',
@@ -4016,7 +4037,7 @@ export const Chats: React.FC<ChatsProps> = ({
                               borderBottom: '1px solid var(--border-color)',
                               marginBottom: '0.2rem'
                             }}>
-                              Whisper Private To:
+                              {t('chat.whisper_private_to')}
                             </div>
                             {activeGroupMembers
                               .filter(member => member.id !== user?.id)
@@ -4059,7 +4080,7 @@ export const Chats: React.FC<ChatsProps> = ({
                               ))}
                             {activeGroupMembers.filter(member => member.id !== user?.id).length === 0 && (
                               <div style={{ padding: '0.4rem', fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                                No other members
+                                {t('chat.no_other_members')}
                               </div>
                             )}
                           </div>
@@ -4070,7 +4091,7 @@ export const Chats: React.FC<ChatsProps> = ({
                     <input 
                       type="text" 
                       placeholder={whisperTargetUserId 
-                        ? `Whisper secretly to ${activeGroupMembers.find(m => m.id === whisperTargetUserId)?.name}...` 
+                        ? t('chat.whisper_secretly_to', { v1: activeGroupMembers.find(m => m.id === whisperTargetUserId)?.name }) 
                         : `Write message...`}
                       value={chatInput}
                       onChange={(e) => {

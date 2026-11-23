@@ -117,28 +117,28 @@ export function LiveNotesPad({ meetingId, myKey }: { meetingId: string; myKey: s
   };
 
   if (!loaded) {
-    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.5rem 0' }}>Loading the shared notes...</p>;
+    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.5rem 0' }}>{t('c2b.loading_the_shared_notes')}</p>;
   }
   if (notConfigured) {
-    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.5rem 0' }}>Shared notes need the Phase C2b database setup first. Ask the host to run giinmeet_phaseC2b.sql in Supabase.</p>;
+    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.5rem 0' }}>{t('c2b.shared_notes_need_the_phase')}</p>;
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', minHeight: 0, flex: 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <StickyNote size={15} color="var(--color-accent)" />
-        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>SHARED NOTES PAD</span>
+        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>{t('c2b.shared_notes_pad')}</span>
         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
           {saveState === 'saving' ? 'Saving...' : saveState === 'unsaved' ? 'Typing...' : 'Saved'}
         </span>
       </div>
       <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        Everyone in the meeting types in this same page. It is saved to the library when the meeting ends.
+        {t('c2b.everyone_in_the_meeting_types')}
       </p>
       <textarea
         value={body}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder="Type the shared notes here..."
-        aria-label="Shared notes pad"
+        placeholder={t('c2b.type_the_shared_notes_here')}
+        aria-label={t('c2b.shared_notes_pad_2')}
         style={{
           flex: 1, minHeight: '220px', resize: 'vertical',
           padding: '0.75rem', borderRadius: '8px',
@@ -148,7 +148,7 @@ export function LiveNotesPad({ meetingId, myKey }: { meetingId: string; myKey: s
       />
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <button onClick={handleSaveToLibrary} className="premium-btn premium-btn-secondary" style={{ fontSize: '0.8rem', padding: '0.45rem 0.7rem' }}>
-          Save to library now
+          {t('c2b.save_to_library_now')}
         </button>
         {libraryState && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{libraryState}</span>}
       </div>
@@ -201,11 +201,11 @@ export function DocumentViewerPanel({ meetingId, isAdmin, canTurnExtra }: { meet
     const isPdf = ext === 'pdf';
     const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
     if (!isPdf && !isImage) {
-      setError('That file cannot be shown here. Export slides as PDF first, then upload the PDF.');
+      setError(t('c2b.that_file_cannot_be_shown'));
       return;
     }
     if (file.size > 25 * 1024 * 1024) {
-      setError('That file is larger than 25 MB.');
+      setError(t('c2b.that_file_is_larger_than'));
       return;
     }
     setError('');
@@ -237,17 +237,17 @@ export function DocumentViewerPanel({ meetingId, isAdmin, canTurnExtra }: { meet
   };
 
   if (notConfigured) {
-    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>The document viewer needs the Phase C2b database setup first. Ask the host to run giinmeet_phaseC2b.sql in Supabase.</p>;
+    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{t('c2b.the_document_viewer_needs_the')}</p>;
   }
   if (!doc) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <FileText size={15} color="var(--color-accent)" />
-          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>DOCUMENT VIEWER</span>
+          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>{t('c2b.document_viewer')}</span>
         </div>
         <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-          Show slides or a PDF to everyone at once, sharper and lighter than sharing a whole screen. The host turns the pages.
+          {t('c2b.show_slides_or_a_pdf')}
         </p>
         {isAdmin ? (
           <label className="premium-btn premium-btn-primary" style={{ fontSize: '0.8rem', padding: '0.5rem 0.7rem', cursor: 'pointer', justifyContent: 'center' }}>
@@ -255,9 +255,9 @@ export function DocumentViewerPanel({ meetingId, isAdmin, canTurnExtra }: { meet
             <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp" onChange={handleUpload} disabled={uploading} style={{ display: 'none' }} />
           </label>
         ) : (
-          <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>No document is open right now. The host opens one when it is time.</p>
+          <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('c2b.no_document_is_open_right')}</p>
         )}
-        <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>Slide decks (PowerPoint, Keynote) need a PDF export first, the viewer shows PDF and images.</p>
+        <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('c2b.slide_decks_powerpoint_keynote_need')}</p>
         {error && <p style={{ margin: 0, fontSize: '0.75rem', color: '#F87171' }}>{error}</p>}
       </div>
     );
@@ -271,7 +271,7 @@ export function DocumentViewerPanel({ meetingId, isAdmin, canTurnExtra }: { meet
         <FileText size={15} color="var(--color-accent)" />
         <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{doc.title}</span>
         {isAdmin && (
-          <button onClick={() => { giinApi.closeDocViewer(meetingId).then(() => setDoc(null)).catch(() => {}); }} aria-label="Close document" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}>
+          <button onClick={() => { giinApi.closeDocViewer(meetingId).then(() => setDoc(null)).catch(() => {}); }} aria-label={t('c2b.close_document')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}>
             <X size={15} />
           </button>
         )}
@@ -285,14 +285,14 @@ export function DocumentViewerPanel({ meetingId, isAdmin, canTurnExtra }: { meet
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <button onClick={() => turnPage(doc.currentPage - 1)} disabled={!canTurn || doc.currentPage <= 1 || turning} className="premium-btn premium-btn-secondary" style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem', opacity: (!canTurn || doc.currentPage <= 1) ? 0.5 : 1 }}>
-          <ChevronLeft size={14} /> Prev
+          <ChevronLeft size={14} /> {t('c2b.prev')}
         </button>
         <span style={{ fontSize: '0.8rem', color: 'white', flex: 1, textAlign: 'center' }}>Page {doc.currentPage} of {doc.pageCount}</span>
         <button onClick={() => turnPage(doc.currentPage + 1)} disabled={!canTurn || doc.currentPage >= doc.pageCount || turning} className="premium-btn premium-btn-secondary" style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem', opacity: (!canTurn || doc.currentPage >= doc.pageCount) ? 0.5 : 1 }}>
-          Next <ChevronRight size={14} />
+          {t('c2b.next')} <ChevronRight size={14} />
         </button>
       </div>
-      {!canTurn && <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>The host turns the pages. Yours stay in step automatically.</p>}
+      {!canTurn && <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('c2b.the_host_turns_the_pages')}</p>}
       {isAdmin && (
         <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer' }}>
           <input
@@ -303,7 +303,7 @@ export function DocumentViewerPanel({ meetingId, isAdmin, canTurnExtra }: { meet
               if (res?.ok) setDoc((d: any) => d ? { ...d, viewersCanTurn: e.target.checked } : d);
             }}
           />
-          Let viewers turn pages too
+          {t('c2b.let_viewers_turn_pages_too')}
         </label>
       )}
       {error && <p style={{ margin: 0, fontSize: '0.75rem', color: '#F87171' }}>{error}</p>}
@@ -340,7 +340,7 @@ export function InterpretationPanel({ meetingId, isAdmin, myKey, participants, s
   const others = participants.filter((p) => p.key !== myKey);
 
   const handleStart = async () => {
-    if (!pickKey) { setError('Pick who will interpret.'); return; }
+    if (!pickKey) { setError(t('c2b.pick_who_will_interpret')); return; }
     setBusy(true);
     setError('');
     try {
@@ -357,13 +357,13 @@ export function InterpretationPanel({ meetingId, isAdmin, myKey, participants, s
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <Languages size={15} color="var(--color-accent)" />
-        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>LIVE INTERPRETATION</span>
+        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>{t('c2b.live_interpretation')}</span>
       </div>
       <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        A human interpreter speaks on a second channel. Pick which voice you hear, the room or the interpreter.
+        {t('c2b.a_human_interpreter_speaks_on')}
       </p>
       {!state?.active ? (
-        <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>No interpreter right now. The host starts one when it is needed.</p>
+        <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>{t('c2b.no_interpreter_right_now_the')}</p>
       ) : (
         <>
           <p style={{ margin: 0, fontSize: '0.8rem', color: 'white' }}>
@@ -371,7 +371,7 @@ export function InterpretationPanel({ meetingId, isAdmin, myKey, participants, s
           </p>
           {amInterpreter ? (
             <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-accent)' }}>
-              You are the interpreter. You hear the original room so you can keep interpreting.
+              {t('c2b.you_are_the_interpreter_you')}
             </p>
           ) : (
             <div style={{ display: 'flex', gap: '0.4rem' }}>
@@ -380,43 +380,43 @@ export function InterpretationPanel({ meetingId, isAdmin, myKey, participants, s
                 className="premium-btn premium-btn-secondary"
                 style={{ flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '0.45rem', backgroundColor: listenMode === 'original' ? 'var(--color-primary)' : undefined, color: listenMode === 'original' ? 'white' : undefined }}
               >
-                <Volume2 size={14} /> Original room
+                <Volume2 size={14} /> {t('c2b.original_room')}
               </button>
               <button
                 onClick={() => onListenModeChange('interpretation')}
                 className="premium-btn premium-btn-secondary"
                 style={{ flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '0.45rem', backgroundColor: listenMode === 'interpretation' ? 'var(--color-primary)' : undefined, color: listenMode === 'interpretation' ? 'white' : undefined }}
               >
-                <Headphones size={14} /> Interpreter
+                <Headphones size={14} /> {t('c2b.interpreter')}
               </button>
             </div>
           )}
           {listenMode === 'interpretation' && !amInterpreter && (
-            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>You hear the interpreter only. The other voices are muted for you, not for anyone else.</p>
+            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('c2b.you_hear_the_interpreter_only')}</p>
           )}
           {isAdmin && (
             <button onClick={async () => { setBusy(true); await giinApi.stopInterpretation(meetingId); onChanged(); setBusy(false); }} disabled={busy} className="premium-btn premium-btn-secondary" style={{ fontSize: '0.8rem', padding: '0.45rem 0.7rem', alignSelf: 'flex-start' }}>
-              Stop interpretation
+              {t('c2b.stop_interpretation')}
             </button>
           )}
         </>
       )}
       {isAdmin && !state?.active && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', borderTop: '1px solid #1E293B', paddingTop: '0.6rem' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Host: pick an interpreter</span>
-          <select value={pickKey} onChange={(e) => setPickKey(e.target.value)} aria-label="Pick an interpreter" style={{ height: '30px', fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px' }}>
-            <option value="" style={{ color: 'black' }}>Choose a person...</option>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('c2b.host_pick_an_interpreter')}</span>
+          <select value={pickKey} onChange={(e) => setPickKey(e.target.value)} aria-label={t('c2b.pick_an_interpreter')} style={{ height: '30px', fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px' }}>
+            <option value="" style={{ color: 'black' }}>{t('c2b.choose_a_person')}</option>
             {others.map((p) => (
               <option key={p.key} value={p.key} style={{ color: 'black' }}>{p.name}</option>
             ))}
           </select>
-          <select value={pickLang} onChange={(e) => setPickLang(e.target.value)} aria-label="Interpret into language" style={{ height: '30px', fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px' }}>
+          <select value={pickLang} onChange={(e) => setPickLang(e.target.value)} aria-label={t('c2b.interpret_into_language')} style={{ height: '30px', fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px' }}>
             {Object.entries(LANG_LABEL).map(([code, label]) => (
               <option key={code} value={code} style={{ color: 'black' }}>{label}</option>
             ))}
           </select>
           <button onClick={handleStart} disabled={busy || !pickKey} className="premium-btn premium-btn-primary" style={{ fontSize: '0.8rem', padding: '0.5rem', justifyContent: 'center' }}>
-            Start interpretation
+            {t('c2b.start_interpretation')}
           </button>
         </div>
       )}
@@ -462,25 +462,25 @@ export function RemoteControlPanel({ meetingId, myKey, sharerKey, sharerName, st
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.6rem 0.75rem', backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid #1E293B', borderRadius: '8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <Monitor size={14} color="var(--color-accent)" />
-        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>REMOTE CONTROL</span>
+        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>{t('c2b.remote_control')}</span>
       </div>
       {amSharer ? (
         <>
           <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
             {status?.grant
-              ? `${status.grant.controller_name} is controlling your shared screen. Take it back any time.`
+              ? t('c2b.is_controlling_your_shared_screen', { v1: status.grant.controller_name })
               : 'Nobody is controlling your screen. You approve anyone who asks.'}
           </p>
           {pendingForMe.map((r) => (
             <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <span style={{ fontSize: '0.8rem', color: 'white', flex: 1 }}>{r.controller_name} asks to control your screen</span>
-              <button onClick={() => act(() => giinApi.remoteControl(meetingId, 'grant', { controllerKey: r.controller_key }))} disabled={busy} className="premium-btn premium-btn-primary" style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem' }}>Allow</button>
-              <button onClick={() => act(() => giinApi.remoteControl(meetingId, 'deny', { controllerKey: r.controller_key }))} disabled={busy} className="premium-btn premium-btn-secondary" style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem' }}>Deny</button>
+              <button onClick={() => act(() => giinApi.remoteControl(meetingId, 'grant', { controllerKey: r.controller_key }))} disabled={busy} className="premium-btn premium-btn-primary" style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem' }}>{t('c2b.allow')}</button>
+              <button onClick={() => act(() => giinApi.remoteControl(meetingId, 'deny', { controllerKey: r.controller_key }))} disabled={busy} className="premium-btn premium-btn-secondary" style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem' }}>{t('c2b.deny')}</button>
             </div>
           ))}
           {status?.grant && (
             <button onClick={() => act(() => giinApi.remoteControl(meetingId, 'revoke', { controllerKey: status.grant!.controller_key }))} disabled={busy} className="premium-btn premium-btn-secondary" style={{ fontSize: '0.8rem', padding: '0.45rem 0.6rem', alignSelf: 'flex-start' }}>
-              Take control back
+              {t('c2b.take_control_back')}
             </button>
           )}
         </>
@@ -489,9 +489,9 @@ export function RemoteControlPanel({ meetingId, myKey, sharerKey, sharerName, st
           <p style={{ margin: 0, fontSize: '0.75rem', color: 'white', lineHeight: 1.45 }}>
             You are controlling {sharerName}&#39;s shared screen. Move your pointer over the shared screen to point, click to act on it.
           </p>
-          <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>Control works on the shared screen pointer and on GiinMeet shared pages (the document viewer and the notes pad). It never touches the sharer&#39;s own computer.</p>
+          <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('c2b.control_works_on_the_shared')}</p>
           <button onClick={() => act(() => giinApi.remoteControl(meetingId, 'revoke'))} disabled={busy} className="premium-btn premium-btn-secondary" style={{ fontSize: '0.8rem', padding: '0.45rem 0.6rem', alignSelf: 'flex-start' }}>
-            Stop controlling
+            {t('c2b.stop_controlling')}
           </button>
         </>
       ) : (
@@ -539,13 +539,13 @@ export function VoiceNoteButton({ meetingId, disabled, onSent }: { meetingId: st
     try { rec.stop(); } catch (e) { return; }
     const blob = await done;
     const duration = Math.min(60, Math.max(1, Math.round((Date.now() - startRef.current) / 1000)));
-    if (blob.size === 0) { setError('Nothing was recorded.'); return; }
+    if (blob.size === 0) { setError(t('c2b.nothing_was_recorded')); return; }
     setBusy(true);
     setError('');
     try {
       const req: any = await giinApi.requestVoiceNoteUpload(meetingId, blob.size, duration);
       const res = await fetch(req.uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'audio/webm' }, body: blob });
-      if (!res.ok) throw new Error('The voice note upload did not go through.');
+      if (!res.ok) throw new Error(t('c2b.the_voice_note_upload_did'));
       const confirmed: any = await giinApi.confirmVoiceNote(meetingId, req.storagePath, duration);
       if (confirmed?.note) onSent(confirmed.note);
     } catch (e: any) {
@@ -576,14 +576,14 @@ export function VoiceNoteButton({ meetingId, disabled, onSent }: { meetingId: st
         if (s >= 60) void stopAndSend();
       }, 500);
     } catch (e) {
-      setError('Microphone access is needed to record a voice note.');
+      setError(t('c2b.microphone_access_is_needed_to'));
     }
   };
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
 
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }} title="Hold to record a voice note (up to 60 seconds). It plays only on each listener's own device.">
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }} title={t('c2b.hold_to_record_a_voice')}>
       {recording && <span style={{ fontSize: '0.7rem', color: '#F87171', fontWeight: 700 }}>{seconds}s / 60s</span>}
       <button
         type="button"
@@ -592,7 +592,7 @@ export function VoiceNoteButton({ meetingId, disabled, onSent }: { meetingId: st
         onPointerUp={() => void stopAndSend()}
         onPointerLeave={() => { if (recording) void stopAndSend(); }}
         onContextMenu={(e) => e.preventDefault()}
-        aria-label="Hold to record a voice note"
+        aria-label={t('c2b.hold_to_record_a_voice_2')}
         style={{
           background: recording ? '#EF4444' : '#1E293B', border: 'none', borderRadius: '4px',
           width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center',

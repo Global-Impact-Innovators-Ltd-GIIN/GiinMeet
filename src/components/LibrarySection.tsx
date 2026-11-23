@@ -126,7 +126,7 @@ export const LibrarySection: React.FC = () => {
               </div>
             )}
             <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.6rem 0 0' }}>
-              Certificates download from the meeting record on the dashboard.
+              {t('lib.certificates_download_from_record')}
             </p>
           </div>
 

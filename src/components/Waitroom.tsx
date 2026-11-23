@@ -422,7 +422,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       console.error('Could not join the waiting room:', err);
       // Round 9 (9A): the rejoin route refused a removed participant.
       if (String(err?.message || '').startsWith('REMOVED')) { setBlocked('removed'); return; }
-      setErrorMsg(`Could not join the waiting room: ${err?.message || 'please check your connection and try again.'}`);
+      setErrorMsg(t('wait.could_not_join_the_waiting', { v1: err?.message || 'please check your connection and try again.' }));
     } finally {
       setLoading(false);
     }
@@ -472,10 +472,10 @@ export const Waitroom: React.FC<WaitroomProps> = ({
 
   if (blocked) {
     const copy = blocked === 'removed'
-      ? { title: 'You were removed from this meeting', text: 'The host removed you. You can\'t rejoin with this link unless the host invites you back.' }
+      ? { title: t('wait.you_were_removed_from_this'), text: t('wait.the_host_removed_you_you') }
       : blocked === 'expired'
-      ? { title: 'This meeting link has expired', text: 'This link is no longer valid. Ask the host for a new link.' }
-      : { title: 'This meeting has ended', text: 'The meeting has ended. The invite link no longer works.' };
+      ? { title: t('wait.this_meeting_link_has_expired'), text: t('wait.this_link_is_no_longer') }
+      : { title: t('wait.this_meeting_has_ended'), text: t('wait.the_meeting_has_ended_the') };
     return (
       <div className="flex-center" style={{ minHeight: '80vh', padding: '2rem' }}>
         <div className="glass-panel" style={{ maxWidth: '400px', width: '100%', padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -488,7 +488,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           </div>
           <button onClick={onBack} className="premium-btn premium-btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
             <ArrowLeft size={16} />
-            <span>Go Back</span>
+            <span>{t('wait.go_back')}</span>
           </button>
         </div>
       </div>
@@ -503,12 +503,12 @@ export const Waitroom: React.FC<WaitroomProps> = ({
             <ShieldAlert size={28} />
           </div>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', marginBottom: '0.5rem' }}>Connection Denied</h3>
+            <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', marginBottom: '0.5rem' }}>{t('wait.connection_denied')}</h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{errorMsg}</p>
           </div>
           <button onClick={onBack} className="premium-btn premium-btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
             <ArrowLeft size={16} />
-            <span>Go Back</span>
+            <span>{t('wait.go_back')}</span>
           </button>
           <button
             onClick={() => {
@@ -518,7 +518,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
             className="premium-btn premium-btn-primary"
             style={{ width: '100%', justifyContent: 'center' }}
           >
-            <span>Try Again</span>
+            <span>{t('wait.try_again')}</span>
           </button>
         </div>
       </div>
@@ -536,11 +536,11 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const countdownText = (() => {
     if (!Number.isFinite(startTimeMs)) return '';
     const diffMin = Math.round((startTimeMs - nowMs) / 60000);
-    if (diffMin > 60) return `Starts in ${Math.floor(diffMin / 60)}h ${diffMin % 60}m`;
-    if (diffMin > 0) return `Starts in ${diffMin} min`;
+    if (diffMin > 60) return t('wait.starts_in_hours', { v1: Math.floor(diffMin / 60), v2: diffMin % 60 });
+    if (diffMin > 0) return t('wait.starts_in_min', { v1: diffMin });
     if (diffMin === 0) return 'Starting now';
     const agoMin = -diffMin;
-    if (agoMin < 60) return `Started ${agoMin} min ago`;
+    if (agoMin < 60) return t('wait.started_min_ago', { v1: agoMin });
     return `Started at ${new Date(startTimeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   })();
 
@@ -568,7 +568,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           </h2>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: {meetingId.slice(0, 8)}...</span>
           {isWhiteLabel && (
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>powered by GiinMeet</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>{t('wait.powered_by_giinmeet')}</div>
           )}
         </div>
 
@@ -583,7 +583,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
             )}
             {preview.agenda.length > 0 && (
               <>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Agenda</span>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('brief.agenda')}</span>
                 <ol style={{ margin: 0, paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.45 }}>
                   {preview.agenda.slice(0, 5).map((item) => (
                     <li key={item.id}>{item.startTime && item.endTime ? `${item.startTime} to ${item.endTime} · ` : ''}{item.text}</li>
@@ -595,7 +595,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
               </>
             )}
             {preview.e2eeEnabled && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>End-to-end encrypted media: audio and video are encrypted between participants with the meeting passcode as the key. Chat and files are not covered.</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('wait.end_to_end_encrypted_media')}</span>
             )}
           </div>
         )}
@@ -605,12 +605,12 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           <form onSubmit={handleVerifyPasscode} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
-                Enter Meeting Passcode
+                {t('wait.enter_meeting_passcode')}
               </label>
               <input 
                 type="text" 
                 className="premium-input" 
-                placeholder="e.g. AB12CD" 
+                placeholder={t('wait.e_g_ab12cd')} 
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value.toUpperCase())}
                 required
@@ -625,10 +625,10 @@ export const Waitroom: React.FC<WaitroomProps> = ({
 
             <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
               <button type="button" onClick={onBack} className="premium-btn premium-btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>
-                Cancel
+                {t('common.cancel')}
               </button>
               <button type="submit" className="premium-btn premium-btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-                Verify Code
+                {t('wait.verify_code')}
               </button>
             </div>
           </form>
@@ -641,42 +641,42 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           <form onSubmit={handleNameSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
-                Enter Your Display Name
+                {t('wait.enter_your_display_name')}
               </label>
               <input 
                 type="text" 
                 className="premium-input" 
-                placeholder="Your Name (e.g. John Doe)" 
+                placeholder={t('wait.your_name_e_g_john')} 
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 required
                 style={{ height: '46px' }}
               />
               <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                This is how other participants and the host will identify you in the room. No account needed, just your name.
+                {t('wait.this_is_how_other_participants')}
               </span>
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
-                Organisation (optional)
+                {t('wait.organisation_optional')}
               </label>
               <input
                 type="text"
                 className="premium-input"
-                placeholder="Your company, school or church"
+                placeholder={t('wait.your_company_school_or_church')}
                 value={organisation}
                 onChange={(e) => setOrganisation(e.target.value)}
                 maxLength={80}
                 style={{ height: '46px' }}
               />
               <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                Shown as a small badge next to your name in the meeting. Leave it blank for no badge.
+                {t('wait.shown_as_a_small_badge')}
               </span>
             </div>
 
             <button type="submit" className="premium-btn premium-btn-accent" style={{ width: '100%', justifyContent: 'center', height: '46px' }}>
               <UserPlus size={18} />
-              <span>Ask to Join Meeting</span>
+              <span>{t('wait.ask_to_join_meeting')}</span>
             </button>
           </form>
         )}
@@ -706,15 +706,15 @@ export const Waitroom: React.FC<WaitroomProps> = ({
 
             <div>
               <h3 style={{ fontSize: '1.2rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', marginBottom: '0.5rem' }}>
-                Waitroom Access Granted
+                {t('wait.waitroom_access_granted')}
               </h3>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '300px', lineHeight: 1.45 }}>
-                Wait for Host to admit you... Please don't close this window.
+                {t('wait.wait_for_host_to_admit')}
               </p>
             </div>
 
             <div style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Connected as <strong style={{ color: 'var(--text-main)' }}>{displayName}</strong>
+              {t('wait.connected_as')} <strong style={{ color: 'var(--text-main)' }}>{displayName}</strong>
             </div>
 
             {countdownText && (
@@ -723,7 +723,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
 
             {preview && preview.agenda.length > 0 && (
               <div style={{ width: '100%', textAlign: 'left', padding: '0.9rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Agenda</span>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('brief.agenda')}</span>
                 <ol style={{ margin: '0.4rem 0 0 0', paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.45 }}>
                   {preview.agenda.slice(0, 5).map((item) => (
                     <li key={item.id}>{item.startTime && item.endTime ? `${item.startTime} to ${item.endTime} · ` : ''}{item.text}</li>
@@ -734,14 +734,14 @@ export const Waitroom: React.FC<WaitroomProps> = ({
 
             {lobbyMessage && (
               <div style={{ width: '100%', textAlign: 'left', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--color-accent)', backgroundColor: 'rgba(59, 130, 246, 0.08)', fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.45 }}>
-                <strong>Message from the host:</strong> {lobbyMessage}
+                <strong>{t('wait.message_from_the_host')}</strong> {lobbyMessage}
               </div>
             )}
 
             {/* Phase D (38c): knock, one line to the host. */}
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {knockSent ? (
-                <span style={{ fontSize: '0.8rem', color: '#10B981', fontWeight: 600 }}>Knock sent. The host can see your message.</span>
+                <span style={{ fontSize: '0.8rem', color: '#10B981', fontWeight: 600 }}>{t('wait.knock_sent_the_host_can')}</span>
               ) : (
                 <>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -750,7 +750,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
                       value={knockMessage}
                       onChange={(e) => setKnockMessage(e.target.value)}
                       maxLength={140}
-                      placeholder="Knock: one line, for example I am here for the interview"
+                      placeholder={t('wait.knock_one_line_for_example')}
                       className="premium-input"
                       style={{ flex: 1, height: '40px', fontSize: '0.85rem' }}
                     />
@@ -760,7 +760,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
                       className="premium-btn premium-btn-secondary"
                       style={{ height: '40px', padding: '0 0.9rem', fontSize: '0.85rem', fontWeight: 700, cursor: knockMessage.trim() ? 'pointer' : 'not-allowed', opacity: knockMessage.trim() ? 1 : 0.5 }}
                     >
-                      Knock
+                      {t('wait.knock')}
                     </button>
                   </div>
                   {knockError && (
@@ -771,7 +771,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
             </div>
 
             <button onClick={onBack} className="premium-btn premium-btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
-              Leave Waitroom
+              {t('wait.leave_waitroom')}
             </button>
           </div>
         )}

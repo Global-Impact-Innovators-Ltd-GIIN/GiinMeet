@@ -30,9 +30,9 @@ interface Props {
 }
 
 const STARTERS: Omit<MeetingTemplate, 'id'>[] = [
-  { name: 'Team standup', title: 'Team standup', duration_minutes: 30, require_waiting_room: false, passcode: null, attendee_emails: [] },
+  { name: 'Team standup', title: t('dash.team_standup'), duration_minutes: 30, require_waiting_room: false, passcode: null, attendee_emails: [] },
   { name: 'Class', title: 'Class', duration_minutes: 60, require_waiting_room: true, passcode: null, attendee_emails: [] },
-  { name: 'Client call', title: 'Client call', duration_minutes: 60, require_waiting_room: true, passcode: null, attendee_emails: [] },
+  { name: 'Client call', title: t('dash.client_call'), duration_minutes: 60, require_waiting_room: true, passcode: null, attendee_emails: [] },
 ];
 
 export const TemplatesPanel: React.FC<Props> = ({
@@ -78,7 +78,7 @@ export const TemplatesPanel: React.FC<Props> = ({
   const handleSave = async () => {
     const name = saveName.trim();
     if (!name) {
-      setNote('Give the template a name first.');
+      setNote(t('tpl.give_the_template_a_name'));
       return;
     }
     setSaving(true);
@@ -123,7 +123,7 @@ export const TemplatesPanel: React.FC<Props> = ({
     const result: any = await giinApi.deleteTemplate(id);
     setDeletingId(null);
     if (result?.ok) setTemplates((prev) => prev.filter((t) => t.id !== id));
-    else setNote('That template could not be deleted.');
+    else setNote(t('tpl.that_template_could_not_be'));
   };
 
   const durationLabel = (mins: number) =>
@@ -134,7 +134,7 @@ export const TemplatesPanel: React.FC<Props> = ({
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
         <LayoutTemplate size={18} color="var(--color-accent)" />
         <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)', margin: 0, flex: '1 1 auto' }}>
-          Meeting templates
+          {t('tpl.meeting_templates')}
         </h3>
         <button
           type="button"
@@ -142,11 +142,11 @@ export const TemplatesPanel: React.FC<Props> = ({
           style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
           onClick={() => setShowSave((v) => !v)}
         >
-          <Plus size={14} /> Save current setup
+          <Plus size={14} /> {t('tpl.save_current_setup')}
         </button>
       </div>
       <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0.5rem 0 0' }}>
-        Save a setup once, then start it in one tap. No filling in the same details every time.
+        {t('tpl.save_a_setup_once_then')}
       </p>
 
       {showSave && (
@@ -155,7 +155,7 @@ export const TemplatesPanel: React.FC<Props> = ({
             type="text"
             value={saveName}
             onChange={(e) => setSaveName(e.target.value)}
-            placeholder="Template name, e.g. Team standup"
+            placeholder={t('tpl.template_name_e_g_team')}
             maxLength={80}
             style={{ flex: '1 1 200px', minWidth: 0, padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem' }}
           />
@@ -177,12 +177,12 @@ export const TemplatesPanel: React.FC<Props> = ({
       )}
 
       {loading ? (
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>Loading templates…</p>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>{t('tpl.loading_templates')}</p>
       ) : templates.length === 0 ? (
         <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {note && <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{note}</p>}
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-            No templates yet. Start with one of these, or save your current setup above.
+            {t('tpl.no_templates_yet_start_with')}
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {STARTERS.map((s) => (
@@ -223,7 +223,7 @@ export const TemplatesPanel: React.FC<Props> = ({
                 style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
                 onClick={() => onStartTemplate(t)}
               >
-                <Play size={13} /> Start now
+                <Play size={13} /> {t('tpl.start_now')}
               </button>
               <button
                 type="button"
@@ -231,14 +231,14 @@ export const TemplatesPanel: React.FC<Props> = ({
                 style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
                 onClick={() => onScheduleTemplate(t)}
               >
-                <CalendarPlus size={13} /> Schedule
+                <CalendarPlus size={13} /> {t('schedule.title')}
               </button>
               <button
                 type="button"
                 className="premium-btn premium-btn-secondary"
                 style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem', color: '#EF4444' }}
                 disabled={deletingId === t.id}
-                title="Delete this template"
+                title={t('tpl.delete_this_template')}
                 onClick={() => void handleDelete(t.id)}
               >
                 <Trash2 size={14} />

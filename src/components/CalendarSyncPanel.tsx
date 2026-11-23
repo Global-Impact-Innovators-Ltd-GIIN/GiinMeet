@@ -188,7 +188,7 @@ export const CalendarSyncPanel: React.FC<Props> = ({ meetings }) => {
             style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
             onClick={() => void handleDisconnect(provider)}
           >
-            Disconnect
+            {t('cal.disconnect')}
           </button>
         ) : (
           <button
@@ -209,13 +209,13 @@ export const CalendarSyncPanel: React.FC<Props> = ({ meetings }) => {
     <div className="glass-panel" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
         <Calendar size={18} color="var(--color-accent)" />
-        <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)', margin: 0 }}>Calendar sync</h3>
+        <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)', margin: 0 }}>{t('cal.calendar_sync')}</h3>
       </div>
       <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0.5rem 0 0.25rem' }}>
-        Meetings you schedule appear on your calendar, and a time moved on your calendar can come back here.
+        {t('cal.meetings_you_schedule_appear_on')}
       </p>
       {loading ? (
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Checking your calendars…</p>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('cal.checking_your_calendars')}</p>
       ) : (
         <>
           {providerRow('google', 'Google Calendar')}
@@ -227,15 +227,12 @@ export const CalendarSyncPanel: React.FC<Props> = ({ meetings }) => {
           )}
           {!configured.google && !configured.outlook && !statusNote && (
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.5rem 0 0', lineHeight: 1.5 }}>
-              Calendar sync needs setup: a Google OAuth client or an Azure app registration,
-              with its ID and secret in Vercel. Until then, meetings can still be added to a
-              calendar one at a time from the invite panel.
+              {t('cal.calendar_sync_needs_setup_a')}
             </p>
           )}
           {connections.length > 0 && !tokensEncrypted && (
             <p style={{ fontSize: '0.8rem', color: '#F59E0B', margin: '0.5rem 0 0', lineHeight: 1.5 }}>
-              Calendar tokens are stored without extra encryption. Set GIINMEET_TOKEN_ENCRYPTION_KEY
-              in Vercel to encrypt them.
+              {t('cal.calendar_tokens_are_stored_without')}
             </p>
           )}
           {connections.length > 0 && (
@@ -259,7 +256,7 @@ export const CalendarSyncPanel: React.FC<Props> = ({ meetings }) => {
                       style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', marginLeft: '0.5rem' }}
                       onClick={() => window.location.reload()}
                     >
-                      Refresh list
+                      {t('cal.refresh_list')}
                     </button>
                   </span>
                 )}
@@ -269,7 +266,7 @@ export const CalendarSyncPanel: React.FC<Props> = ({ meetings }) => {
               )}
               {changed.length > 0 && (
                 <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>Moved on your calendar</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>{t('cal.moved_on_your_calendar')}</span>
                   {changed.map((e: any) => {
                     const local = meetings.find((m) => m.id === e.meetingId);
                     return (
@@ -288,7 +285,7 @@ export const CalendarSyncPanel: React.FC<Props> = ({ meetings }) => {
                     disabled={applying}
                     onClick={() => void handleApplyChanges()}
                   >
-                    {applying ? 'Applying…' : `Apply ${changed.length} change${changed.length === 1 ? '' : 's'} to GiinMeet`}
+                    {applying ? 'Applying…' : t('cal.apply_change_to_giinmeet', { v1: changed.length, v2: changed.length === 1 ? '' : 's' })}
                   </button>
                 </div>
               )}

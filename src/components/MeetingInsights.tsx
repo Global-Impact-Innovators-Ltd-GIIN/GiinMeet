@@ -79,19 +79,19 @@ export default function MeetingInsights({ meetingId }: { meetingId: string }) {
   }, [meetingId]);
 
   if (loading) {
-    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Loading attendance…</p>;
+    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('insight.loading_attendance')}</p>;
   }
   if (source === 'none') {
     return (
       <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-        No attendance was recorded for this meeting.
+        {t('insight.no_attendance_was_recorded_for')}
       </p>
     );
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
       <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-        ATTENDANCE AND ENGAGEMENT
+        {t('insight.attendance_and_engagement')}
       </span>
       <p style={{ fontSize: '0.82rem', margin: 0, lineHeight: 1.5 }}>
         {summary.joined} {summary.joined === 1 ? 'person' : 'people'} joined
@@ -105,7 +105,7 @@ export default function MeetingInsights({ meetingId }: { meetingId: string }) {
       </p>
       {source === 'local' && (
         <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
-          From this device only, speaking time was not recorded for this meeting.
+          {t('insight.from_this_device_only_speaking')}
         </p>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
@@ -133,7 +133,7 @@ export default function MeetingInsights({ meetingId }: { meetingId: string }) {
             </span>
             {p.neverSpoke === true && (
               <span style={{ flexShrink: 0, backgroundColor: 'rgba(250,189,2,0.15)', border: '1px solid var(--color-accent)', color: 'var(--color-accent)', fontSize: '0.65rem', fontWeight: 700, padding: '1px 7px', borderRadius: '20px', whiteSpace: 'nowrap' }}>
-                Never spoke
+                {t('insight.never_spoke')}
               </span>
             )}
           </div>

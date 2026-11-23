@@ -279,6 +279,38 @@ export async function getCaller(admin: any, accessToken: string | undefined) {
   return user;
 }
 
+/** Developer API (keys and webhooks) is a PAID feature. Resolve the
+ *  caller's plan tier from their profile row: plan_tier wins when set,
+ *  otherwise the stored is_premium boolean decides (premium == Pro),
+ *  mirroring tierForProfile in src/utils/tiers.ts. Fail closed: any
+ *  lookup problem resolves to Free, so creation is denied, never
+ *  granted by accident. SUKU TO CONFIRM: does Pro get API access, or
+ *  Enterprise only? If Enterprise only, change `tier !== 'free'` below
+ *  to `tier === 'enterprise'`. */
+export async function canCallerUseDeveloperApi(admin: any, userId: string): Promise<boolean> {
+  try {
+    const { data, error } = await admin
+      .from('profiles')
+      .select('plan_tier,is_premium')
+      .eq('id', userId)
+      .maybeSingle();
+    if (!error && data) {
+      const tier = data.plan_tier === 'free' || data.plan_tier === 'pro' || data.plan_tier === 'enterprise'
+        ? data.plan_tier
+        : data.is_premium ? 'pro' : 'free';
+      return tier !== 'free';
+    }
+    const { data: fb } = await admin
+      .from('profiles')
+      .select('is_premium')
+      .eq('id', userId)
+      .maybeSingle();
+    return fb?.is_premium ? true : false;
+  } catch {
+    return false;
+  }
+}
+
 /** Host check used by the meeting-scoped routes: the meeting's admin_id
  *  (falling back to user_id) must be the caller. */
 export function isCurrentHost(

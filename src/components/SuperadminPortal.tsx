@@ -36,7 +36,7 @@ const NAV: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: 'analytics', label: 'Analytics', icon: <BarChart3 size={18} /> },
   { id: 'reports', label: 'Reports', icon: <FileWarning size={18} /> },
   { id: 'troubleshooting', label: 'Troubleshooting', icon: <Wrench size={18} /> },
-  { id: 'audit', label: 'Audit Log', icon: <ScrollText size={18} /> },
+  { id: 'audit', label: t('admin.audit_log'), icon: <ScrollText size={18} /> },
   { id: 'setup', label: 'Setup', icon: <Server size={18} /> },
 ];
 
@@ -46,15 +46,15 @@ const UI_STYLES = [
 ];
 
 const FONT_OPTIONS: { heading: string; body: string; label: string }[] = [
-  { heading: 'Outfit', body: 'Inter', label: 'Sleek Sans (Outfit / Inter)' },
-  { heading: 'Playfair Display', body: 'Georgia', label: 'Classic Serif (Playfair Display / Georgia)' },
-  { heading: 'Fira Code', body: 'Fira Code', label: 'Monospace Tech (Fira Code)' },
-  { heading: 'Montserrat', body: 'Montserrat', label: 'Elegant Modern (Montserrat)' },
-  { heading: 'Orbitron', body: 'Rajdhani', label: 'Futuristic Glow (Orbitron / Rajdhani)' },
-  { heading: 'Poppins', body: 'Poppins', label: 'Geometric Pop (Poppins)' },
-  { heading: 'Space Grotesk', body: 'Space Grotesk', label: 'Modern Grotesk (Space Grotesk)' },
-  { heading: 'Lora', body: 'Merriweather', label: 'Literary Serif (Lora / Merriweather)' },
-  { heading: 'Quicksand', body: 'Nunito', label: 'Soft Rounded (Quicksand / Nunito)' },
+  { heading: 'Outfit', body: 'Inter', label: t('set.sleek_sans_outfit_inter') },
+  { heading: 'Playfair Display', body: 'Georgia', label: t('set.classic_serif_playfair_display_georgia') },
+  { heading: 'Fira Code', body: 'Fira Code', label: t('set.monospace_tech_fira_code') },
+  { heading: 'Montserrat', body: 'Montserrat', label: t('set.elegant_modern_montserrat') },
+  { heading: 'Orbitron', body: 'Rajdhani', label: t('set.futuristic_glow_orbitron_rajdhani') },
+  { heading: 'Poppins', body: 'Poppins', label: t('set.geometric_pop_poppins') },
+  { heading: 'Space Grotesk', body: 'Space Grotesk', label: t('set.modern_grotesk_space_grotesk') },
+  { heading: 'Lora', body: 'Merriweather', label: t('set.literary_serif_lora_merriweather') },
+  { heading: 'Quicksand', body: 'Nunito', label: t('set.soft_rounded_quicksand_nunito') },
 ];
 
 function formatBytes(bytes: number): string {
@@ -192,7 +192,7 @@ export const SuperadminPortal: React.FC = () => {
   const callAdmin = useCallback(
     async (path: string, body: Record<string, unknown> = {}): Promise<any> => {
       const token = await getToken();
-      if (!token) throw new Error('Your session has expired, sign in again.');
+      if (!token) throw new Error(t('admin.your_session_has_expired_sign'));
       const res = await fetch(`/api/superadmin/${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -200,7 +200,7 @@ export const SuperadminPortal: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {
-        throw new Error(data.message || data.error || `The server refused the request (${res.status}).`);
+        throw new Error(data.message || data.error || t('admin.the_server_refused_the_request', { v1: res.status }));
       }
       return data;
     },
@@ -311,7 +311,7 @@ export const SuperadminPortal: React.FC = () => {
       if (data?.url) {
         window.location.href = data.url;
       } else {
-        throw new Error('No redirect URL returned from Supabase OAuth.');
+        throw new Error(t('auth.no_redirect_url_returned_from'));
       }
     } catch (err: any) {
       console.error('[Superadmin] Google sign-in failed:', err);
@@ -333,7 +333,7 @@ export const SuperadminPortal: React.FC = () => {
   if (gate === 'loading') {
     return (
       <div style={{ height: '100dvh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-app)', color: 'var(--text-muted)', overflowY: 'auto' }}>
-        Checking your session…
+        {t('admin.checking_your_session')}
       </div>
     );
   }
@@ -350,16 +350,16 @@ export const SuperadminPortal: React.FC = () => {
             </span>
             <div>
               <div style={{ fontFamily: 'var(--font-heading)', fontSize: '1.35rem', fontWeight: 800 }}>GiinMeet</div>
-              <div style={{ fontSize: '0.75rem', letterSpacing: '0.14em', color: '#FABD02', fontWeight: 700 }}>SUPERADMIN PORTAL</div>
+              <div style={{ fontSize: '0.75rem', letterSpacing: '0.14em', color: '#FABD02', fontWeight: 700 }}>{t('admin.superadmin_portal')}</div>
             </div>
           </div>
           <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: '0.9rem', margin: '0.75rem 0 1.5rem' }}>
-            System administration only. Sign in with the superadmin account.
+            {t('admin.system_administration_only_sign_in')}
           </p>
           <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
             <input
               type="email"
-              placeholder="Superadmin email"
+              placeholder={t('admin.superadmin_email')}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -369,7 +369,7 @@ export const SuperadminPortal: React.FC = () => {
             <div style={{ position: 'relative' }}>
               <input
                 type={showPassword ? 'text' : 'password'}
-                placeholder="Password"
+                placeholder={t('admin.password')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -395,7 +395,7 @@ export const SuperadminPortal: React.FC = () => {
             </button>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.25rem 0' }}>
               <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.15)' }} />
-              <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.5)', letterSpacing: '0.08em' }}>OR CONTINUE WITH</span>
+              <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.5)', letterSpacing: '0.08em' }}>{t('admin.or_continue_with')}</span>
               <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.15)' }} />
             </div>
             <button
@@ -422,14 +422,14 @@ export const SuperadminPortal: React.FC = () => {
                   fill="#EA4335"
                 />
               </svg>
-              Continue with Google
+              {t('admin.continue_with_google')}
             </button>
           </form>
           <button
             onClick={() => { window.location.href = '/'; }}
             style={{ marginTop: '1rem', background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
           >
-            <ArrowLeft size={15} /> Back to GiinMeet
+            <ArrowLeft size={15} /> {t('admin.back_to_giinmeet')}
           </button>
         </div>
       </div>
@@ -442,14 +442,14 @@ export const SuperadminPortal: React.FC = () => {
       <div style={{ height: '100dvh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-app)', padding: '1rem', overflowY: 'auto' }}>
         <div style={{ ...cardStyle, maxWidth: '480px', textAlign: 'center' }}>
           <Shield size={40} color="#DC2626" style={{ margin: '0 auto 0.75rem' }} />
-          <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.4rem', color: 'var(--text-main)' }}>Access denied</h1>
+          <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.4rem', color: 'var(--text-main)' }}>{t('admin.access_denied')}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: 1.5 }}>
-            {adminEmail ? <><strong>{adminEmail}</strong> is signed in, but that account is not a superadmin.</> : 'This account is not a superadmin.'}
+            {adminEmail ? <><strong>{adminEmail}</strong> {t('admin.is_signed_in_but_that')}</> : 'This account is not a superadmin.'}
             {' '}Only the superadmin account can use this portal. If this is wrong, the superadmin can grant the role from Users.
           </p>
           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1.25rem' }}>
-            <button onClick={handleSignOut} style={btnGhost}>Sign out</button>
-            <button onClick={() => { window.location.href = '/'; }} style={btnPrimary}>Back to GiinMeet</button>
+            <button onClick={handleSignOut} style={btnGhost}>{t('admin.sign_out')}</button>
+            <button onClick={() => { window.location.href = '/'; }} style={btnPrimary}>{t('admin.back_to_giinmeet')}</button>
           </div>
         </div>
       </div>
@@ -497,13 +497,13 @@ export const SuperadminPortal: React.FC = () => {
         ))}
         <div style={{ marginTop: narrow ? 0 : 'auto', paddingTop: narrow ? '0.5rem' : '1rem', borderTop: '1px solid rgba(255,255,255,0.12)', display: 'flex', flexDirection: narrow ? 'row' : 'column', gap: '0.6rem', width: narrow ? '100%' : undefined, alignItems: narrow ? 'center' : undefined }}>
           <div style={{ display: narrow ? 'none' : 'block', padding: '0 0.4rem', fontSize: '0.8rem', color: 'rgba(255,255,255,0.65)', wordBreak: 'break-all' }}>
-            Signed in as<br /><strong style={{ color: '#fff' }}>{adminEmail}</strong>
+            {t('admin.signed_in_as')}<br /><strong style={{ color: '#fff' }}>{adminEmail}</strong>
           </div>
           <button onClick={() => { window.location.href = '/'; }} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'none', border: 'none', color: 'rgba(255,255,255,0.75)', cursor: 'pointer', fontSize: '0.9rem', padding: '0.5rem 0.8rem', textAlign: 'left' }}>
-            <ArrowLeft size={16} /> Back to GiinMeet
+            <ArrowLeft size={16} /> {t('admin.back_to_giinmeet')}
           </button>
           <button onClick={handleSignOut} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'none', border: 'none', color: 'rgba(255,255,255,0.75)', cursor: 'pointer', fontSize: '0.9rem', padding: '0.5rem 0.8rem', textAlign: 'left' }}>
-            <LogOut size={16} /> Sign out
+            <LogOut size={16} /> {t('admin.sign_out')}
           </button>
         </div>
       </aside>
@@ -604,32 +604,32 @@ function OverviewSection({ callAdmin }: { callAdmin: (path: string, body?: Recor
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div style={{ color: 'var(--text-muted)' }}>Loading live numbers…</div>;
+  if (loading) return <div style={{ color: 'var(--text-muted)' }}>{t('admin.loading_live_numbers')}</div>;
   if (error) return <Notice kind="error">{error}</Notice>;
 
   const s = data?.stats || {};
   const setup = data?.setup || {};
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <SectionTitle title="Overview" sub="The whole system at a glance, every number below is live." onRefresh={load} refreshing={loading} />
+      <SectionTitle title={t('admin.overview')} sub="The whole system at a glance, every number below is live." onRefresh={load} refreshing={loading} />
       {!setup?.superadminSql?.ok && (
         <Notice kind="warn">
-          <strong>Setup incomplete:</strong> {setup?.superadminSql?.detail || 'giinmeet_superadmin.sql has not run yet.'} Until it runs, settings, the audit log and suspension are unavailable, the rest of this portal still works.
+          <strong>{t('admin.setup_incomplete')}</strong> {setup?.superadminSql?.detail || 'giinmeet_superadmin.sql has not run yet.'} Until it runs, settings, the audit log and suspension are unavailable, the rest of this portal still works.
         </Notice>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-        <StatCard label="Total users" value={String(s.totalUsers ?? 0)} icon={<Users size={22} />} />
-        <StatCard label="Signups this week" value={String(s.signupsThisWeek ?? 0)} icon={<UserCheck size={22} />} />
-        <StatCard label="Meetings live now" value={String(s.liveMeetings ?? 0)} sub={`${s.meetingsToday ?? 0} scheduled today`} icon={<Video size={22} />} />
-        <StatCard label="Total meetings" value={String(s.totalMeetings ?? 0)} icon={<Video size={22} />} />
+        <StatCard label={t('admin.total_users')} value={String(s.totalUsers ?? 0)} icon={<Users size={22} />} />
+        <StatCard label={t('admin.signups_this_week')} value={String(s.signupsThisWeek ?? 0)} icon={<UserCheck size={22} />} />
+        <StatCard label={t('admin.meetings_live_now')} value={String(s.liveMeetings ?? 0)} sub={t('admin.scheduled_today', { v1: s.meetingsToday ?? 0 })} icon={<Video size={22} />} />
+        <StatCard label={t('admin.total_meetings')} value={String(s.totalMeetings ?? 0)} icon={<Video size={22} />} />
         <StatCard
-          label="Participant-minutes this month"
+          label={t('admin.participant_minutes_this_month')}
           value={s.participantMinutesThisMonth === null ? '-' : String(s.participantMinutesThisMonth)}
           sub="Approximate, from room allocations"
           icon={<Activity size={22} />}
         />
         <StatCard
-          label="LiveKit rooms live"
+          label={t('admin.livekit_rooms_live')}
           value={String((s.livekitRooms || []).length)}
           sub={s.livekitConfigured ? 'Video server connected' : 'Video server not configured'}
           icon={<Cloud size={22} />}
@@ -638,9 +638,9 @@ function OverviewSection({ callAdmin }: { callAdmin: (path: string, body?: Recor
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Live meetings now</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.live_meetings_now')}</h3>
           {(data?.liveMeetingRows || []).length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No meeting is in progress right now.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_meeting_is_in_progress')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {data.liveMeetingRows.map((m: any) => (
@@ -654,9 +654,9 @@ function OverviewSection({ callAdmin }: { callAdmin: (path: string, body?: Recor
         </div>
 
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Recent sign-ins</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.recent_sign_ins')}</h3>
           {(data?.recentSignins || []).length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No recent sign-ins recorded.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_recent_sign_ins_recorded')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {data.recentSignins.map((r: any) => (
@@ -670,9 +670,9 @@ function OverviewSection({ callAdmin }: { callAdmin: (path: string, body?: Recor
         </div>
 
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Storage use</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.storage_use')}</h3>
           {(s.storage || []).length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No storage buckets found.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_storage_buckets_found')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {(s.storage || []).map((b: any) => (
@@ -686,7 +686,7 @@ function OverviewSection({ callAdmin }: { callAdmin: (path: string, body?: Recor
         </div>
 
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Recent superadmin activity</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.recent_superadmin_activity')}</h3>
           {(data?.recentAudit || []).length === 0 ? (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>
               {setup?.superadminSql?.ok ? 'No superadmin actions recorded yet.' : 'The audit log is not set up yet, run giinmeet_superadmin.sql.'}
@@ -769,7 +769,7 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
   };
 
   const confirmSuspend = (user: PortalUser) => {
-    if (!window.confirm(`Suspend ${user.name || user.email}? They will not be able to sign in or join meetings until you activate them again.`)) return;
+    if (!window.confirm(t('admin.suspend_they_will_not_be', { v1: user.name || user.email }))) return;
     const reason = window.prompt('Reason for suspension (optional):', '') || undefined;
     act(user, 'suspend', reason ? { reason } : {});
   };
@@ -782,7 +782,7 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Users" sub={`${users.length} account(s). Assign tiers, suspend or activate accounts, reset passwords, grant the superadmin role.`} onRefresh={load} refreshing={loading} />
+      <SectionTitle title={t('admin.users')} sub={t('admin.account_s_assign_tiers_suspend', { v1: users.length })} onRefresh={load} refreshing={loading} />
       {error && <Notice kind="error">{error}</Notice>}
       {tempPassword && (
         <Notice kind="warn">
@@ -794,9 +794,9 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
               onClick={() => { try { navigator.clipboard.writeText(tempPassword.password); showToast('Copied.'); } catch (e) { /* clipboard unavailable */ } }}
               style={{ ...btnGhost, marginLeft: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
             >
-              <Copy size={14} /> Copy
+              <Copy size={14} /> {t('common.copy')}
             </button>
-            <button onClick={() => setTempPassword(null)} style={{ ...btnGhost, marginLeft: '0.5rem' }}>Dismiss</button>
+            <button onClick={() => setTempPassword(null)} style={{ ...btnGhost, marginLeft: '0.5rem' }}>{t('admin.dismiss')}</button>
           </span>
         </Notice>
       )}
@@ -805,25 +805,25 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
           <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
             type="text"
-            placeholder="Search by name, email, workspace…"
+            placeholder={t('admin.search_by_name_email_workspace')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ ...inputStyle, paddingLeft: '2.2rem' }}
           />
         </div>
         {loading ? (
-          <p style={{ color: 'var(--text-muted)' }}>Loading users…</p>
+          <p style={{ color: 'var(--text-muted)' }}>{t('admin.loading_users')}</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.87rem', textAlign: 'left' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>User</th>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>Tier</th>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>Role</th>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>Status</th>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>Joined</th>
-                  <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right' }}>Actions</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.user')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.tier')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.role')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.status')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.joined')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right' }}>{t('admin.actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -842,7 +842,7 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
                           disabled={busyId === u.id}
                           onChange={(e) => act(u, 'set-tier', { tier: e.target.value as PlanTier })}
                           style={{ ...inputStyle, height: '34px', fontSize: '0.82rem', fontWeight: 600, minWidth: '130px' }}
-                          title="Free: 50 people, 40 min · Pro: 100 people, up to 24h · Enterprise: 250 people, up to 24h"
+                          title={t('admin.free_50_people_40_min')}
                         >
                           <option value="free">Free</option>
                           <option value="pro">Pro</option>
@@ -856,14 +856,14 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
                           title={isSelf ? 'You cannot change your own role.' : 'Grant or revoke the superadmin role'}
                           style={{ border: 'none', background: 'none', cursor: isSelf ? 'not-allowed' : 'pointer', color: u.is_superadmin ? 'var(--color-accent)' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: u.is_superadmin ? 700 : 400, fontSize: '0.85rem' }}
                         >
-                          {u.is_superadmin ? <><ShieldCheck size={15} /> Superadmin</> : <><Shield size={15} /> Standard</>}
+                          {u.is_superadmin ? <><ShieldCheck size={15} /> {t('admin.superadmin')}</> : <><Shield size={15} /> {t('admin.standard')}</>}
                         </button>
                       </td>
                       <td style={{ padding: '0.8rem 0.5rem' }}>
                         {u.is_suspended ? (
                           <span style={{ color: '#DC2626', fontWeight: 700, fontSize: '0.85rem' }}>Suspended{u.suspended_reason ? `, ${u.suspended_reason}` : ''}</span>
                         ) : (
-                          <span style={{ color: '#15803D', fontWeight: 600, fontSize: '0.85rem' }}>Active</span>
+                          <span style={{ color: '#15803D', fontWeight: 600, fontSize: '0.85rem' }}>{t('admin.active')}</span>
                         )}
                       </td>
                       <td style={{ padding: '0.8rem 0.5rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
@@ -872,23 +872,23 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
                       </td>
                       <td style={{ padding: '0.8rem 0.5rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {u.is_suspended ? (
-                          <button onClick={() => act(u, 'activate')} disabled={busyId === u.id} style={{ ...btnGhost, marginRight: '0.4rem' }} title="Activate this account again">
-                            <UserCheck size={14} /> Activate
+                          <button onClick={() => act(u, 'activate')} disabled={busyId === u.id} style={{ ...btnGhost, marginRight: '0.4rem' }} title={t('admin.activate_this_account_again')}>
+                            <UserCheck size={14} /> {t('admin.activate')}
                           </button>
                         ) : (
-                          <button onClick={() => confirmSuspend(u)} disabled={busyId === u.id || u.is_superadmin || isSelf} style={{ ...btnDanger, marginRight: '0.4rem' }} title="Suspend this account (blocks sign-in)">
-                            <Ban size={14} /> Suspend
+                          <button onClick={() => confirmSuspend(u)} disabled={busyId === u.id || u.is_superadmin || isSelf} style={{ ...btnDanger, marginRight: '0.4rem' }} title={t('admin.suspend_this_account_blocks_sign')}>
+                            <Ban size={14} /> {t('admin.suspend')}
                           </button>
                         )}
-                        <button onClick={() => { if (window.confirm(`Reset the password for ${u.email || u.name}? A one-time temporary password will be shown once.`)) act(u, 'reset-password'); }} disabled={busyId === u.id} style={btnGhost} title="Set a one-time temporary password">
-                          <KeyRound size={14} /> Reset password
+                        <button onClick={() => { if (window.confirm(t('admin.reset_the_password_for_a', { v1: u.email || u.name }))) act(u, 'reset-password'); }} disabled={busyId === u.id} style={btnGhost} title={t('admin.set_a_one_time_temporary')}>
+                          <KeyRound size={14} /> {t('admin.reset_password')}
                         </button>
                       </td>
                     </tr>
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>No matching users.</td></tr>
+                  <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>{t('admin.no_matching_users')}</td></tr>
                 )}
               </tbody>
             </table>
@@ -896,7 +896,7 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
         )}
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
-        There is no payment processor connected yet, tiers are assigned manually here, never automatically. Enterprise is assigned this way.
+        {t('admin.there_is_no_payment_processor')}
       </p>
     </div>
   );
@@ -931,8 +931,8 @@ function MeetingsSection({ callAdmin, showToast }: {
 
   const act = async (m: any, action: 'end' | 'delete') => {
     const label = action === 'end'
-      ? `End "${m.title}" for everyone right now? Participants will be disconnected.`
-      : `Delete "${m.title}" from history? This is a soft delete and is written to the audit trail.`;
+      ? t('admin.end_for_everyone_right_now', { v1: m.title })
+      : t('admin.delete_from_history_this_is', { v1: m.title });
     if (!window.confirm(label)) return;
     setBusyId(m.id);
     try {
@@ -967,7 +967,7 @@ function MeetingsSection({ callAdmin, showToast }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Meetings" sub={`${meetings.filter((m) => !m.deleted_at).length} meeting(s) in total. End a live meeting for everyone, or delete a completed / expired one from history.`} onRefresh={load} refreshing={loading} />
+      <SectionTitle title={t('common.meetings')} sub={t('admin.meeting_s_in_total_end', { v1: meetings.filter((m) => !m.deleted_at).length })} onRefresh={load} refreshing={loading} />
       {error && <Notice kind="error">{error}</Notice>}
       <div style={{ ...cardStyle, padding: '1rem 1.25rem' }}>
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
@@ -988,22 +988,22 @@ function MeetingsSection({ callAdmin, showToast }: {
           ))}
           <div style={{ position: 'relative', marginLeft: 'auto', minWidth: '220px' }}>
             <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input type="text" placeholder="Search title or host…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, paddingLeft: '2.2rem' }} />
+            <input type="text" placeholder={t('admin.search_title_or_host')} value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, paddingLeft: '2.2rem' }} />
           </div>
         </div>
         {loading ? (
-          <p style={{ color: 'var(--text-muted)' }}>Loading meetings…</p>
+          <p style={{ color: 'var(--text-muted)' }}>{t('admin.loading_meetings')}</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.87rem', textAlign: 'left' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>Meeting</th>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>Host</th>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>When</th>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>People</th>
-                  <th style={{ padding: '0.6rem 0.5rem' }}>Status</th>
-                  <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right' }}>Actions</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.meeting')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.host')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.when')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.people')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.status')}</th>
+                  <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right' }}>{t('admin.actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1026,8 +1026,8 @@ function MeetingsSection({ callAdmin, showToast }: {
                     </td>
                     <td style={{ padding: '0.8rem 0.5rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {m.status === 'In Progress' && (
-                        <button onClick={() => act(m, 'end')} disabled={busyId === m.id} style={{ ...btnDanger, marginRight: '0.4rem' }} title="End this meeting for everyone">
-                          <PhoneOff size={14} /> End meeting
+                        <button onClick={() => act(m, 'end')} disabled={busyId === m.id} style={{ ...btnDanger, marginRight: '0.4rem' }} title={t('admin.end_this_meeting_for_everyone')}>
+                          <PhoneOff size={14} /> {t('admin.end_meeting')}
                         </button>
                       )}
                       <button
@@ -1036,13 +1036,13 @@ function MeetingsSection({ callAdmin, showToast }: {
                         style={btnGhost}
                         title={isDeletable(m) ? 'Delete from history (soft delete, audited)' : 'Only completed meetings and expired scheduled meetings can be deleted, end a live meeting first, or cancel an upcoming one.'}
                       >
-                        <Trash2 size={14} /> Delete
+                        <Trash2 size={14} /> {t('admin.delete')}
                       </button>
                     </td>
                   </tr>
                 ))}
                 {visible.length === 0 && (
-                  <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>No meetings match this view.</td></tr>
+                  <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>{t('admin.no_meetings_match_this_view')}</td></tr>
                 )}
               </tbody>
             </table>
@@ -1150,7 +1150,7 @@ function ConfigSection({ callAdmin, showToast }: {
   };
 
   const resetBrand = async () => {
-    if (!window.confirm('Reset the shared brand to the default GiinMeet name, slogan, logo and accent?')) return;
+    if (!window.confirm(t('admin.reset_the_shared_brand_to'))) return;
     setBrandSaving(true);
     try {
       await callAdmin('brand', { action: 'reset' });
@@ -1163,7 +1163,7 @@ function ConfigSection({ callAdmin, showToast }: {
     }
   };
 
-  if (loading) return <div style={{ color: 'var(--text-muted)' }}>Loading configuration…</div>;
+  if (loading) return <div style={{ color: 'var(--text-muted)' }}>{t('admin.loading_configuration')}</div>;
   if (error) return <Notice kind="error">{error}</Notice>;
 
   const guestsCanChat = settings.guests_can_chat?.enabled === true;
@@ -1179,25 +1179,25 @@ function ConfigSection({ callAdmin, showToast }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <SectionTitle title="Configuration" sub="System-wide settings. Every change is written to the audit log." onRefresh={load} refreshing={loading} />
+      <SectionTitle title={t('admin.configuration')} sub="System-wide settings. Every change is written to the audit log." onRefresh={load} refreshing={loading} />
       {notSetUp && (
         <Notice kind="warn">
-          System settings are not set up yet, run <strong>giinmeet_superadmin.sql</strong> in the Supabase SQL Editor once. Until then these controls show the built-in defaults and cannot be saved.
+          {t('admin.system_settings_are_not_set')} <strong>giinmeet_superadmin.sql</strong> {t('admin.in_the_supabase_sql_editor')}
         </Notice>
       )}
 
-      <ConfigGroup title="General" sub="Limits, defaults and announcements for the whole system.">
+      <ConfigGroup title={t('admin.general')} sub="Limits, defaults and announcements for the whole system.">
         {/* Tier limits */}
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Tier limits</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Maximum participants per meeting and longest meeting per tier. The video server enforces these.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>{t('admin.tier_limits')}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>{t('admin.maximum_participants_per_meeting_and')}</p>
           <TierLimitsForm limits={limits} durations={durations} disabled={notSetUp} saving={savingKey !== ''} onSave={async (l, d) => { await save('tier_limits', l); await save('tier_max_duration_minutes', d); }} />
         </div>
 
         {/* Default meeting duration */}
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Default meeting duration</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>The duration the dashboard pre-selects when someone schedules a new meeting.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>{t('admin.default_meeting_duration')}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>{t('admin.the_duration_the_dashboard_pre')}</p>
           <DurationDefaultForm
             minutes={defaultDuration}
             disabled={notSetUp}
@@ -1209,8 +1209,8 @@ function ConfigSection({ callAdmin, showToast }: {
 
         {/* Announcement banner */}
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Announcement / maintenance banner</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Shown at the top of the dashboard for every user while it is on.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>{t('admin.announcement_maintenance_banner')}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>{t('admin.shown_at_the_top_of')}</p>
           <BannerForm
             banner={{ enabled: banner.enabled === true, message: banner.message || '' }}
             disabled={notSetUp}
@@ -1220,11 +1220,11 @@ function ConfigSection({ callAdmin, showToast }: {
         </div>
       </ConfigGroup>
 
-      <ConfigGroup title="Security" sub="Who can do what in meetings, enforced by the app and the video server.">
+      <ConfigGroup title={t('admin.security')} sub="Who can do what in meetings, enforced by the app and the video server.">
         {/* Feature flags */}
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Guest chat</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Whether people without an account can write in a meeting.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>{t('admin.guest_chat')}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>{t('admin.whether_people_without_an_account')}</p>
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: notSetUp ? 'not-allowed' : 'pointer', opacity: notSetUp ? 0.6 : 1 }}>
             <input
               type="checkbox"
@@ -1234,7 +1234,7 @@ function ConfigSection({ callAdmin, showToast }: {
               style={{ width: '18px', height: '18px', marginTop: '2px' }}
             />
             <span>
-              <strong>Guests may send chat</strong>
+              <strong>{t('admin.guests_may_send_chat')}</strong>
               <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.2rem' }}>
                 {guestsCanChat
                   ? 'ON, guests without an account can send messages in a meeting.'
@@ -1246,8 +1246,8 @@ function ConfigSection({ callAdmin, showToast }: {
 
         {/* Waiting-room default */}
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Waiting room default</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Whether new meetings admit guests through the waiting room unless the host changes it for that meeting.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>{t('admin.waiting_room_default')}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>{t('admin.whether_new_meetings_admit_guests')}</p>
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: notSetUp ? 'not-allowed' : 'pointer', opacity: notSetUp ? 0.6 : 1 }}>
             <input
               type="checkbox"
@@ -1257,7 +1257,7 @@ function ConfigSection({ callAdmin, showToast }: {
               style={{ width: '18px', height: '18px', marginTop: '2px' }}
             />
             <span>
-              <strong>Waiting room on for new meetings</strong>
+              <strong>{t('admin.waiting_room_on_for_new')}</strong>
               <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.2rem' }}>
                 {waitingRoomDefault
                   ? 'ON, guests wait to be admitted. The host can still switch it off per meeting.'
@@ -1268,13 +1268,13 @@ function ConfigSection({ callAdmin, showToast }: {
         </div>
       </ConfigGroup>
 
-      <ConfigGroup title="Branding" sub="What every user sees, the shared brand, and the defaults a brand-new workspace starts with.">
+      <ConfigGroup title={t('admin.branding')} sub="What every user sees, the shared brand, and the defaults a brand-new workspace starts with.">
         {/* Shared workspace brand */}
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Shared workspace brand</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>The name, slogan, logo and accent every user sees, on the sign-in screen, in meetings and in the app header. Saved to the shared brand; the app loads it on start.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>{t('admin.shared_workspace_brand')}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>{t('admin.the_name_slogan_logo_and')}</p>
           {brandNotSetUp ? (
-            <Notice kind="warn">Shared branding is not set up yet, run <strong>giinmeet_phase3_brand.sql</strong> in the Supabase SQL Editor once.</Notice>
+            <Notice kind="warn">{t('admin.shared_branding_is_not_set')} <strong>giinmeet_phase3_brand.sql</strong> {t('admin.in_the_supabase_sql_editor_2')}</Notice>
           ) : (
             <BrandForm brand={brand} disabled={notSetUp} saving={brandSaving} onSave={saveBrand} onReset={resetBrand} />
           )}
@@ -1282,11 +1282,11 @@ function ConfigSection({ callAdmin, showToast }: {
 
         {/* Workspace defaults */}
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Defaults for new workspaces</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>The accent, theme and fonts a brand-new workspace starts with.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>{t('admin.defaults_for_new_workspaces')}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>{t('admin.the_accent_theme_and_fonts')}</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
             <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', fontSize: '0.9rem' }}>
-              Default accent
+              {t('admin.default_accent')}
               <input
                 type="color"
                 value={accent}
@@ -1296,7 +1296,7 @@ function ConfigSection({ callAdmin, showToast }: {
               />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', fontSize: '0.9rem' }}>
-              Default theme
+              {t('admin.default_theme')}
               <select
                 value={theme.ui_style}
                 disabled={notSetUp}
@@ -1307,7 +1307,7 @@ function ConfigSection({ callAdmin, showToast }: {
               </select>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', fontSize: '0.9rem' }}>
-              Default font
+              {t('admin.default_font')}
               <select
                 value={`${font.heading}|${font.body}`}
                 disabled={notSetUp}
@@ -1356,14 +1356,14 @@ function TierLimitsForm({ limits, durations, disabled, saving, onSave }: {
               type="number" min={1} max={1440} value={d[t]} disabled={disabled}
               onChange={(e) => setD((prev) => ({ ...prev, [t]: Number(e.target.value) || 1 }))}
               style={{ ...inputStyle, width: '84px', height: '36px' }}
-            /> min max
+            /> {t('admin.min_max')}
           </label>
         </div>
       ))}
       <div>
-        <button onClick={() => void onSave(l, d)} disabled={disabled || saving} style={btnPrimary}>Save tier limits</button>
+        <button onClick={() => void onSave(l, d)} disabled={disabled || saving} style={btnPrimary}>{t('admin.save_tier_limits')}</button>
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>Limits must grow with the tier (Free ≤ Pro ≤ Enterprise). Durations are capped at 24 hours (1440 min).</p>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>{t('admin.limits_must_grow_with_the')}</p>
     </div>
   );
 }
@@ -1390,15 +1390,15 @@ function DurationDefaultForm({ minutes, disabled, saving, onSave, onClear }: {
         /> minutes
       </label>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <button onClick={() => { if (valid) void onSave(Math.round(n)); }} disabled={disabled || saving || !valid} style={btnPrimary}>Save default duration</button>
+        <button onClick={() => { if (valid) void onSave(Math.round(n)); }} disabled={disabled || saving || !valid} style={btnPrimary}>{t('admin.save_default_duration')}</button>
         {minutes !== null && (
-          <button onClick={() => void onClear()} disabled={disabled || saving} style={btnGhost}>Clear, use tier default</button>
+          <button onClick={() => void onClear()} disabled={disabled || saving} style={btnGhost}>{t('admin.clear_use_tier_default')}</button>
         )}
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>
         {minutes === null
           ? 'Not set, new meetings default to the tier default (Free 40 min, Pro / Enterprise 2 hours).'
-          : `Currently ${minutes} minutes, the dashboard pre-selects the matching duration for new meetings.`} 5-1440 minutes.
+          : t('admin.currently_minutes_the_dashboard_pre', { v1: minutes })} 5-1440 minutes.
       </p>
     </div>
   );
@@ -1427,21 +1427,21 @@ function BannerForm({ banner, disabled, saving, onSave }: {
           onChange={(e) => setEnabled(e.target.checked)}
           style={{ width: '18px', height: '18px' }}
         />
-        <strong>Show the banner</strong>
+        <strong>{t('admin.show_the_banner')}</strong>
       </label>
       <textarea
         value={message}
         disabled={disabled}
         maxLength={300}
         rows={3}
-        placeholder="e.g. Scheduled maintenance on Sunday 02:00-03:00 SAST, meetings may be briefly interrupted."
+        placeholder={t('admin.e_g_scheduled_maintenance_on')}
         onChange={(e) => setMessage(e.target.value)}
         style={{ ...inputStyle, height: 'auto', minHeight: '72px', padding: '0.6rem 0.75rem', resize: 'vertical' }}
       />
       <div>
-        <button onClick={() => void onSave({ enabled, message })} disabled={disabled || saving || !dirty} style={btnPrimary}>Save banner</button>
+        <button onClick={() => void onSave({ enabled, message })} disabled={disabled || saving || !dirty} style={btnPrimary}>{t('admin.save_banner')}</button>
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>The message saves with the button above, typing alone does not save it. 300 characters maximum.</p>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>{t('admin.the_message_saves_with_the')}</p>
     </div>
   );
 }
@@ -1509,30 +1509,30 @@ function BrandForm({ brand, disabled, saving, onSave, onReset }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
       <label style={{ fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-        Brand name
+        {t('admin.brand_name')}
         <input type="text" value={name} disabled={disabled} maxLength={80} onChange={(e) => setName(e.target.value)} style={inputStyle} />
       </label>
       <label style={{ fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-        Slogan
+        {t('admin.slogan')}
         <input type="text" value={slogan} disabled={disabled} maxLength={120} onChange={(e) => setSlogan(e.target.value)} style={inputStyle} />
       </label>
       <div style={{ fontSize: '0.9rem' }}>
-        <div style={{ marginBottom: '0.35rem' }}>Logo</div>
+        <div style={{ marginBottom: '0.35rem' }}>{t('admin.logo')}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           {logo ? (
-            <img src={logo} alt="Brand logo preview" style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#fff' }} />
+            <img src={logo} alt={t('admin.brand_logo_preview')} style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#fff' }} />
           ) : (
-            <span style={{ width: '56px', height: '56px', borderRadius: '8px', border: '1px dashed var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.25rem' }}>Default logo</span>
+            <span style={{ width: '56px', height: '56px', borderRadius: '8px', border: '1px dashed var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.25rem' }}>{t('admin.default_logo')}</span>
           )}
           <input type="file" accept="image/png,image/jpeg,image/webp" disabled={disabled} onChange={(e) => onLogoFile(e.target.files?.[0])} style={{ fontSize: '0.85rem', maxWidth: '220px' }} />
           {logo && (
-            <button onClick={() => setLogo(null)} disabled={disabled} style={btnGhost}>Remove logo</button>
+            <button onClick={() => setLogo(null)} disabled={disabled} style={btnGhost}>{t('admin.remove_logo')}</button>
           )}
         </div>
         {logoError && <p style={{ color: '#DC2626', fontSize: '0.85rem', margin: '0.4rem 0 0' }}>{logoError}</p>}
       </div>
       <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', fontSize: '0.9rem' }}>
-        Accent colour
+        {t('admin.accent_colour')}
         <input
           type="color"
           value={accentColor}
@@ -1542,7 +1542,7 @@ function BrandForm({ brand, disabled, saving, onSave, onReset }: {
         />
       </label>
       <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', fontSize: '0.9rem' }}>
-        Accent hover colour
+        {t('admin.accent_hover_colour')}
         <input
           type="color"
           value={accentHover}
@@ -1557,10 +1557,10 @@ function BrandForm({ brand, disabled, saving, onSave, onReset }: {
           disabled={disabled || saving || !dirty || name.trim().length === 0}
           style={btnPrimary}
         >
-          Save brand
+          {t('admin.save_brand')}
         </button>
         {brand !== null && (
-          <button onClick={() => void onReset()} disabled={disabled || saving} style={btnGhost}>Reset to default</button>
+          <button onClick={() => void onReset()} disabled={disabled || saving} style={btnGhost}>{t('admin.reset_to_default')}</button>
         )}
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>
@@ -1598,7 +1598,7 @@ function AnalyticsSection({ callAdmin }: {
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div style={{ color: 'var(--text-muted)' }}>Crunching the real numbers…</div>;
+  if (loading) return <div style={{ color: 'var(--text-muted)' }}>{t('admin.crunching_the_real_numbers')}</div>;
 
   const a = data || {};
   const perDay: { date: string; count: number }[] = a.meetingsPerDay || [];
@@ -1611,24 +1611,24 @@ function AnalyticsSection({ callAdmin }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Analytics" sub="Real usage from the live tables. No invented numbers: anything not measurable yet shows as a dash." onRefresh={load} refreshing={loading} />
+      <SectionTitle title={t('admin.analytics')} sub="Real usage from the live tables. No invented numbers: anything not measurable yet shows as a dash." onRefresh={load} refreshing={loading} />
       {error && <Notice kind="error">{error}</Notice>}
       {a.generatedAt && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>Generated {formatDateTime(a.generatedAt)}</p>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-        <StatCard label="Meetings, all time" value={String(a.totalMeetings ?? '-')} sub={`${a.completedMeetings ?? 0} completed · ${a.liveMeetings ?? 0} live now`} icon={<Video size={22} />} />
+        <StatCard label={t('admin.meetings_all_time')} value={String(a.totalMeetings ?? '-')} sub={t('admin.completed_live_now', { v1: a.completedMeetings ?? 0, v2: a.liveMeetings ?? 0 })} icon={<Video size={22} />} />
         <StatCard label="Accounts" value={String(a.totalUsers ?? '-')} icon={<Users size={22} />} />
-        <StatCard label="Participant-minutes / month" value={a.participantMinutesThisMonth === null || a.participantMinutesThisMonth === undefined ? '-' : String(a.participantMinutesThisMonth)} sub="Approximate" icon={<Activity size={22} />} />
-        <StatCard label="Meeting rating" value={fb && fb.average !== null ? `${fb.average} / 5` : '-'} sub={fb ? `${fb.count} rating${fb.count === 1 ? '' : 's'} after meetings` : 'No ratings yet'} icon={<BarChart3 size={22} />} />
-        <StatCard label="Open abuse reports" value={a.reportsAvailable ? String(a.openReports ?? 0) : '-'} sub={a.reportsAvailable ? 'See the Reports section' : 'Needs the Phase D database setup'} icon={<FileWarning size={22} />} />
+        <StatCard label={t('admin.participant_minutes_month')} value={a.participantMinutesThisMonth === null || a.participantMinutesThisMonth === undefined ? '-' : String(a.participantMinutesThisMonth)} sub="Approximate" icon={<Activity size={22} />} />
+        <StatCard label={t('admin.meeting_rating')} value={fb && fb.average !== null ? `${fb.average} / 5` : '-'} sub={fb ? t('admin.rating_after_meetings', { v1: fb.count, v2: fb.count === 1 ? '' : 's' }) : 'No ratings yet'} icon={<BarChart3 size={22} />} />
+        <StatCard label={t('admin.open_abuse_reports')} value={a.reportsAvailable ? String(a.openReports ?? 0) : '-'} sub={a.reportsAvailable ? 'See the Reports section' : 'Needs the Phase D database setup'} icon={<FileWarning size={22} />} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Meetings per day, last 30 days</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.meetings_per_day_last_30')}</h3>
           {perDay.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No meetings in the last 30 days.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_meetings_in_the_last')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
               {perDay.map((d) => (
@@ -1644,11 +1644,11 @@ function AnalyticsSection({ callAdmin }: {
           )}
         </div>
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Peak times (UTC hour)</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.peak_times_utc_hour')}</h3>
           {peak.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No meeting times to chart yet.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_meeting_times_to_chart')}</p>
           ) : (
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '3px', height: '110px' }} title="Meetings per UTC hour">
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '3px', height: '110px' }} title={t('admin.meetings_per_utc_hour')}>
               {peak.map((h) => (
                 <div key={h.hour} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', height: '100%', justifyContent: 'flex-end' }}>
                   <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{h.count > 0 ? h.count : ''}</span>
@@ -1658,15 +1658,15 @@ function AnalyticsSection({ callAdmin }: {
               ))}
             </div>
           )}
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: '0.6rem 0 0' }}>Hours are UTC. Rwanda is UTC+2, so 07:00 here is 05:00 UTC.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: '0.6rem 0 0' }}>{t('admin.hours_are_utc_rwanda_is')}</p>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Plan usage</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.plan_usage')}</h3>
           {plans.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No plan data yet.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_plan_data_yet')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {plans.map((p) => (
@@ -1677,9 +1677,9 @@ function AnalyticsSection({ callAdmin }: {
               ))}
             </div>
           )}
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '1.25rem 0 0.75rem' }}>Top hosts</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '1.25rem 0 0.75rem' }}>{t('admin.top_hosts')}</h3>
           {(a.topHosts || []).length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No host data yet.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_host_data_yet')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {(a.topHosts || []).map((h: any) => (
@@ -1692,11 +1692,11 @@ function AnalyticsSection({ callAdmin }: {
           )}
         </div>
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Feedback after meetings</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.feedback_after_meetings')}</h3>
           {!fb ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>Ratings need the Phase D database setup first (run giinmeet_phaseD.sql).</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.ratings_need_the_phase_d')}</p>
           ) : fb.count === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No ratings yet. Ratings appear here once meetings end and people tap a star.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_ratings_yet_ratings_appear')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
               {[5, 4, 3, 2, 1].map((stars) => (
@@ -1762,14 +1762,14 @@ function ReportsSection({ callAdmin, showToast }: {
     }
   };
 
-  if (loading) return <div style={{ color: 'var(--text-muted)' }}>Loading reports…</div>;
+  if (loading) return <div style={{ color: 'var(--text-muted)' }}>{t('admin.loading_reports')}</div>;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Reports" sub="Meetings people reported for abuse or spam. Review them here, and block the host when a report checks out." onRefresh={load} refreshing={loading} />
+      <SectionTitle title={t('admin.reports')} sub="Meetings people reported for abuse or spam. Review them here, and block the host when a report checks out." onRefresh={load} refreshing={loading} />
       {error && <Notice kind="warn">{error}</Notice>}
       {reports.length === 0 && !error ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>No reports. When someone reports a meeting, it lands here.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>{t('admin.no_reports_when_someone_reports')}</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           {reports.map((r: any) => (
@@ -1786,14 +1786,14 @@ function ReportsSection({ callAdmin, showToast }: {
               {r.detail && <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: '0.35rem 0 0' }}>{r.detail}</p>}
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
                 {r.status === 'open' && (
-                  <button style={btnGhost} disabled={busyId === r.id} onClick={() => void act(r.id, 'set-status', 'reviewed')}>Mark reviewed</button>
+                  <button style={btnGhost} disabled={busyId === r.id} onClick={() => void act(r.id, 'set-status', 'reviewed')}>{t('admin.mark_reviewed')}</button>
                 )}
                 {r.status !== 'resolved' && (
-                  <button style={btnGhost} disabled={busyId === r.id} onClick={() => void act(r.id, 'set-status', 'resolved')}>Mark resolved</button>
+                  <button style={btnGhost} disabled={busyId === r.id} onClick={() => void act(r.id, 'set-status', 'resolved')}>{t('admin.mark_resolved')}</button>
                 )}
                 {r.hostId && (
-                  <button style={{ ...btnGhost, borderColor: 'rgba(239,68,68,0.5)', color: '#DC2626' }} disabled={busyId === r.id} onClick={() => { if (window.confirm(`Block ${r.hostEmail || 'this host'} from your meetings? They will not be able to rejoin.`)) void act(r.id, 'block-host'); }}>
-                    <Ban size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} />Block host
+                  <button style={{ ...btnGhost, borderColor: 'rgba(239,68,68,0.5)', color: '#DC2626' }} disabled={busyId === r.id} onClick={() => { if (window.confirm(t('admin.block_from_your_meetings_they', { v1: r.hostEmail || 'this host' }))) void act(r.id, 'block-host'); }}>
+                    <Ban size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} />{t('admin.block_host')}
                   </button>
                 )}
               </div>
@@ -1850,18 +1850,18 @@ function MonitoringSection({ callAdmin }: {
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div style={{ color: 'var(--text-muted)' }}>Checking the live systems…</div>;
+  if (loading) return <div style={{ color: 'var(--text-muted)' }}>{t('admin.checking_the_live_systems')}</div>;
 
   const s = overview?.stats || {};
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Monitoring" sub="Live rooms on the video server, recent sign-ins, and system health, refreshed on demand." onRefresh={load} refreshing={loading} />
+      <SectionTitle title={t('admin.monitoring')} sub="Live rooms on the video server, recent sign-ins, and system health, refreshed on demand." onRefresh={load} refreshing={loading} />
       {error && <Notice kind="warn">{error}</Notice>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-        <StatCard label="LiveKit rooms live" value={String(rooms.length)} sub={s.livekitConfigured ? 'Video server connected' : 'Video server not configured'} icon={<Cloud size={22} />} />
-        <StatCard label="People in live rooms" value={String(rooms.reduce((n: number, r: any) => n + (r.participants?.length || 0), 0))} icon={<Users size={22} />} />
-        <StatCard label="Meetings live now" value={String(s.liveMeetings ?? 0)} sub={`${s.meetingsToday ?? 0} scheduled today`} icon={<Video size={22} />} />
-        <StatCard label="Participant-minutes / month" value={s.participantMinutesThisMonth === null ? '-' : String(s.participantMinutesThisMonth)} sub="Approximate · LiveKit free tier: 5,000 / month" icon={<Activity size={22} />} />
+        <StatCard label={t('admin.livekit_rooms_live')} value={String(rooms.length)} sub={s.livekitConfigured ? 'Video server connected' : 'Video server not configured'} icon={<Cloud size={22} />} />
+        <StatCard label={t('admin.people_in_live_rooms')} value={String(rooms.reduce((n: number, r: any) => n + (r.participants?.length || 0), 0))} icon={<Users size={22} />} />
+        <StatCard label={t('admin.meetings_live_now')} value={String(s.liveMeetings ?? 0)} sub={t('admin.scheduled_today', { v1: s.meetingsToday ?? 0 })} icon={<Video size={22} />} />
+        <StatCard label={t('admin.participant_minutes_month')} value={s.participantMinutesThisMonth === null ? '-' : String(s.participantMinutesThisMonth)} sub="Approximate · LiveKit free tier: 5,000 / month" icon={<Activity size={22} />} />
       </div>
 
       {/* Phase D (43): service health. The latest check per service,
@@ -1869,14 +1869,14 @@ function MonitoringSection({ callAdmin }: {
           site right now. A new outage also emails the superadmin. */}
       <div style={{ ...cardStyle }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.75rem' }}>Service health</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.75rem' }}>{t('admin.service_health')}</h3>
           <button onClick={() => void runHealthCheck()} disabled={checking} style={{ ...btnPrimary, height: '36px', fontSize: '0.85rem' }}>
             {checking ? 'Checking…' : 'Run health check'}
           </button>
         </div>
         {!health?.available ? (
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>
-            Health monitoring needs the Phase D database setup first (run giinmeet_phaseD.sql). Once it is run, this card probes LiveKit, Supabase and the site.
+            {t('admin.health_monitoring_needs_the_phase')}
           </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
@@ -1912,16 +1912,16 @@ function MonitoringSection({ callAdmin }: {
               </div>
             )}
             {(health.alerts || []).length === 0 && (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>No open alerts. When a service goes down, an alert appears here and the superadmin gets an email.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>{t('admin.no_open_alerts_when_a')}</p>
             )}
           </div>
         )}
       </div>
 
       <div style={{ ...cardStyle }}>
-        <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.75rem' }}>Live rooms on the video server</h3>
+        <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.75rem' }}>{t('admin.live_rooms_on_the_video')}</h3>
         {rooms.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No room is live on the video server right now.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_room_is_live_on')}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {rooms.map((r: any) => (
@@ -1943,9 +1943,9 @@ function MonitoringSection({ callAdmin }: {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Recent sign-ins</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.recent_sign_ins')}</h3>
           {(overview?.recentSignins || []).length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No recent sign-ins recorded.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_recent_sign_ins_recorded')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {overview.recentSignins.map((r: any) => (
@@ -1958,9 +1958,9 @@ function MonitoringSection({ callAdmin }: {
           )}
         </div>
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Error / audit feed</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>{t('admin.error_audit_feed')}</h3>
           {(overview?.recentAudit || []).length === 0 && (overview?.recentDeletions || []).length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>Nothing recorded yet. Superadmin actions and meeting deletions appear here.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.nothing_recorded_yet_superadmin_actions')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {(overview?.recentAudit || []).map((a: any, i: number) => (
@@ -1971,7 +1971,7 @@ function MonitoringSection({ callAdmin }: {
               ))}
               {(overview?.recentDeletions || []).map((d: any, i: number) => (
                 <div key={`d${i}`} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.9rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                  <span>Meeting deleted: <strong>{d.meeting_title || 'Untitled'}</strong></span>
+                  <span>{t('admin.meeting_deleted')} <strong>{d.meeting_title || 'Untitled'}</strong></span>
                   <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatDateTime(d.deleted_at)}</span>
                 </div>
               ))}
@@ -2038,12 +2038,12 @@ function TroubleshootingSection({ callAdmin, showToast }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Troubleshooting" sub="Find a user, diagnose a meeting, and see which database migrations have actually been applied." />
+      <SectionTitle title={t('admin.troubleshooting')} sub="Find a user, diagnose a meeting, and see which database migrations have actually been applied." />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1rem' }}>
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>User lookup</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Auth + profile + meetings for one email address.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>{t('admin.user_lookup')}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>{t('admin.auth_profile_meetings_for_one')}</p>
           <form onSubmit={runLookup} style={{ display: 'flex', gap: '0.5rem' }}>
             <input type="email" placeholder="user@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required style={inputStyle} />
             <button type="submit" disabled={lookupBusy} style={btnPrimary}>{lookupBusy ? '…' : 'Look up'}</button>
@@ -2056,18 +2056,18 @@ function TroubleshootingSection({ callAdmin, showToast }: {
               <div style={{ color: 'var(--text-muted)' }}>Last sign-in: {formatDateTime(lookup.user.last_sign_in_at)}</div>
               <div style={{ color: 'var(--text-muted)' }}>Email confirmed: {lookup.user.email_confirmed_at ? formatDateTime(lookup.user.email_confirmed_at) : 'not confirmed'}</div>
               <div style={{ color: 'var(--text-muted)' }}>Banned until: {lookup.user.banned_until ? formatDateTime(lookup.user.banned_until) : 'not banned'}</div>
-              <div>Tier: <strong>{lookup.user.profile ? TIER_LABELS[tierForProfile(lookup.user.profile)] : '-'}</strong> · Superadmin: <strong>{lookup.user.profile?.is_superadmin ? 'yes' : 'no'}</strong> · Suspended: <strong>{lookup.user.profile?.is_suspended ? 'yes' : 'no'}</strong></div>
+              <div>Tier: <strong>{lookup.user.profile ? TIER_LABELS[tierForProfile(lookup.user.profile)] : '-'}</strong> {t('admin.superadmin_2')} <strong>{lookup.user.profile?.is_superadmin ? 'yes' : 'no'}</strong> {t('admin.suspended')} <strong>{lookup.user.profile?.is_suspended ? 'yes' : 'no'}</strong></div>
               <div style={{ color: 'var(--text-muted)' }}>Meetings: {lookup.user.meetings_count} total, {lookup.user.live_meetings} live now</div>
-              {!lookup.user.profile && <Notice kind="warn">This auth account has no profile row, the self-healing profile creation will make one on next sign-in.</Notice>}
+              {!lookup.user.profile && <Notice kind="warn">{t('admin.this_auth_account_has_no')}</Notice>}
             </div>
           )}
         </div>
 
         <div style={cardStyle}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Meeting diagnostics</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>Room state, waiting-room participants, and whether the video server still has the room live.</p>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>{t('admin.meeting_diagnostics')}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>{t('admin.room_state_waiting_room_participants')}</p>
           <form onSubmit={runDiagnose} style={{ display: 'flex', gap: '0.5rem' }}>
-            <input type="text" placeholder="Meeting ID (UUID)" value={meetingId} onChange={(e) => setMeetingId(e.target.value)} required style={inputStyle} />
+            <input type="text" placeholder={t('admin.meeting_id_uuid')} value={meetingId} onChange={(e) => setMeetingId(e.target.value)} required style={inputStyle} />
             <button type="submit" disabled={diagBusy} style={btnPrimary}>{diagBusy ? '…' : 'Diagnose'}</button>
           </form>
           {diagnosis && (
@@ -2088,7 +2088,7 @@ function TroubleshootingSection({ callAdmin, showToast }: {
               <div style={{ marginTop: '0.4rem' }}>
                 <strong>Participants ({(diagnosis.participants || []).length}):</strong>
                 {(diagnosis.participants || []).length === 0 ? (
-                  <span style={{ color: 'var(--text-muted)' }}> none recorded</span>
+                  <span style={{ color: 'var(--text-muted)' }}> {t('admin.none_recorded')}</span>
                 ) : (
                   <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.2rem', color: 'var(--text-muted)' }}>
                     {diagnosis.participants.map((p: any) => (
@@ -2104,14 +2104,14 @@ function TroubleshootingSection({ callAdmin, showToast }: {
 
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem' }}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: 0 }}>Migration / SQL status</h3>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: 0 }}>{t('admin.migration_sql_status')}</h3>
           <button onClick={loadChecks} disabled={checksBusy} style={btnGhost}>{checksBusy ? 'Checking…' : 'Check now'}</button>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>
-          Which of the repo’s SQL files have actually been applied to the live database. Probed live where a read can prove it; files that only change a constraint, a policy or an extension say so honestly instead of guessing.
+          {t('admin.which_of_the_repos_sql')}
         </p>
         {checks.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>Press “Check now” to probe the live database.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.press_check_now_to_probe')}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {checks.map((c: any) => (
@@ -2161,29 +2161,29 @@ function AuditSection({ callAdmin }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Audit Log" sub="Every superadmin action, with actor, action, target and time, plus the meeting-deletion trail." onRefresh={load} refreshing={loading} />
+      <SectionTitle title={t('admin.audit_log')} sub="Every superadmin action, with actor, action, target and time, plus the meeting-deletion trail." onRefresh={load} refreshing={loading} />
       {error && <Notice kind="error">{error}</Notice>}
       {notSetUp && (
-        <Notice kind="warn">The audit log is not set up yet, run <strong>giinmeet_superadmin.sql</strong> in the Supabase SQL Editor once. Actions taken before then are not recorded.</Notice>
+        <Notice kind="warn">{t('admin.the_audit_log_is_not')} <strong>giinmeet_superadmin.sql</strong> {t('admin.in_the_supabase_sql_editor_3')}</Notice>
       )}
       {loading ? (
-        <p style={{ color: 'var(--text-muted)' }}>Loading the audit log…</p>
+        <p style={{ color: 'var(--text-muted)' }}>{t('admin.loading_the_audit_log')}</p>
       ) : (
         <>
           <div style={cardStyle}>
-            <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.75rem' }}>Superadmin actions</h3>
+            <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.75rem' }}>{t('admin.superadmin_actions')}</h3>
             {entries.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No superadmin actions recorded yet.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_superadmin_actions_recorded_yet')}</p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.87rem', textAlign: 'left' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                      <th style={{ padding: '0.6rem 0.5rem' }}>When</th>
-                      <th style={{ padding: '0.6rem 0.5rem' }}>Actor</th>
-                      <th style={{ padding: '0.6rem 0.5rem' }}>Action</th>
-                      <th style={{ padding: '0.6rem 0.5rem' }}>Target</th>
-                      <th style={{ padding: '0.6rem 0.5rem' }}>Detail</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.when')}</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.actor')}</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.action')}</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.target')}</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>{t('admin.detail')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2202,9 +2202,9 @@ function AuditSection({ callAdmin }: {
             )}
           </div>
           <div style={cardStyle}>
-            <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.75rem' }}>Meeting deletions</h3>
+            <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.75rem' }}>{t('admin.meeting_deletions')}</h3>
             {deletions.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No meetings have been deleted from history.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{t('admin.no_meetings_have_been_deleted')}</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {deletions.map((d: any, i: number) => (
@@ -2244,21 +2244,21 @@ function SetupSection({ callAdmin }: {
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div style={{ color: 'var(--text-muted)' }}>Checking the system setup…</div>;
+  if (loading) return <div style={{ color: 'var(--text-muted)' }}>{t('admin.checking_the_system_setup')}</div>;
   if (error) return <Notice kind="error">{error}</Notice>;
 
   const setup = overview?.setup || {};
   const items: { icon: React.ReactNode; title: string; ok: boolean; detail: string }[] = [
-    { icon: <Database size={20} />, title: 'Supabase (database + auth)', ok: !!setup.supabase?.ok, detail: setup.supabase?.detail || '' },
-    { icon: <Cloud size={20} />, title: 'LiveKit (video server)', ok: !!setup.livekit?.ok, detail: setup.livekit?.detail || '' },
-    { icon: <Mail size={20} />, title: 'SMTP / Resend (email)', ok: !!setup.resend?.ok, detail: `${setup.resend?.detail || ''} Magic-link and forgot-password emails were verified delivered on 15 Nov 2026.` },
-    { icon: <Server size={20} />, title: 'Vercel (hosting)', ok: !!setup.vercel?.ok, detail: setup.vercel?.detail || '' },
-    { icon: <ShieldCheck size={20} />, title: 'Superadmin SQL', ok: !!setup.superadminSql?.ok, detail: setup.superadminSql?.detail || '' },
+    { icon: <Database size={20} />, title: t('admin.supabase_database_auth'), ok: !!setup.supabase?.ok, detail: setup.supabase?.detail || '' },
+    { icon: <Cloud size={20} />, title: t('admin.livekit_video_server'), ok: !!setup.livekit?.ok, detail: setup.livekit?.detail || '' },
+    { icon: <Mail size={20} />, title: t('admin.smtp_resend_email'), ok: !!setup.resend?.ok, detail: t('admin.magic_link_and_forgot_password', { v1: setup.resend?.detail || '' }) },
+    { icon: <Server size={20} />, title: t('admin.vercel_hosting'), ok: !!setup.vercel?.ok, detail: setup.vercel?.detail || '' },
+    { icon: <ShieldCheck size={20} />, title: t('admin.superadmin_sql'), ok: !!setup.superadminSql?.ok, detail: setup.superadminSql?.detail || '' },
   ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Setup" sub="What the system is built on, whether each piece is live, and what still needs running." onRefresh={load} refreshing={loading} />
+      <SectionTitle title={t('admin.setup')} sub="What the system is built on, whether each piece is live, and what still needs running." onRefresh={load} refreshing={loading} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
         {items.map((it) => (
           <div key={it.title} style={cardStyle}>
@@ -2274,14 +2274,14 @@ function SetupSection({ callAdmin }: {
         ))}
       </div>
       <div style={cardStyle}>
-        <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.5rem' }}>To finish the setup</h3>
+        <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.5rem' }}>{t('admin.to_finish_the_setup')}</h3>
         <ol style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.92rem', lineHeight: 1.7, color: 'var(--text-main)' }}>
-          <li>Run <code>giinmeet_superadmin.sql</code> once in the Supabase SQL Editor (project <code>umeptngfntryekzxifvq</code>).</li>
-          <li>Run any other SQL file the Troubleshooting → Migration status list shows as “Not applied”.</li>
-          <li>Sign in here with the superadmin account, the portal then unlocks Users, Meetings, Configuration, Monitoring and the Audit Log.</li>
+          <li>{t('admin.run')} <code>giinmeet_superadmin.sql</code> {t('admin.once_in_the_supabase_sql')} <code>umeptngfntryekzxifvq</code>).</li>
+          <li>{t('admin.run_any_other_sql_file')}</li>
+          <li>{t('admin.sign_in_here_with_the')}</li>
         </ol>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0.75rem 0 0' }}>
-          The service-role key is still the original one shared in chat, rotation is a dashboard job, not a code job: follow the steps in <code>KEY_ROTATION_STEPS.md</code> in the repo root (create a new key in Supabase, update the Vercel env var, redeploy, verify, then revoke the old key). The code already reads the key from the environment only, so no code change is needed.
+          {t('admin.the_service_role_key_is')} <code>KEY_ROTATION_STEPS.md</code> {t('admin.in_the_repo_root_create')}
         </p>
       </div>
     </div>

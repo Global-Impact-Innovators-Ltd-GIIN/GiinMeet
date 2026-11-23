@@ -229,6 +229,7 @@ export const clearStoredBreakout = (meetingId: string) => {
 import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink, buildWhatsAppInviteUrl, isMeetingHostForUser, getSystemSettings } from '../supabaseClient';
 import { ShortLinkBox } from './ShortLinkBox';
 import { t, useUiLanguage } from '../i18n';
+import { useClickOutside, useClickOutsideMany } from '../hooks/useClickOutside';
 
 // Helper functions defined outside the component to satisfy purity rules
 const generateRandomId = () => {
@@ -444,11 +445,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const startRecording = () => {
     if (isRecording) return;
     if (typeof MediaRecorder === 'undefined') {
-      triggerToast('Recording is not supported in this browser.');
+      triggerToast(t('room.recording_is_not_supported_in'));
       return;
     }
     if (!stream) {
-      triggerToast('Turn your camera or mic on to record.');
+      triggerToast(t('room.turn_your_camera_or_mic'));
       return;
     }
     try {
@@ -465,9 +466,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           a.download = 'giinmeet-recording-' + meetingId + '-' + new Date().toISOString().replace(/[:.]/g, '-') + '.webm';
           a.click();
           setTimeout(() => URL.revokeObjectURL(url), 5000);
-          triggerToast('Recording saved to your downloads.');
+          triggerToast(t('room.recording_saved_to_your_downloads'));
         } catch (e) {
-          triggerToast('Could not save the recording.');
+          triggerToast(t('room.could_not_save_the_recording'));
         }
       };
       rec.start(1000);
@@ -475,9 +476,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setIsRecording(true);
       setRecordingSeconds(0);
       recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
-      triggerToast('Recording started. It saves on this device when you stop.');
+      triggerToast(t('room.recording_started_it_saves_on'));
     } catch (e) {
-      triggerToast('Recording could not start in this browser.');
+      triggerToast(t('room.recording_could_not_start_in'));
     }
   };
   const stopRecording = () => {
@@ -698,11 +699,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // works as before, and the minutes are stored with the item.
     const duration = Math.max(0, Math.min(480, parseInt(newAgendaDuration.trim(), 10) || 0));
     if ((start && !end && !duration) || (!start && end)) {
-      triggerToast('Set a start time and minutes, or a start and an end time, or leave the times blank.');
+      triggerToast(t('room.set_a_start_time_and'));
       return;
     }
     if (start && end && end <= start) {
-      triggerToast('The end time must be after the start time.');
+      triggerToast(t('room.the_end_time_must_be'));
       return;
     }
     let finalEnd = end;
@@ -1110,7 +1111,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       console.warn('[Audio] Browser did not apply mic processing:', missing, s);
       if (!micProcessingWarnedRef.current) {
         micProcessingWarnedRef.current = true;
-        triggerToast(`Your browser could not enable ${missing.join(' and ')} on this microphone, use headphones to keep your speakers out of the mic.`);
+        triggerToast(t('room.your_browser_could_not_enable', { v1: missing.join(' and ') }));
       }
     } catch (e) { /* settings unreadable, capture itself still works */ }
   };
@@ -1340,6 +1341,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [lobbyDrafts, setLobbyDrafts] = useState<Record<string, string>>({});
   // Phase D (46 + 39): report form on the ended screen.
   const [reportOpen, setReportOpen] = useState(false);
+  // Click-outside-to-close for the toolbar menus. The meeting-info card
+  // has two toggles (desktop header and mobile bar), so its boundary
+  // is all three elements; the emoji and hand-raise menus wrap their
+  // toggle and menu in one relative container each. The More menu
+  // already closes on its own full-screen backdrop, and Live Tools is
+  // a docked panel, not a menu, so neither is wired here.
+  const emojiMenuRef = useClickOutside<HTMLDivElement>(() => setShowEmojiReactions(false), showEmojiReactions);
+  const handRaiseRef = useClickOutside<HTMLDivElement>(() => setShowHandRaiseMenu(false), showHandRaiseMenu);
+  const infoCardRef = useRef<HTMLDivElement | null>(null);
+  const infoToggleDesktopRef = useRef<HTMLButtonElement | null>(null);
+  const infoToggleMobileRef = useRef<HTMLButtonElement | null>(null);
+  useClickOutsideMany([infoCardRef, infoToggleDesktopRef, infoToggleMobileRef], () => setShowMeetingInfo(false), showMeetingInfo);
   const [reportReason, setReportReason] = useState('spam');
   const [reportDetail, setReportDetail] = useState('');
   const [reportSent, setReportSent] = useState(false);
@@ -1525,7 +1538,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Timed-agenda start/end alerts, ADMIN ONLY. Every 20s the admin's
   // client checks the timed agenda items: when an item STARTS it shows
-  // a small toast ("Now on: ..."); when an item ENDS it shows a toast
+  // a small toast (t('room.now_on')); when an item ENDS it shows a toast
   // AND the short end popup ("That part has ended"), so the admin
   // knows to move to the next part. Nobody else sees either one, the
   // check runs only when isAdmin, and the toast/popup are local state.
@@ -1546,11 +1559,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const endKey = `end:${item.id}:${item.endTime}`;
         if (!agendaAlertsFiredRef.current.has(startKey) && now >= start.getTime() && now < end.getTime()) {
           agendaAlertsFiredRef.current.add(startKey);
-          triggerToast(`▶ Now on: "${item.text}" (${range})`);
+          triggerToast(t('room.now_on', { v1: item.text, v2: range }));
         }
         if (!agendaAlertsFiredRef.current.has(endKey) && now >= end.getTime() && end.getTime() >= roomJoinedAtRef.current) {
           agendaAlertsFiredRef.current.add(endKey);
-          triggerToast(`✅ "${item.text}" has ended, time to move to the next part.`);
+          triggerToast(t('room.has_ended_time_to', { v1: item.text }));
           setAgendaEndPopup({ id: item.id, text: item.text, endLabel: formatAgendaTime(item.endTime) });
         }
       }
@@ -1605,7 +1618,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       const videoEl = document.querySelector('.remote-video-feed') as HTMLVideoElement || document.querySelector('video') as HTMLVideoElement;
       if (!videoEl) {
-        alert('No active video stream found to pop out.');
+        alert(t('room.no_active_video_stream_found'));
         return;
       }
       if (document.pictureInPictureElement) {
@@ -1753,7 +1766,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (guard.attempts >= 3) {
       setIsVideoOn(false);
       setLocalCameraRecovering(false);
-      triggerToast('Your camera stopped and could not be restarted, you are showing as camera off. Turn your camera on again to retry.');
+      triggerToast(t('room.your_camera_stopped_and_could'));
       return;
     }
     guard.inFlight = true;
@@ -1766,7 +1779,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         video: savedCam ? { deviceId: { exact: savedCam }, width: { ideal: 1280 }, height: { ideal: 720 } } : { width: { ideal: 1280 }, height: { ideal: 720 } }
       });
       const videoTrack = videoStream.getVideoTracks()[0];
-      if (!videoTrack) throw new Error('No video track acquired');
+      if (!videoTrack) throw new Error(t('room.no_video_track_acquired'));
       const oldTrack = localVideoTrackRef.current;
       if (oldTrack && oldTrack !== videoTrack && oldTrack.readyState !== 'live') {
         try { oldTrack.stop(); } catch (e) {}
@@ -2197,7 +2210,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
         const livekitUrl = serverLivekitUrl;
         if (!livekitUrl) {
-          throw new Error('The video server address is missing.');
+          throw new Error(t('room.the_video_server_address_is'));
         }
         await room.connect(livekitUrl, token);
         // Fix Round 8 (#8): a connect that lands is silent. The old
@@ -2256,7 +2269,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           // Say so honestly instead, the notice card offers "Retry
           // video server", and the host can end the breakouts to bring
           // everyone back to the main room.
-          setConnectionNotice(`Could not join Breakout Room ${breakoutRoom}. Check your connection, then press "Retry", or ask the host to end the breakout rooms to return to the main room.`);
+          setConnectionNotice(t('room.could_not_join_breakout_room', { v1: breakoutRoom }));
           return;
         }
         setEngineType('P2P');
@@ -2698,12 +2711,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const queue = sortHandRaiseQueue(handRaises);
     const next = queue[0];
     if (!next) {
-      triggerToast('Nobody has their hand raised right now.');
+      triggerToast(t('room.nobody_has_their_hand_raised'));
       return;
     }
     lowerHand(next.userId);
     setHostSpotlight(next.userId);
-    triggerToast(`${next.name} has the floor.`);
+    triggerToast(t('room.has_the_floor', { v1: next.name }));
   };
 
   // Active peer connection keys state to avoid ref access during render
@@ -2785,7 +2798,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         await publishLiveKitTrack(videoTrack, Track.Source.Camera);
       } catch (err) {
         console.error('Failed to change camera:', err);
-        triggerToast('Could not switch camera, keeping the current one.');
+        triggerToast(t('room.could_not_switch_camera_keeping'));
       }
     }
   };
@@ -2829,7 +2842,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await rebuildPublishedMicTrack();
     } catch (err) {
       console.error('Failed to change microphone:', err);
-      triggerToast('Could not switch microphone, keeping the current one.');
+      triggerToast(t('room.could_not_switch_microphone_keeping'));
     }
   };
 
@@ -2865,7 +2878,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (mode === 'interpretation' && isSpatialAudioEnabled) {
       setIsSpatialAudioEnabled(false);
       try { localStorage.setItem('giin_spatial_audio', 'false'); } catch (e) { /* storage unavailable */ }
-      triggerToast('Spatial audio is off while you listen to the interpreter, so only the interpreter is heard.');
+      triggerToast(t('room.spatial_audio_is_off_while'));
     }
   };
 
@@ -3415,7 +3428,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       roomsCount,
       assignments,
     });
-    alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes. Breakout rooms work just like the main room.`);
+    alert(t('room.started_breakout_rooms_for_minutes', { v1: roomsCount, v2: durationMinutes }));
   };
 
   const handleEndBreakouts = async () => {
@@ -3630,7 +3643,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setMeetingAdminId(newAdminId);
         setLocalAdminId(newAdminId);
         if (currentUser && newAdminId === currentUser.id) {
-          triggerToast('You are now the host of this meeting.');
+          triggerToast(t('room.you_are_now_the_host'));
         }
       })
       // Phase 3 (Feature 1), breakout control lives on this channel, NOT
@@ -3670,7 +3683,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           enterBreakoutRoom(myAssignment);
           setBreakoutTimeRemaining(data.durationSeconds);
           setBreakoutBroadcast(null);
-          alert(`You are being moved to Breakout Room ${myAssignment}.`);
+          alert(t('room.you_are_being_moved_to', { v1: myAssignment }));
         }
       })
       .on('broadcast', { event: 'end-breakout' }, (payload: any) => {
@@ -3686,7 +3699,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setBreakoutTimeRemaining(null);
         setBreakoutAssignments({});
         setBreakoutBroadcast(null);
-        alert('Breakout rooms have ended. Returning to main room.');
+        alert(t('room.breakout_rooms_have_ended_returning'));
       })
       .on('broadcast', { event: 'move-breakout' }, (payload: any) => {
         const data = payload.payload;
@@ -3724,12 +3737,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         enterBreakoutRoom(target);
         if (target === null) {
           setBreakoutTimeRemaining(null);
-          triggerToast('The host moved you back to the main room.');
+          triggerToast(t('room.the_host_moved_you_back'));
         } else {
           // A late joiner moved in mid-session has no timer yet, take
           // the remaining time the host sent with the move.
           setBreakoutTimeRemaining(prev => prev ?? (typeof data.durationSeconds === 'number' ? data.durationSeconds : null));
-          triggerToast(`The host moved you to Breakout Room ${target}.`);
+          triggerToast(t('room.the_host_moved_you_to', { v1: target }));
         }
       })
       .on('broadcast', { event: 'breakout-broadcast' }, (payload: any) => {
@@ -3786,7 +3799,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }
         if (myAssignment !== null && myAssignment !== breakoutRoomRef.current) {
           enterBreakoutRoom(myAssignment);
-          triggerToast(`You are in Breakout Room ${myAssignment}.`);
+          triggerToast(t('room.you_are_in_breakout_room', { v1: myAssignment }));
         }
       })
       .subscribe((status: string) => {
@@ -3827,7 +3840,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setMeetingAdminId(newAdmin);
         setLocalAdminId(newAdmin);
         if (currentUser && newAdmin === currentUser.id && wasAdmin && wasAdmin !== currentUser.id) {
-          triggerToast('You are now the host of this meeting.');
+          triggerToast(t('room.you_are_now_the_host'));
         }
       }
     };
@@ -4053,7 +4066,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
       if (myRoom !== null && myRoom !== breakoutRoomRef.current) {
         enterBreakoutRoom(myRoom);
-        triggerToast(`You are in Breakout Room ${myRoom}.`);
+        triggerToast(t('room.you_are_in_breakout_room', { v1: myRoom }));
       }
     }).catch(() => { /* no server state: the stored snapshot stands */ });
     return () => { alive = false; };
@@ -4661,7 +4674,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setMeetingAdminId(data.newAdminId);
         setLocalAdminId(data.newAdminId);
         if (currentUser && data.newAdminId === currentUser.id) {
-          alert('You have been designated as the meeting host.');
+          alert(t('room.you_have_been_designated_as'));
         }
       })
       .on('broadcast', { event: 'settings-update' }, (payload: any) => {
@@ -4700,7 +4713,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (localAudioTrackRef.current) {
             localAudioTrackRef.current.enabled = false;
           }
-          alert('The host has muted everyone.');
+          alert(t('room.the_host_has_muted_everyone'));
         }
       })
       .on('broadcast', { event: 'mute-participant' }, (payload: any) => {
@@ -4715,7 +4728,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (localAudioTrackRef.current) {
             localAudioTrackRef.current.enabled = false;
           }
-          alert('You have been muted by the host.');
+          alert(t('room.you_have_been_muted_by'));
         }
       })
       .on('broadcast', { event: 'remove-participant' }, async (payload: any) => {
@@ -4756,7 +4769,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (localVideoTrackRef.current) {
             localVideoTrackRef.current.enabled = false;
           }
-          alert("The host has disabled everyone's video.");
+          alert(t('room.the_host_has_disabled_everyones'));
         }
       })
       .on('broadcast', { event: 'play-sound' }, (payload: any) => {
@@ -5074,7 +5087,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Screen sharing track feed replacement injector (User gesture compliant)
   const startScreenShare = async (): Promise<boolean> => {
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
-      triggerToast('Screen sharing is not supported in this browser, try a desktop browser instead.');
+      triggerToast(t('room.screen_sharing_is_not_supported'));
       return false;
     }
     setScreenShareError(null);
@@ -5106,7 +5119,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (!screenTrack) {
         displayStream.getTracks().forEach(t => t.stop());
         setScreenShareStarting(false);
-        triggerToast('Screen sharing started but no video track was captured -- please try again.');
+        triggerToast(t('room.screen_sharing_started_but_no'));
         return false;
       }
       const screenAudioTrack = displayStream.getAudioTracks()[0] || null;
@@ -5245,7 +5258,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         ? 'Your browser refused the screen capture settings -- try again.'
         : err?.name === 'PickerTimeoutError'
         ? 'The screen picker did not open, check that screen sharing is allowed for this browser, then try again.'
-        : `Screen sharing could not start (${err?.message || 'unknown error'}).`;
+        : t('room.screen_sharing_could_not_start', { v1: err?.message || 'unknown error' });
       triggerToast(reason);
       setScreenShareError(reason);
       return false;
@@ -5254,7 +5267,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const handleToggleScreenShare = async () => {
     if (isScreenShareBlockedForGuests && !isAdmin) {
-      alert('Screen sharing is blocked by the host.');
+      alert(t('room.screen_sharing_is_blocked_by'));
       return;
     }
     const nextVal = !isScreenSharing;
@@ -5464,7 +5477,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         isMuteOnEntryEnabled
       });
       if (!result.rowUpdated) {
-        triggerToast('That guest is no longer in the waiting room - they may have left already.');
+        triggerToast(t('room.that_guest_is_no_longer'));
       }
     } catch (err: any) {
       triggerToast(err?.message || 'Could not admit the participant - please try again.');
@@ -5498,11 +5511,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       const result = await giinApi.admitAllWaiting(meetingId);
       triggerToast(
         result.admitted > 0
-          ? `${result.admitted} ${result.admitted === 1 ? 'person' : 'people'} admitted${result.waitingLeft > 0 ? `, ${result.waitingLeft} still waiting${result.full ? ' (the room is full for this plan)' : ''}` : ''}.`
-          : 'Nobody was admitted. The room may be full for this plan.',
+          ? t('room.admitted_result', { v1: result.admitted, v2: result.admitted === 1 ? t('room.person') : t('room.people'), v3: result.waitingLeft > 0 ? t('room.still_waiting', { v1: result.waitingLeft, v2: result.full ? t('room.room_full_for_plan') : '' }) : '' })
+          : t('room.nobody_admitted'),
       );
     } catch (err: any) {
-      triggerToast(err?.message || 'Could not admit everyone, please try again.');
+      triggerToast(err?.message || t('room.could_not_admit_everyone'));
     }
   };
 
@@ -5513,7 +5526,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       await giinApi.messageLobbyGuest(meetingId, participantRowId, message);
       setLobbyDrafts((prev) => ({ ...prev, [participantRowId]: '' }));
-      triggerToast('Message sent to the waiting guest.');
+      triggerToast(t('room.message_sent_to_the_waiting'));
     } catch (err: any) {
       triggerToast(err?.message || 'Could not send the message.');
     }
@@ -5536,7 +5549,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setNewRegularEmail('');
       setNewRegularName('');
       await loadRegulars();
-      triggerToast(`${email} will bypass the lobby from now on.`);
+      triggerToast(t('room.will_bypass_the_lobby_from', { v1: email }));
     } catch (err: any) {
       triggerToast(err?.message || 'Could not add the regular.');
     }
@@ -5548,9 +5561,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       const result = await giinApi.setE2eeEnabled(meetingId, enabled);
       setE2eeEnabled(result.enabled);
       if (result.enabled) {
-        triggerToast('Encryption is on for this meeting. New joiners encrypt media with the meeting passcode as the key. People already in the room must rejoin for their media to be encrypted.');
+        triggerToast(t('room.encryption_is_on_for_this'));
       } else {
-        triggerToast('Encryption is off for this meeting. Media uses standard transport encryption.');
+        triggerToast(t('room.encryption_is_off_for_this'));
       }
     } catch (err: any) {
       triggerToast(err?.message || 'Could not change the encryption setting.');
@@ -5564,13 +5577,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const userId = participant.userId || participant.user_id;
     const name = participant.name || 'This person';
     if (!userId) {
-      triggerToast('Guests without an account cannot be blocked by email here. Remove them instead, or decline them in the lobby.');
+      triggerToast(t('room.guests_without_an_account_cannot'));
       return;
     }
-    if (!confirm(`Block ${name}? They will not be able to rejoin your meetings until you unblock them.`)) return;
+    if (!confirm(t('room.block_they_will_not_be', { v1: name }))) return;
     try {
       await giinApi.blockUserById(userId);
-      triggerToast(`${name} is blocked from your meetings.`);
+      triggerToast(t('room.is_blocked_from_your_meetings', { v1: name }));
     } catch (err: any) {
       triggerToast(err?.message || 'Could not block this person.');
     }
@@ -5578,12 +5591,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Delegate admin host rights to another user (server-verified, Phase 6).
   const handleDesignateAdmin = async (targetUserId: string) => {
-    if (!confirm('Are you sure you want to designate this user as the meeting admin? You will transfer host settings.')) return;
+    if (!confirm(t('room.are_you_sure_you_want'))) return;
     try {
       await giinApi.transferHost(meetingId, targetUserId);
       setMeetingAdminId(targetUserId);
       setLocalAdminId(targetUserId);
-      alert('Meeting administrator transferred successfully!');
+      alert(t('room.meeting_administrator_transferred_succes'));
     } catch (err: any) {
       console.error(err);
       alert(err?.message || 'Could not transfer the host role. Please try again.');
@@ -5798,7 +5811,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         ? 'No microphone was found on this device, plug one in, then turn your mic on again.'
         : err?.name === 'NotReadableError'
         ? 'Your microphone is in use by another app, close that app, then turn your mic on again.'
-        : `Your microphone could not be started (${err?.message || 'unknown error'}). Others cannot hear you.`;
+        : t('room.your_microphone_could_not_be', { v1: err?.message || 'unknown error' });
       triggerToast(reason);
     };
     const tryOnce = async (withSaved: boolean): Promise<MediaStreamTrack> => {
@@ -5818,7 +5831,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           window.setTimeout(() => reject(Object.assign(new Error('Microphone timed out'), { name: 'TimeoutError' })), 15000)),
       ]);
       const t = s.getAudioTracks()[0];
-      if (!t) throw new Error('No audio track acquired');
+      if (!t) throw new Error(t('room.no_audio_track_acquired'));
       return t;
     };
     const publish = async (audioTrack: MediaStreamTrack): Promise<boolean> => {
@@ -5934,10 +5947,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             ]);
             if (!active) {
               videoStream.getTracks().forEach(t => t.stop());
-              throw new Error('Component unmounted');
+              throw new Error(t('room.component_unmounted'));
             }
             const t = videoStream.getVideoTracks()[0];
-            if (!t) throw new Error('No video track acquired');
+            if (!t) throw new Error(t('room.no_video_track_acquired'));
             return t;
           };
           const attachAcquiredVideo = (videoTrack: MediaStreamTrack) => {
@@ -5998,7 +6011,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               ? 'No camera was found on this device, you are joining with the camera off.'
               : lastVideoErr?.name === 'NotReadableError'
               ? 'Your camera is in use by another app, close that app, then turn your camera on again.'
-              : `Your camera could not be started (${lastVideoErr?.message || 'unknown error'}). You are joining with the camera off.`;
+              : t('room.your_camera_could_not_be', { v1: lastVideoErr?.message || 'unknown error' });
             triggerToast(reason);
             setLocalCameraLive(false);
             setIsVideoOn(false);
@@ -6198,7 +6211,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         broadcastMediaState({ isVideoOn: false });
       }
       await applyLocalVideoQuality('low');
-      triggerToast('Low-bandwidth mode is on, audio first, video off. Everything else still works.');
+      triggerToast(t('room.low_bandwidth_mode_is_on'));
     } else {
       setBgFxStatus(null);
       if (lowBandwidthVideoWasOnRef.current) {
@@ -6207,7 +6220,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         broadcastMediaState({ isVideoOn: true });
       }
       await applyLocalVideoQuality('high');
-      triggerToast('Low-bandwidth mode is off, your camera is back on.');
+      triggerToast(t('room.low_bandwidth_mode_is_off'));
     }
   };
 
@@ -6495,7 +6508,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // route - the server broadcasts it with a server marker.
     try {
       await giinApi.controlMeeting(meetingId, 'mute-all');
-      alert('Mute all request sent.');
+      alert(t('room.mute_all_request_sent'));
     } catch (err: any) {
       triggerToast(err?.message || 'Could not mute everyone - please try again.');
     }
@@ -6507,7 +6520,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // server route - the server broadcasts it with a server marker.
     try {
       await giinApi.controlMeeting(meetingId, 'disable-video-all');
-      alert('Disable video request sent.');
+      alert(t('room.disable_video_request_sent'));
     } catch (err: any) {
       triggerToast(err?.message || "Could not disable everyone's video - please try again.");
     }
@@ -6669,7 +6682,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await giveBrowserSuppressorBack();
       if (!noiseSuppressionWarnedRef.current) {
         noiseSuppressionWarnedRef.current = true;
-        triggerToast('Noise cleaning could not start on this device, your normal microphone is still on, with the browser’s own noise reduction.');
+        triggerToast(t('room.noise_cleaning_could_not_start'));
       }
       return rawTrack;
     }
@@ -6751,7 +6764,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!nextVal) {
       setNoiseSuppressionStatus('idle');
     } else if (noiseSuppressionChainRef.current) {
-      triggerToast('Noise cleaning is on, background noise is removed before anyone hears it.');
+      triggerToast(t('room.noise_cleaning_is_on_background'));
     }
   };
 
@@ -6763,7 +6776,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!rawTrack || rawTrack.readyState !== 'live') {
       setIsAudioEnhanced(false);
       isAudioEnhancedRef.current = false;
-      triggerToast('Microphone is not ready yet, try again once your mic is on.');
+      triggerToast(t('room.microphone_is_not_ready_yet'));
       return;
     }
     // No re-acquisition: the toggle re-routes the CURRENT capture, so it
@@ -6777,7 +6790,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await rebuildPublishedMicTrack();
     } catch (err) {
       console.error('Failed to toggle audio enhancement:', err);
-      triggerToast('Could not change Studio Voice, keeping the current microphone.');
+      triggerToast(t('room.could_not_change_studio_voice'));
     }
   };
 
@@ -6816,16 +6829,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const enableBackgroundFx = async (mode: 'blur' | 'giin') => {
     if (lowBandwidthRef.current) {
-      triggerToast('Background effects are off in low-bandwidth mode, turn it off to use them.');
+      triggerToast(t('room.background_effects_are_off_in'));
       return;
     }
     if (!isVideoOnRef.current) {
-      triggerToast('Turn your camera on first to use a background effect.');
+      triggerToast(t('room.turn_your_camera_on_first'));
       return;
     }
     const raw = bgFxSessionRef.current ? bgFxRawTrackRef.current : localVideoTrackRef.current;
     if (!raw || raw.readyState !== 'live') {
-      triggerToast('Turn your camera on first to use a background effect.');
+      triggerToast(t('room.turn_your_camera_on_first'));
       return;
     }
     setBgFxStatus('Loading background effect…');
@@ -6834,7 +6847,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       const session = await startBackgroundFx(raw, mode, () => {
         // The model failed mid-call: fall back to the normal camera.
         void disableBackgroundFx();
-        triggerToast('The background effect stopped, your video is back to normal.');
+        triggerToast(t('room.the_background_effect_stopped_your'));
       });
       bgFxSessionRef.current = session;
       bgFxRawTrackRef.current = raw;
@@ -7143,7 +7156,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // anonymous: it needs to know who got it right.
     if (newPollIsAnonymous) {
       if (newPollIsQuiz) {
-        triggerToast('A quiz cannot be anonymous, it needs to know who got it right.');
+        triggerToast(t('room.a_quiz_cannot_be_anonymous'));
         return;
       }
       try {
@@ -7152,7 +7165,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setNewPollQuestion('');
         setNewPollOptions(['', '']);
         setNewPollIsAnonymous(false);
-        triggerToast('Anonymous poll launched. Nobody sees who answered what, only the totals.');
+        triggerToast(t('room.anonymous_poll_launched_nobody_sees'));
       } catch (err: any) {
         triggerToast(err?.message || 'The anonymous poll could not be launched.');
       }
@@ -7337,12 +7350,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     e.target.value = '';
     if (!file) return;
     if (file.size > 25 * 1024 * 1024) {
-      triggerToast('That file is larger than 25 MB, chat files are limited to 25 MB.');
+      triggerToast(t('room.that_file_is_larger_than'));
       return;
     }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      triggerToast('Sign in to share files. Guests can read chat but cannot send messages or files.');
+      triggerToast(t('room.sign_in_to_share_files'));
       return;
     }
     triggerToast(`Uploading ${file.name}…`);
@@ -7352,7 +7365,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await giinApi.sendMessage({
         thread_id: meetingId,
         sender_name: senderName,
-        text: `📎 ${name}, file:${path}`,
+        text: t('room.file_message', { v1: name, v2: path }),
         user_id: currentUser?.id
       });
       const list = await giinApi.getMessages(meetingId);
@@ -7532,7 +7545,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         </p>
         {endedState.reason !== 'removed' && endedState.durationSeconds !== undefined && (
           <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '420px' }}>
-            Meeting lasted {formatElapsedTime(endedState.durationSeconds)}{endedState.attendeeCount !== undefined ? ` · ${endedState.attendeeCount} ${endedState.attendeeCount === 1 ? 'person' : 'people'} attended` : ''}
+            Meeting lasted {formatElapsedTime(endedState.durationSeconds)}{endedState.attendeeCount !== undefined ? t(endedState.attendeeCount === 1 ? 'room.person_attended' : 'room.people_attended', { v1: endedState.attendeeCount }) : ''}
           </p>
         )}
         <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '420px' }}>{meetingTitle}</p>
@@ -7552,18 +7565,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                   className="premium-input"
                   style={{ width: '100%', height: '40px', fontSize: '0.85rem' }}
                 >
-                  <option value="spam">Spam</option>
-                  <option value="abuse">Abuse</option>
-                  <option value="harassment">Harassment</option>
-                  <option value="scam">Scam</option>
-                  <option value="other">Something else</option>
+                  <option value="spam">{t('room.spam')}</option>
+                  <option value="abuse">{t('room.abuse')}</option>
+                  <option value="harassment">{t('room.harassment')}</option>
+                  <option value="scam">{t('room.scam')}</option>
+                  <option value="other">{t('room.something_else')}</option>
                 </select>
                 <input
                   type="text"
                   value={reportDetail}
                   onChange={(e) => setReportDetail(e.target.value)}
                   maxLength={500}
-                  placeholder="What happened? (optional)"
+                  placeholder={t('room.what_happened_optional')}
                   className="premium-input"
                   style={{ width: '100%', height: '40px', fontSize: '0.85rem' }}
                 />
@@ -7581,7 +7594,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                   className="premium-btn premium-btn-secondary"
                   style={{ height: '40px', padding: '0 1.25rem', fontSize: '0.85rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
                 >
-                  Send report
+                  {t('room.send_report')}
                 </button>
                 {reportError && (
                   <span style={{ fontSize: '0.8rem', color: '#FCA5A5' }}>{reportError}</span>
@@ -7592,27 +7605,27 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 onClick={() => setReportOpen(true)}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem', textDecoration: 'underline' }}
               >
-                Report a problem with this meeting
+                {t('room.report_a_problem_with_this')}
               </button>
             )}
           </div>
         )}
         {reportSent && (
-          <span style={{ fontSize: '0.85rem', color: '#10B981', fontWeight: 600 }}>Report sent. The superadmin will review it.</span>
+          <span style={{ fontSize: '0.85rem', color: '#10B981', fontWeight: 600 }}>{t('room.report_sent_the_superadmin_will')}</span>
         )}
         {currentUser?.email === 'guest@phone.giinmeet.com' ? (
           <>
             {endedState.reason !== 'removed' && (
-              <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px' }}>Thanks for joining.</p>
+              <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px' }}>{t('room.thanks_for_joining')}</p>
             )}
             <button
               onClick={() => { try { window.close(); } catch (e) { /* tab was not opened by script */ } }}
               className="premium-btn premium-btn-primary"
               style={{ marginTop: '0.5rem', height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
             >
-              Close this tab
+              {t('room.close_this_tab')}
             </button>
-            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '420px' }}>If the tab stays open, you can close it yourself.</p>
+            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '420px' }}>{t('room.if_the_tab_stays_open')}</p>
           </>
         ) : (
           <button
@@ -7620,7 +7633,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             className="premium-btn premium-btn-primary"
             style={{ marginTop: '0.5rem', height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
           >
-            Back to dashboard
+            {t('room.back_to_dashboard')}
           </button>
         )}
       </div>
@@ -7647,7 +7660,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'rgba(250, 189, 2, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <PhoneOff size={28} color="var(--color-accent)" />
         </div>
-        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>You left the meeting</h2>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>{t('room.you_left_the_meeting')}</h2>
         <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px', lineHeight: 1.5 }}>
           {leftCall.title} · Meeting lasted {formatElapsedTime(leftCall.durationSeconds)}
         </p>
@@ -7657,14 +7670,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             className="premium-btn premium-btn-primary"
             style={{ height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
           >
-            Rejoin meeting
+            {t('room.rejoin_meeting')}
           </button>
           <button
             onClick={() => onEndMeeting()}
             className="premium-btn premium-btn-secondary"
             style={{ height: '44px', padding: '0 1.5rem', fontSize: '0.9rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
           >
-            Go to dashboard
+            {t('room.go_to_dashboard')}
           </button>
         </div>
         <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Returning to the dashboard in {leftCallCountdown}s…</p>
@@ -7693,7 +7706,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     let avatarName = currentUser?.name || 'You';
     
     if (screenPeerKey) {
-      label = `${peerStates[screenPeerKey]?.name || 'Someone'}'s Screen`;
+      label = t('room.name_screen', { v1: peerStates[screenPeerKey]?.name || 'Someone' });
       isVideoActive = true;
     } else if (activeRemoteKey) {
       label = peerStates[activeRemoteKey]?.name || 'Participant';
@@ -7775,7 +7788,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 {initials}
               </div>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                {isLocalStream ? 'Camera Off' : `${label} (Camera Off)`}
+                {isLocalStream ? 'Camera Off' : t('room.camera_off_2', { v1: label })}
               </span>
             </div>
           )}
@@ -7800,7 +7813,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <div style={{ display: 'flex', gap: '4px', pointerEvents: 'auto' }}>
               <button 
                 onClick={() => onMinimizeToggle?.(false)}
-                title="Restore to full screen"
+                title={t('room.restore_to_full_screen')}
                 style={{
                   background: 'rgba(255, 255, 255, 0.15)',
                   border: 'none',
@@ -7882,7 +7895,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 padding: '2px',
                 display: 'flex'
               }}
-              title="Pop out Picture-in-Picture"
+              title={t('room.pop_out_picture_in_picture')}
             >
               <Monitor size={14} />
             </button>
@@ -7899,7 +7912,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 padding: '2px',
                 display: 'flex'
               }}
-              title="Leave Call"
+              title={t('room.leave_call')}
             >
               <PhoneOff size={14} />
             </button>
@@ -7949,7 +7962,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             </span>
           )}
           {breakoutTimeRemaining !== null && breakoutTimeRemaining <= 60 && (
-            <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>Ending soon</span>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>{t('room.ending_soon')}</span>
           )}
         </div>
       )}
@@ -7980,7 +7993,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </span>
           <button
             onClick={() => setBreakoutBroadcast(null)}
-            aria-label="Dismiss broadcast"
+            aria-label={t('room.dismiss_broadcast')}
             style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, color: '#111827', padding: 0, lineHeight: 1 }}
           >
             ×
@@ -8010,16 +8023,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           maxWidth: '90%'
         }}>
           <WifiOff size={14} color="var(--color-accent)" />
-          <span>Connection is weak, switch to low-bandwidth mode (audio first, video off)?</span>
+          <span>{t('room.connection_is_weak_switch_to')}</span>
           <button
             onClick={() => void setLowBandwidthMode(true)}
             style={{ border: 'none', background: 'var(--color-accent)', color: 'black', padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
-            Turn on
+            {t('room.turn_on')}
           </button>
           <button
             onClick={() => setShowLowBandwidthSuggestion(false)}
-            aria-label="Dismiss suggestion"
+            aria-label={t('room.dismiss_suggestion')}
             style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, color: 'white', padding: 0, lineHeight: 1 }}
           >
             ×
@@ -8046,12 +8059,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
         }}>
           <WifiOff size={14} />
-          <span>Low-bandwidth mode, audio first, your video is off</span>
+          <span>{t('room.low_bandwidth_mode_audio_first')}</span>
           <button
             onClick={() => void setLowBandwidthMode(false)}
             style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700, color: '#111827', textDecoration: 'underline', padding: 0 }}
           >
-            Turn off
+            {t('room.turn_off')}
           </button>
         </div>
       )}
@@ -8077,7 +8090,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           {/* Participant count */}
           <span
             style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'white', fontWeight: 600 }}
-            title={`${participants.length + 1} people in this meeting (including you)`}
+            title={t('room.people_in_this_meeting_including', { v1: participants.length + 1 })}
           >
             <Users size={14} color="var(--color-accent)" />
             {participants.length + 1}
@@ -8094,14 +8107,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               border: '1px solid var(--border-color)',
               borderRadius: '4px'
             }}
-            title="Minimize to Floating Window"
+            title={t('room.minimize_to_floating_window')}
           >
             <Minimize2 size={14} />
-            <span className="hide-mobile-text">Minimize</span>
+            <span className="hide-mobile-text">{t('room.minimize')}</span>
           </button>
 
           {!isP2PCall && (
             <button 
+              ref={infoToggleDesktopRef}
               onClick={() => setShowMeetingInfo(!showMeetingInfo)}
               className="premium-btn premium-btn-secondary"
               style={{
@@ -8116,7 +8130,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             >
               <Users size={14} />
               <Info size={14} />
-              <span className="hide-mobile-text">Invite & Info</span>
+              <span className="hide-mobile-text">{t('room.invite_info')}</span>
             </button>
           )}
           {/* Security details hidden to run silently in the background */}
@@ -8125,7 +8139,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       {/* Floating Invite Info Card Overlay */}
       {showMeetingInfo && (
-        <div style={{
+        <div ref={infoCardRef} style={{
           position: 'absolute',
           top: '80px',
           right: '24px',
@@ -8143,10 +8157,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             boxShadow: 'var(--shadow-premium)'
           }}>
             <div className="flex-between">
-              <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'white' }}>Boardroom Invite Info</h4>
+              <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'white' }}>{t('room.boardroom_invite_info')}</h4>
               <button 
                 onClick={() => setShowMeetingInfo(false)}
-                className="panel-close-btn" aria-label="Close invite info"
+                className="panel-close-btn" aria-label={t('room.close_invite_info')}
               >
                 &times;
               </button>
@@ -8155,7 +8169,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)', margin: 0 }} />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Meeting Join Link</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>{t('room.meeting_join_link')}</span>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <input 
                   type="text" 
@@ -8183,13 +8197,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
               <div>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Meeting ID</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>{t('room.meeting_id')}</span>
                 <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>
                   {meetingId}
                 </div>
               </div>
               <div>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Passcode</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>{t('room.passcode')}</span>
                 <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>
                   {passcode || ','}
                 </div>
@@ -8199,13 +8213,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <button
               onClick={() => {
                 const link = buildJoinLink(meetingId, passcode);
-                const invitation = `Please join my ${getLocalBrandName()} video conference:
-Topic: ${meetingTitle}
-Join Link: ${link}
-Meeting ID: ${meetingId}
-Passcode: ${passcode || ','}
-
-Media encrypted in transit (DTLS-SRTP).`;
+                const invitation = t('room.please_join_my_video_conference', { v1: getLocalBrandName(), v2: meetingTitle, v3: link, v4: meetingId, v5: passcode || ',' });
                 navigator.clipboard.writeText(invitation);
                 setCopiedInfo('details');
                 setTimeout(() => setCopiedInfo(null), 2000);
@@ -8227,7 +8235,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               className="premium-btn premium-btn-secondary"
               style={{ width: '100%', justifyContent: 'center', gap: '6px', padding: '0.5rem', fontSize: '0.75rem' }}
             >
-              <span>Share Invite on WhatsApp</span>
+              <span>{t('room.share_invite_on_whatsapp')}</span>
             </button>
           </div>
         </div>
@@ -8298,7 +8306,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   className="premium-btn premium-btn-accent"
                   style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
                 >
-                  Admit all
+                  {t('room.admit_all')}
                 </button>
               )}
             </div>
@@ -8312,14 +8320,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                       className="premium-btn premium-btn-accent"
                       style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
                     >
-                      Admit
+                      {t('room.admit')}
                     </button>
                     <button
                       onClick={() => handleAdmitParticipant(w.participantRowId || w.id, 'Declined')}
                       className="premium-btn premium-btn-danger"
                       style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px', backgroundColor: '#EF4444' }}
                     >
-                      Decline
+                      {t('room.decline')}
                     </button>
                   </div>
                 </div>
@@ -8332,7 +8340,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     value={lobbyDrafts[w.participantRowId || w.id] || ''}
                     onChange={(e) => setLobbyDrafts((prev) => ({ ...prev, [w.participantRowId || w.id]: e.target.value }))}
                     maxLength={280}
-                    placeholder="Message this guest while they wait"
+                    placeholder={t('room.message_this_guest_while_they')}
                     style={{ flex: 1, minWidth: 0, height: '30px', padding: '0 0.6rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.25)', backgroundColor: 'rgba(0,0,0,0.25)', color: 'white', fontSize: '0.8rem' }}
                   />
                   <button
@@ -8340,7 +8348,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     disabled={!(lobbyDrafts[w.participantRowId || w.id] || '').trim()}
                     style={{ border: '1px solid rgba(255,255,255,0.35)', background: 'none', color: 'white', cursor: 'pointer', padding: '0 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, height: '30px', opacity: (lobbyDrafts[w.participantRowId || w.id] || '').trim() ? 1 : 0.5 }}
                   >
-                    Send
+                    {t('room.send')}
                   </button>
                 </div>
               </div>
@@ -8355,14 +8363,14 @@ Media encrypted in transit (DTLS-SRTP).`;
             style={{ position: 'absolute', top: '12px', left: '50%', transform: 'translateX(-50%)', width: 'min(680px, calc(100% - 2rem))', backgroundColor: 'rgba(2, 6, 23, 0.95)', border: '1px solid var(--color-accent)', borderRadius: '10px', padding: '0.6rem 0.9rem', zIndex: 101, boxShadow: '0 8px 30px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', animation: 'pop-in 0.25s ease' }}
             onClick={() => { setActivePanel('polls'); setIsQAActive(true); setQaBanner(null); }}
             role="button"
-            title="Open the Q&A Hub"
+            title={t('room.open_the_q_a_hub')}
           >
             <span style={{ fontSize: '1rem', flexShrink: 0 }}>❓</span>
             <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--color-accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>NEW QUESTION · {qaBanner.author}</span>
             <span style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <span key={qaBanner.id} className="qa-banner-scroll-text" style={{ display: 'inline-block', whiteSpace: 'nowrap', fontSize: '0.9rem', fontWeight: 600, color: 'white', animationDuration: `${Math.min(10, Math.max(5, Math.ceil(qaBanner.text.length / 12)))}s` }}>{qaBanner.text}</span>
             </span>
-            <button onClick={(e) => { e.stopPropagation(); setQaBanner(null); setHighlightedQaId(null); }} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '1.3rem', cursor: 'pointer', flexShrink: 0, padding: '0.35rem 0.5rem', minWidth: '36px', minHeight: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>&times;</button>
+            <button onClick={(e) => { e.stopPropagation(); setQaBanner(null); setHighlightedQaId(null); }} aria-label={t('room.dismiss')} style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '1.3rem', cursor: 'pointer', flexShrink: 0, padding: '0.35rem 0.5rem', minWidth: '36px', minHeight: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>&times;</button>
           </div>
         )}
 
@@ -8384,8 +8392,8 @@ Media encrypted in transit (DTLS-SRTP).`;
           >
             <div onPointerDown={onAgendaNotePointerDown} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 0.8rem', backgroundColor: 'rgba(0,0,0,0.08)', cursor: 'grab', touchAction: 'none', userSelect: 'none' }}>
               <GripVertical size={14} />
-              <span style={{ flex: 1, fontSize: '0.8rem', fontWeight: 800 }}>📋 Meeting Agenda</span>
-              <button onClick={() => setAgendaNoteVisible(false)} aria-label="Close agenda" style={{ background: 'none', border: 'none', color: '#0B0F19', fontSize: '1.2rem', cursor: 'pointer', lineHeight: 1, padding: '0.1rem 0.3rem' }}>&times;</button>
+              <span style={{ flex: 1, fontSize: '0.8rem', fontWeight: 800 }}>{t('room.meeting_agenda')}</span>
+              <button onClick={() => setAgendaNoteVisible(false)} aria-label={t('room.close_agenda')} style={{ background: 'none', border: 'none', color: '#0B0F19', fontSize: '1.2rem', cursor: 'pointer', lineHeight: 1, padding: '0.1rem 0.3rem' }}>&times;</button>
             </div>
             <ol style={{ margin: 0, padding: '0.75rem 0.9rem 0.9rem 1.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600, lineHeight: 1.45 }}>
               {agendaItems.map(item => (<li key={item.id} style={{ display: 'flex', gap: '0.4rem', alignItems: 'baseline', flexWrap: 'wrap' }}><span style={{ flex: '1 1 auto' }}>{item.startTime && item.endTime ? `${formatAgendaTime(item.startTime)} to ${formatAgendaTime(item.endTime)} · ` : ''}{item.text}</span><AgendaTimerChip item={item} /></li>))}
@@ -8575,7 +8583,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   {meetingTitle || 'Calling...'}
                 </h4>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.75rem', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-                  <span>Calling</span>
+                  <span>{t('room.calling')}</span>
                   <span className="calling-dot">.</span>
                   <span className="calling-dot">.</span>
                   <span className="calling-dot">.</span>
@@ -8643,7 +8651,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   }}>
                     <User size={20} color="white" />
                   </div>
-                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Camera Off</span>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{t('room.camera_off')}</span>
                 </div>
               )}
               <div style={{
@@ -8656,7 +8664,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 fontSize: '0.65rem',
                 color: 'white'
               }}>
-                You
+                {t('room.you')}
               </div>
             </div>
           </div>
@@ -8750,7 +8758,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <User size={36} color="white" />
                     </div>
                     <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-accent)' }}>{currentUser?.name || 'You'}</span>
-                    <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 500 }}>Webcam Off</span>
+                    <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 500 }}>{t('room.webcam_off')}</span>
                   </div>
                 )}
 
@@ -8790,7 +8798,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 ))}
               </div>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>
-                You are currently the only participant in this boardroom conference.
+                {t('room.you_are_currently_the_only')}
               </span>
             </div>
           </div>
@@ -8917,7 +8925,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}>
                       <User size={28} color="white" />
                     </div>
-                    <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-accent)' }}>You</span>
+                    <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-accent)' }}>{t('room.you')}</span>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{localCameraRecovering ? 'Camera reconnecting…' : 'Camera Off'}</span>
                   </div>
                 )}
@@ -8984,7 +8992,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   {isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                   <span
                     style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: engineType === 'LIVEKIT' ? '#10B981' : 'var(--color-accent)' }}
-                    title="Video connection"
+                    title={t('room.video_connection')}
                   />
                 </div>
                 {activeReactions.filter(r => r.senderKey === myKey).map(r => (
@@ -9071,7 +9079,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         cursor: 'pointer',
                         zIndex: 10
                       }}
-                      title={pinnedKey === peerKey ? `Unpin ${p.name}` : `Pin ${p.name} as the spotlight (speaker view)`}
+                      title={pinnedKey === peerKey ? `Unpin ${p.name}` : t('room.pin_as_the_spotlight_speaker', { v1: p.name })}
                     >
                       <Pin size={13} />
                     </button>
@@ -9110,7 +9118,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           cursor: 'pointer',
                           zIndex: 10
                         }}
-                        title={spotlightKey === peerKey ? `Stop spotlighting ${p.name} for everyone` : `Spotlight ${p.name} for everyone`}
+                        title={spotlightKey === peerKey ? t('room.stop_spotlighting_for_everyone', { v1: p.name }) : t('room.spotlight_for_everyone', { v1: p.name })}
                       >
                         <Star size={13} />
                       </button>
@@ -9129,7 +9137,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           try {
                             await giinApi.controlMeeting(meetingId, 'mute-participant', { targetUserId: p.userId || undefined, targetRowId: p.id });
                           } catch (err: any) {
-                            triggerToast(err?.message || `Could not mute ${p.name} - please try again.`);
+                            triggerToast(err?.message || t('room.could_not_mute_please_try', { v1: p.name }));
                           }
                         }}
                         style={{
@@ -9154,7 +9162,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         title={`Mute ${p.name}`}
                       >
                         <MicOff size={13} />
-                        <span style={{ fontSize: '0.65rem', fontWeight: 700 }}>Mute</span>
+                        <span style={{ fontSize: '0.65rem', fontWeight: 700 }}>{t('room.mute')}</span>
                       </button>
                     )}
                     {hasConnection && activeStreamObj && (
@@ -9256,7 +9264,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       dimming overlay. Reconnects happen quietly. */}
                   {pState.isReconnecting && (
                     <span
-                      title="Connection healing"
+                      title={t('room.connection_healing')}
                       style={{
                         position: 'absolute',
                         top: '10px',
@@ -9472,7 +9480,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         fontFamily: 'monospace',
                         letterSpacing: '3px'
                       }}>
-                        {`CONFIDENTIAL • GIIN SECURE SYSTEM • ${currentUser?.email || 'GUEST'} • ${new Date().toLocaleDateString()}`}
+                        {t('room.confidential_giin_secure_system', { v1: currentUser?.email || 'GUEST', v2: new Date().toLocaleDateString() })}
                       </div>
                     </div>
                     )}
@@ -9520,7 +9528,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <span>
                         {isScreenSharing
                           ? 'You are sharing your screen'
-                          : `${screenSharePeerKey ? (peerStates[screenSharePeerKey]?.name || 'Participant') : 'Participant'} is sharing screen`}
+                          : t('room.is_sharing_screen', { v1: screenSharePeerKey ? (peerStates[screenSharePeerKey]?.name || 'Participant') : 'Participant' })}
                       </span>
                         {isScreenSharing && (
                           <button
@@ -9537,7 +9545,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                               cursor: 'pointer'
                             }}
                           >
-                            Stop sharing
+                            {t('room.stopShare')}
                           </button>
                         )}
                     </div>
@@ -9598,7 +9606,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 {layoutMode === 'focus' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.75rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(250,189,2,0.08)', fontSize: '0.8rem', color: 'white', position: 'relative', zIndex: 5 }}>
                     <span style={{ flex: '1 1 auto', minWidth: 0 }}>{t('room.focusOn')}</span>
-                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }} onClick={() => setLayoutMode('grid')}>Show everyone</button>
+                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }} onClick={() => setLayoutMode('grid')}>{t('room.show_everyone')}</button>
                   </div>
                 )}
                 {/* Portrait-phone tile auto-size: this inner wrapper carries
@@ -9650,23 +9658,23 @@ Media encrypted in transit (DTLS-SRTP).`;
             zIndex: 5
           }}>
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
-              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Meeting Chat</h4>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>{t('room.meeting_chat')}</h4>
               {/* Phase C2b (4), chat auto-translation: each reader picks their own language. */}
               <select
                 value={chatLang}
                 onChange={(e) => { setChatLang(e.target.value as 'original' | 'en' | 'fr' | 'rw'); setChatTranslationUnavailable(null); }}
-                aria-label="Translate chat messages into"
-                title="Translate chat messages into your language"
+                aria-label={t('room.translate_chat_messages_into')}
+                title={t('room.translate_chat_messages_into_your')}
                 style={{ height: '28px', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px', cursor: 'pointer', marginLeft: 'auto' }}
               >
-                <option value="original" style={{ color: 'black' }}>Original language</option>
+                <option value="original" style={{ color: 'black' }}>{t('room.original_language')}</option>
                 <option value="en" style={{ color: 'black' }}>English</option>
                 <option value="fr" style={{ color: 'black' }}>French</option>
                 <option value="rw" style={{ color: 'black' }}>Kinyarwanda</option>
               </select>
               <button 
                 onClick={() => setActivePanel('none')}
-                className="panel-close-btn" aria-label="Close panel"
+                className="panel-close-btn" aria-label={t('room.close_panel')}
               >
                 &times;
               </button>
@@ -9709,11 +9717,11 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Phase C2b (10), private whispers: only you and the other person see these. */}
               {whispers.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid #1E293B', paddingTop: '0.75rem' }}>
-                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#FBBF24' }}>PRIVATE WHISPERS, ONLY YOU SEE THESE</span>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#FBBF24' }}>{t('room.private_whispers_only_you_see')}</span>
                   {whispers.map((w) => (
                     <div key={w.id} style={{ alignSelf: w.self ? 'flex-end' : 'flex-start', maxWidth: '85%', display: 'flex', flexDirection: 'column', alignItems: w.self ? 'flex-end' : 'flex-start' }}>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.15rem' }}>
-                        {w.self ? `Whisper to ${w.recipientName}` : `Whisper from ${w.senderName}`} &bull; {new Date(w.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {w.self ? `Whisper to ${w.recipientName}` : t('room.whisper_from', { v1: w.senderName })} &bull; {new Date(w.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                       <div style={{ padding: '0.6rem 0.85rem', borderRadius: '8px', backgroundColor: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.4)', color: 'white', fontSize: '0.85rem', lineHeight: 1.3 }}>
                         <PrivateNote text="Private" /> <span style={{ marginLeft: '0.25rem' }}>{w.text}</span>
@@ -9725,14 +9733,14 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Phase C2b (9), voice notes: private playback on your own device only. */}
               {voiceNotes.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid #1E293B', paddingTop: '0.75rem' }}>
-                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>VOICE NOTES, TAP TO PLAY ON YOUR DEVICE ONLY</span>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.voice_notes_tap_to_play')}</span>
                   {voiceNotes.map((n) => (
                     <div key={n.id} style={{ alignSelf: n.self ? 'flex-end' : 'flex-start', maxWidth: '85%', display: 'flex', flexDirection: 'column', alignItems: n.self ? 'flex-end' : 'flex-start' }}>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.15rem' }}>
                         {n.senderName} &bull; {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} &bull; {n.durationSeconds}s
                       </span>
                       <audio controls preload="none" src={n.url} style={{ maxWidth: '220px', height: '36px' }} />
-                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Plays only on your device, never into the meeting audio.</span>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{t('room.plays_only_on_your_device')}</span>
                     </div>
                   ))}
                 </div>
@@ -9746,17 +9754,17 @@ Media encrypted in transit (DTLS-SRTP).`;
                 value={whisperRecipient}
                 onChange={(e) => setWhisperRecipient(e.target.value)}
                 disabled={(!canSendChat || (isChatLocked && !isAdmin))}
-                aria-label="Send to everyone or whisper to one person"
-                title="Send to everyone, or whisper privately to one person"
+                aria-label={t('room.send_to_everyone_or_whisper')}
+                title={t('room.send_to_everyone_or_whisper_2')}
                 style={{ height: '34px', fontSize: '0.75rem', backgroundColor: '#1E293B', color: 'white', border: '1px solid #1E293B', borderRadius: '4px', cursor: 'pointer', maxWidth: '104px', flexShrink: 0 }}
               >
-                <option value="everyone" style={{ color: 'black' }}>Everyone</option>
+                <option value="everyone" style={{ color: 'black' }}>{t('room.everyone')}</option>
                 {participants.filter(p => (p.userId || p.id) !== myKey).map(p => (
                   <option key={p.userId || p.id} value={p.userId || p.id} style={{ color: 'black' }}>Whisper: {p.name}</option>
                 ))}
               </select>
               <label
-                title="Share a file (up to 25 MB; signed-in users only)"
+                title={t('room.share_a_file_up_to')}
                 style={{
                   background: '#1E293B',
                   border: 'none',
@@ -9776,7 +9784,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </label>
               <input 
                 type="text" 
-                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !canSendChat ? "Sign in to send messages, guests can read chat" : whisperRecipient !== 'everyone' ? `Whisper privately to ${(participants.find(p => (p.userId || p.id) === whisperRecipient)?.name) || 'that person'}...` : "Send message to everyone..."} 
+                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !canSendChat ? "Sign in to send messages, guests can read chat" : whisperRecipient !== 'everyone' ? t('room.whisper_privately_to', { v1: (participants.find(p => (p.userId || p.id) === whisperRecipient)?.name) || 'that person' }) : "Send message to everyone..."} 
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 disabled={(!canSendChat || (isChatLocked && !isAdmin))}
@@ -9831,7 +9839,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Participants ({participants.length + 1}{roomCapacity ? ` / ${roomCapacity}` : ''})</h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                className="panel-close-btn" aria-label="Close panel"
+                className="panel-close-btn" aria-label={t('room.close_panel')}
               >
                 &times;
               </button>
@@ -9844,7 +9852,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   back in the room they chose. */}
               {breakoutTimeRemaining !== null && (
                 <div style={{ padding: '0.75rem', border: '1px solid var(--color-accent)', borderRadius: '8px', backgroundColor: 'rgba(250, 189, 2, 0.05)' }}>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>Breakout rooms, choose your room</div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>{t('room.breakout_rooms_choose_your_room')}</div>
                   <p style={{ margin: '0.3rem 0 0.6rem', fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
                     You are in {breakoutRoom ? `Room ${breakoutRoom}` : 'the main room'}. Pick a room to move yourself.
                   </p>
@@ -9853,7 +9861,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       onClick={() => handleSelfSelectRoom(null)}
                       style={{ padding: '4px 8px', fontSize: '0.75rem', borderRadius: '4px', border: 'none', backgroundColor: breakoutRoom === null ? 'var(--color-accent)' : 'rgba(255,255,255,0.1)', color: breakoutRoom === null ? 'black' : 'white', cursor: 'pointer', fontWeight: 600 }}
                     >
-                      Main room
+                      {t('room.main_room')}
                     </button>
                     {Array.from({ length: breakoutRoomsCount }).map((_, idx) => {
                       const rNum = idx + 1;
@@ -9892,13 +9900,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                           onClick={callOnNext}
                           style={{ border: 'none', background: 'var(--color-accent)', color: 'black', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 700, padding: '3px 8px', borderRadius: '4px', boxShadow: '0 2px 8px rgba(250,189,2,0.35)' }}
                         >
-                          Call on next
+                          {t('room.call_on_next')}
                         </button>
                         <button 
                           onClick={clearAllHands}
                           style={{ border: 'none', background: 'none', color: '#EF4444', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 600 }}
                         >
-                          Lower All
+                          {t('room.lower_all')}
                         </button>
                       </span>
                     )}
@@ -9951,7 +9959,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                                   fontWeight: 600
                                 }}
                               >
-                                Lower
+                                {t('room.lower')}
                               </button>
                             )}
                           </div>
@@ -9968,7 +9976,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     Y
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', minWidth: 0 }}>You<OrgBadge org={orgBadges[myKey] || (myParticipantRowId ? orgBadges[myParticipantRowId] : undefined)} /></div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', minWidth: 0 }}>{t('room.you')}<OrgBadge org={orgBadges[myKey] || (myParticipantRowId ? orgBadges[myParticipantRowId] : undefined)} /></div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{isAdmin ? 'Host' : isCoHost ? 'Co-host' : isModerator ? 'Moderator' : 'Guest'}</div>
                   </div>
                 </div>
@@ -10003,9 +10011,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                           <button
                             onClick={() => handleDesignateAdmin(p.userId!)}
                             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
-                            title="Designate Admin"
+                            title={t('room.designate_admin')}
                           >
-                            Make Admin
+                            {t('room.make_admin')}
                           </button>
                         )}
                         {isAdmin && (
@@ -10013,7 +10021,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             onClick={async () => {
                               const { error } = await giinApi.setParticipantRole(meetingId, p.id, 'CoHost');
                               if (error) {
-                                triggerToast(`Could not make ${p.name} a co-host, please try again.`);
+                                triggerToast(t('room.could_not_make_a_co', { v1: p.name }));
                               } else {
                                 setCoHostKeys(prev => {
                                   const next = new Set(prev);
@@ -10021,13 +10029,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                                   if (p.userId) next.add(p.userId);
                                   return next;
                                 });
-                                triggerToast(`${p.name} is now a co-host and can admit people, mute and remove participants, and manage breakout rooms.`);
+                                triggerToast(t('room.is_now_a_co_host', { v1: p.name }));
                               }
                             }}
                             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
-                            title="Make Co-Host (can admit people, mute and remove participants, and manage breakout rooms)"
+                            title={t('room.make_co_host_can_admit')}
                           >
-                            Make Co-Host
+                            {t('room.make_co_host')}
                           </button>
                         )}
                         {isAdmin && (
@@ -10035,7 +10043,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             onClick={async () => {
                               const { error } = await giinApi.setParticipantRole(meetingId, p.id, 'Moderator');
                               if (error) {
-                                triggerToast(`Could not make ${p.name} a moderator, please try again.`);
+                                triggerToast(t('room.could_not_make_a_moderator', { v1: p.name }));
                               } else {
                                 setModeratorKeys(prev => {
                                   const next = new Set(prev);
@@ -10043,13 +10051,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                                   if (p.userId) next.add(p.userId);
                                   return next;
                                 });
-                                triggerToast(`${p.name} is now a moderator and can mute and remove participants and manage breakout rooms (but cannot admit people).`);
+                                triggerToast(t('room.is_now_a_moderator_and', { v1: p.name }));
                               }
                             }}
                             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--color-accent)', fontWeight: 600, padding: '2px 4px' }}
-                            title="Make Moderator (can mute and remove participants and manage breakout rooms; cannot admit people)"
+                            title={t('room.make_moderator_can_mute_and')}
                           >
-                            Make Moderator
+                            {t('room.make_moderator')}
                           </button>
                         )}
                         {isAdmin && (p.role === 'CoHost' || p.role === 'Moderator') && (
@@ -10057,7 +10065,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             onClick={async () => {
                               const { error } = await giinApi.setParticipantRole(meetingId, p.id, 'Participant');
                               if (error) {
-                                triggerToast(`Could not remove ${p.name}'s role, please try again.`);
+                                triggerToast(t('room.could_not_remove_s_role', { v1: p.name }));
                               } else {
                                 setCoHostKeys(prev => {
                                   const next = new Set(prev);
@@ -10071,13 +10079,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                                   if (p.userId) next.delete(p.userId);
                                   return next;
                                 });
-                                triggerToast(`${p.name} is a participant again.`);
+                                triggerToast(t('room.is_a_participant_again', { v1: p.name }));
                               }
                             }}
                             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', color: '#FCA5A5', fontWeight: 600, padding: '2px 4px' }}
-                            title="Remove this person's co-host / moderator role"
+                            title={t('room.remove_this_persons_co_host')}
                           >
-                            Remove Role
+                            {t('room.remove_role')}
                           </button>
                         )}
                         
@@ -10090,7 +10098,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                               try {
                                 await giinApi.controlMeeting(meetingId, 'mute-participant', { targetUserId: p.userId || undefined, targetRowId: p.id });
                               } catch (err: any) {
-                                triggerToast(err?.message || `Could not mute ${p.name} - please try again.`);
+                                triggerToast(err?.message || t('room.could_not_mute_please_try', { v1: p.name }));
                               }
                             }}
                             style={{
@@ -10103,7 +10111,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                               padding: '4px',
                               borderRadius: '4px'
                             }}
-                            title="Mute Participant"
+                            title={t('room.mute_participant')}
                           >
                             <MicOff size={13} />
                           </button>
@@ -10114,7 +10122,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           disabled={busyControlKey === p.id}
                           onClick={async () => {
                             if (busyControlKey) return;
-                            if (confirm(`Are you sure you want to remove ${p.name} from the meeting?`)) {
+                            if (confirm(t('room.are_you_sure_you_want_2', { v1: p.name }))) {
                               // Fix Round 7 (#1 + #3): the kick goes
                               // through the host-verified server route -
                               // the server deletes the row AND broadcasts
@@ -10131,7 +10139,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                                 // the Removed section below, with Re-invite.
                                 loadRemovedParticipants();
                               } catch (err: any) {
-                                triggerToast(err?.message || `Could not remove ${p.name} from the meeting - please try again.`);
+                                triggerToast(err?.message || t('room.could_not_remove_from_the', { v1: p.name }));
                               } finally {
                                 setBusyControlKey(null);
                               }
@@ -10148,9 +10156,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                             padding: '3px 6px',
                             borderRadius: '4px'
                           }}
-                          title="Remove Participant"
+                          title={t('room.remove_participant')}
                         >
-                          Remove
+                          {t('room.remove')}
                         </button>
                         )}
                         {isAdmin && p.userId && p.userId !== currentUser?.id && (
@@ -10166,9 +10174,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                               padding: '3px 6px',
                               borderRadius: '4px'
                             }}
-                            title="Block this person from your meetings (server-enforced, they cannot rejoin by refreshing)"
+                            title={t('room.block_this_person_from_your')}
                           >
-                            Block
+                            {t('room.block')}
                           </button>
                         )}
                       </div>
@@ -10191,20 +10199,20 @@ Media encrypted in transit (DTLS-SRTP).`;
                         onClick={async () => {
                           try {
                             await giinApi.admitParticipant(meetingId, rp.id, 'Admitted');
-                            triggerToast(`${rp.name} was invited back, they can rejoin with the same link.`);
+                            triggerToast(t('room.was_invited_back_they_can', { v1: rp.name }));
                             loadRemovedParticipants();
                           } catch (err: any) {
-                            triggerToast(err?.message || `Could not invite ${rp.name} back, please try again.`);
+                            triggerToast(err?.message || t('room.could_not_invite_back_please', { v1: rp.name }));
                           }
                         }}
                         style={{ border: 'none', background: 'rgba(16, 185, 129, 0.12)', cursor: 'pointer', color: '#10B981', fontSize: '0.7rem', fontWeight: 600, padding: '3px 8px', borderRadius: '4px' }}
-                        title="Invite this person back into the meeting"
+                        title={t('room.invite_this_person_back_into')}
                       >
                         Re-invite
                       </button>
                     </div>
                   ))}
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Removed people cannot rejoin with the link until you invite them back.</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('room.removed_people_cannot_rejoin_with')}</span>
                 </div>
               )}
             </div>
@@ -10225,7 +10233,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>{isAdmin ? 'Host Controls' : 'Moderator Controls'}</h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                className="panel-close-btn" aria-label="Close panel"
+                className="panel-close-btn" aria-label={t('room.close_panel')}
               >
                 &times;
               </button>
@@ -10241,7 +10249,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Lock Meeting Toggle */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Lock Meeting</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{t('room.lock_meeting')}</span>
                   <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                     <input 
                       type="checkbox" 
@@ -10264,7 +10272,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  Prevent any new participants from joining the meeting room.
+                  {t('room.prevent_any_new_participants_from')}
                 </span>
               </div>
 
@@ -10277,7 +10285,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   their media to be encrypted. */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Encrypted Media</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{t('room.encrypted_media')}</span>
                   <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                     <input
                       type="checkbox"
@@ -10300,7 +10308,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  Audio and video encrypted between participants, with the meeting passcode as the key. GiinMeet and LiveKit only relay encrypted media. Chat, files, names and meeting details are not covered.
+                  {t('room.audio_and_video_encrypted_between')}
                 </span>
               </div>
 
@@ -10309,16 +10317,16 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Phase D (38): regulars who bypass the lobby. */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Regulars (skip the lobby)</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{t('room.regulars_skip_the_lobby')}</span>
                   <button
                     onClick={loadRegulars}
                     style={{ background: 'none', border: '1px solid #1E293B', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.25rem 0.6rem', fontSize: '0.75rem', fontWeight: 600 }}
                   >
-                    Show list
+                    {t('room.show_list')}
                   </button>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  People you trust bypass the waiting room and join straight in. Only signed-in people can be regulars.
+                  {t('room.people_you_trust_bypass_the')}
                 </span>
                 {regulars.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
@@ -10329,7 +10337,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           onClick={async () => { try { await giinApi.removeRegular(r.email); await loadRegulars(); } catch (err: any) { triggerToast(err?.message || 'Could not remove the regular.'); } }}
                           style={{ background: 'none', border: 'none', color: '#FCA5A5', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
                         >
-                          Remove
+                          {t('room.remove')}
                         </button>
                       </div>
                     ))}
@@ -10340,7 +10348,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     type="email"
                     value={newRegularEmail}
                     onChange={(e) => setNewRegularEmail(e.target.value)}
-                    placeholder="Email of a regular"
+                    placeholder={t('room.email_of_a_regular')}
                     style={{ flex: 1, minWidth: 0, height: '34px', padding: '0 0.6rem', borderRadius: '6px', border: '1px solid #1E293B', backgroundColor: '#0B0F19', color: 'white', fontSize: '0.8rem' }}
                   />
                   <button
@@ -10348,7 +10356,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     disabled={!newRegularEmail.trim()}
                     style={{ background: 'var(--color-accent)', border: 'none', color: '#07090E', cursor: 'pointer', padding: '0 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700, height: '34px', opacity: newRegularEmail.trim() ? 1 : 0.5 }}
                   >
-                    Add
+                    {t('room.add')}
                   </button>
                 </div>
                 <input
@@ -10356,7 +10364,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   value={newRegularName}
                   onChange={(e) => setNewRegularName(e.target.value)}
                   maxLength={120}
-                  placeholder="Name (optional)"
+                  placeholder={t('room.name_optional')}
                   style={{ height: '34px', padding: '0 0.6rem', borderRadius: '6px', border: '1px solid #1E293B', backgroundColor: '#0B0F19', color: 'white', fontSize: '0.8rem' }}
                 />
               </div>
@@ -10366,7 +10374,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Toggle Waiting Room */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Waiting Room</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{t('room.waiting_room')}</span>
                   <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                     <input 
                       type="checkbox" 
@@ -10389,7 +10397,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  New participants must be approved by you before entering the meeting.
+                  {t('room.new_participants_must_be_approved')}
                 </span>
               </div>
 
@@ -10398,7 +10406,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Toggle In-Call Chat */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Lock In-Call Chat</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{t('room.lock_in_call_chat')}</span>
                   <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                     <input 
                       type="checkbox" 
@@ -10421,7 +10429,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  When locked, only you can send messages. Other participants can only view.
+                  {t('room.when_locked_only_you_can')}
                 </span>
               </div>
 
@@ -10430,7 +10438,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Block Screen Sharing for Guests */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Block Guest Screen Share</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{t('room.block_guest_screen_share')}</span>
                   <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                     <input 
                       type="checkbox" 
@@ -10453,7 +10461,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  Block guests from sharing their screen.
+                  {t('room.block_guests_from_sharing_their')}
                 </span>
               </div>
 
@@ -10462,7 +10470,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               {/* Mute on Entry */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Mute on Entry</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{t('room.mute_on_entry')}</span>
                   <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                     <input 
                       type="checkbox" 
@@ -10485,7 +10493,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  Mute new participants automatically when they join the meeting.
+                  {t('room.mute_new_participants_automatically_when')}
                 </span>
               </div>
 
@@ -10494,7 +10502,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
               {/* Global Audio/Video Actions */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Global Actions</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{t('room.global_actions')}</span>
                 
                 <button 
                   onClick={handleMuteAll}
@@ -10502,7 +10510,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '0.5rem' }}
                 >
                   <MicOff size={14} style={{ marginRight: '4px' }} />
-                  Mute All Participants
+                  {t('room.mute_all_participants')}
                 </button>
  
                 <button 
@@ -10511,7 +10519,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '0.5rem' }}
                 >
                   <VideoOff size={14} style={{ marginRight: '4px' }} />
-                  Turn Off All Videos
+                  {t('room.turn_off_all_videos')}
                 </button>
               </div>
 
@@ -10519,9 +10527,9 @@ Media encrypted in transit (DTLS-SRTP).`;
 
               {/* Breakout Rooms Management */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Breakout Rooms</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>{t('room.breakout_rooms')}</span>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                  Breakout rooms work just like the main room, each room is separate, so video quality holds with several people in a room.
+                  {t('room.breakout_rooms_work_just_like')}
                 </span>
                 {breakoutTimeRemaining === null ? (
                   <>
@@ -10558,9 +10566,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                         the host places each person in a room in advance;
                         anyone left on Auto is dealt round-robin. */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Place people in rooms first (optional):</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('room.place_people_in_rooms_first')}</span>
                       {participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').length === 0 ? (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No other participants yet, they can be placed once they join.</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('room.no_other_participants_yet_they')}</span>
                       ) : (
                         participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').map(p => {
                           const peerKey = p.userId || p.id;
@@ -10571,10 +10579,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                               <select
                                 value={assigned ? String(assigned) : 'auto'}
                                 onChange={(e) => setBreakoutAssignments(prev => { const next = { ...prev }; if (e.target.value === 'auto') delete next[peerKey]; else next[peerKey] = parseInt(e.target.value, 10); return next; })}
-                                aria-label={`Pre-assign ${p.name} to a breakout room`}
+                                aria-label={t('room.pre_assign_to_a_breakout', { v1: p.name })}
                                 style={{ height: '26px', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px', cursor: 'pointer' }}
                               >
-                                <option value="auto" style={{ color: 'black' }}>Auto</option>
+                                <option value="auto" style={{ color: 'black' }}>{t('room.auto')}</option>
                                 {Array.from({ length: breakoutRoomsCount }).map((_, idx) => (
                                   <option key={idx + 1} value={String(idx + 1)} style={{ color: 'black' }}>Room {idx + 1}</option>
                                 ))}
@@ -10590,24 +10598,24 @@ Media encrypted in transit (DTLS-SRTP).`;
                       className="premium-btn premium-btn-primary"
                       style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '0.5rem', marginTop: '0.25rem' }}
                     >
-                      Start Breakout Rooms
+                      {t('room.start_breakout_rooms')}
                     </button>
                   </>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', textAlign: 'center' }}>
                     <span style={{ fontSize: '0.8rem', color: 'var(--color-accent)', fontWeight: 600 }}>
-                      Breakout Rooms Active
+                      {t('room.breakout_rooms_active')}
                     </span>
                     <span style={{ fontSize: '1.25rem', fontWeight: 700, color: breakoutTimeRemaining !== null && breakoutTimeRemaining <= 60 ? '#F87171' : 'white', fontFamily: 'monospace' }}>
                       {Math.floor(breakoutTimeRemaining / 60)}:{(breakoutTimeRemaining % 60).toString().padStart(2, '0')}
                     </span>
                     {breakoutTimeRemaining !== null && breakoutTimeRemaining <= 60 && (
-                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#F87171' }}>Ending soon, wrap up</span>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#F87171' }}>{t('room.ending_soon_wrap_up')}</span>
                     )}
                     
                     {/* Host Join Room Selector */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Jump to Room:</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('room.jump_to_room')}</span>
                       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'center' }}>
                         <button 
                           onClick={() => enterBreakoutRoom(null)}
@@ -10621,7 +10629,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             cursor: 'pointer'
                           }}
                         >
-                          Main
+                          {t('room.main')}
                         </button>
                         {Array.from({ length: breakoutRoomsCount }).map((_, idx) => {
                           const rNum = idx + 1;
@@ -10659,9 +10667,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                         assignments, not from LiveKit presence, so it
                         stays correct across rooms. */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem', textAlign: 'left' }}>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Who is where:</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('room.who_is_where')}</span>
                       {participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').length === 0 ? (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No other participants yet.</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('room.no_other_participants_yet')}</span>
                       ) : (
                         participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').map(p => {
                           const peerKey = p.userId || p.id;
@@ -10672,10 +10680,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                               <select
                                 value={currentRoom === null ? 'main' : String(currentRoom)}
                                 onChange={(e) => handleMoveParticipant(peerKey, e.target.value === 'main' ? null : parseInt(e.target.value, 10))}
-                                aria-label={`Move ${p.name} to another room`}
+                                aria-label={t('room.move_to_another_room', { v1: p.name })}
                                 style={{ height: '26px', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px', cursor: 'pointer' }}
                               >
-                                <option value="main" style={{ color: 'black' }}>Main room</option>
+                                <option value="main" style={{ color: 'black' }}>{t('room.main_room')}</option>
                                 {Array.from({ length: breakoutRoomsCount }).map((_, idx) => (
                                   <option key={idx + 1} value={String(idx + 1)} style={{ color: 'black' }}>Room {idx + 1}</option>
                                 ))}
@@ -10688,15 +10696,15 @@ Media encrypted in transit (DTLS-SRTP).`;
 
                     {/* Phase 3 (Feature 1), broadcast a message to all rooms at once. */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'left' }}>Broadcast to all rooms:</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'left' }}>{t('room.broadcast_to_all_rooms')}</span>
                       <div style={{ display: 'flex', gap: '4px' }}>
                         <input
                           type="text"
                           value={breakoutBroadcastDraft}
                           onChange={(e) => setBreakoutBroadcastDraft(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') handleBroadcastToBreakouts(); }}
-                          placeholder="Message for every room..."
-                          aria-label="Broadcast message to all breakout rooms"
+                          placeholder={t('room.message_for_every_room')}
+                          aria-label={t('room.broadcast_message_to_all_breakout')}
                           className="premium-input"
                           style={{ flex: '1 1 auto', minWidth: 0, height: '28px', fontSize: '0.8rem' }}
                         />
@@ -10705,7 +10713,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           className="premium-btn premium-btn-primary"
                           style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem', whiteSpace: 'nowrap' }}
                         >
-                          Send
+                          {t('room.send')}
                         </button>
                       </div>
                     </div>
@@ -10715,7 +10723,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       className="premium-btn"
                       style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '0.5rem', backgroundColor: '#EF4444', border: 'none', color: 'white', marginTop: '0.5rem' }}
                     >
-                      End Breakout Rooms
+                      {t('room.end_breakout_rooms')}
                     </button>
                   </div>
                 )}
@@ -10749,7 +10757,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   fontSize: '0.85rem'
                 }}
               >
-                📊 Polls
+                {t('room.polls')}
               </button>
               <button 
                 onClick={() => setIsQAActive(true)}
@@ -10764,7 +10772,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   fontSize: '0.85rem'
                 }}
               >
-                ❓ Q&A Hub
+                {t('room.q_a_hub')}
               </button>
             </div>
 
@@ -10774,10 +10782,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                 {/* Host Poll Creator */}
                 {isAdmin && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>CREATE A POLL</span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>{t('room.create_a_poll')}</span>
                     <input 
                       type="text" 
-                      placeholder="Ask a question..."
+                      placeholder={t('room.ask_a_question')}
                       value={newPollQuestion}
                       onChange={(e) => setNewPollQuestion(e.target.value)}
                       className="premium-input"
@@ -10799,14 +10807,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                             style={{ fontSize: '0.8rem', height: '32px', flex: 1, minWidth: 0 }}
                           />
                           {newPollIsQuiz && (
-                            <label title="Mark as the correct answer" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                            <label title={t('room.mark_as_the_correct_answer')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                               <input
                                 type="radio"
                                 name="quiz-correct-option"
                                 checked={newPollCorrectOption === idx}
                                 onChange={() => setNewPollCorrectOption(idx)}
                               />
-                              Correct
+                              {t('room.correct')}
                             </label>
                           )}
                         </div>
@@ -10815,7 +10823,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         onClick={() => setNewPollOptions([...newPollOptions, ''])}
                         style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: '0.75rem', textAlign: 'left', cursor: 'pointer', padding: 0 }}
                       >
-                        + Add Option
+                        {t('room.add_option')}
                       </button>
                     </div>
                     {/* Phase 1, quiz mode: one option is the correct answer. */}
@@ -10825,10 +10833,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                         checked={newPollIsQuiz}
                         onChange={(e) => { setNewPollIsQuiz(e.target.checked); if (!e.target.checked) setNewPollCorrectOption(null); }}
                       />
-                      Quiz mode, mark one correct answer and score voters
+                      {t('room.quiz_mode_mark_one_correct')}
                     </label>
                     {newPollIsQuiz && newPollCorrectOption === null && (
-                      <span style={{ fontSize: '0.75rem', color: '#F59E0B' }}>Pick the correct answer above before launching.</span>
+                      <span style={{ fontSize: '0.75rem', color: '#F59E0B' }}>{t('room.pick_the_correct_answer_above')}</span>
                     )}
                     {/* Phase C2b (8), anonymous polls run on the server. */}
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'white', cursor: 'pointer' }}>
@@ -10838,10 +10846,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                         disabled={newPollIsQuiz}
                         onChange={(e) => setNewPollIsAnonymous(e.target.checked)}
                       />
-                      Anonymous, nobody sees who answered what, only the totals
+                      {t('room.anonymous_nobody_sees_who_answered')}
                     </label>
                     {newPollIsQuiz && (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>A quiz cannot be anonymous, it needs to know who got it right.</span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('room.a_quiz_cannot_be_anonymous')}</span>
                     )}
                     <button
                       onClick={handleCreatePoll}
@@ -10849,16 +10857,16 @@ Media encrypted in transit (DTLS-SRTP).`;
                       style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', height: '36px' }}
                       disabled={newPollIsQuiz && newPollCorrectOption === null}
                     >
-                      Launch Poll
+                      {t('room.launch_poll')}
                     </button>
                   </div>
                 )}
 
                 {/* Active Polls List */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>ACTIVE POLLS</span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.active_polls')}</span>
                   {polls.length === 0 && serverPolls.length === 0 ? (
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', display: 'block', padding: '1rem 0' }}>No active polls yet.</span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', display: 'block', padding: '1rem 0' }}>{t('room.no_active_polls_yet')}</span>
                   ) : (
                     polls.map(p => {
                       const totalVotes = p.votes.reduce((a: number, b: number) => a + b, 0);
@@ -10920,7 +10928,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.6rem' }}>
                               <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>LEADERBOARD</span>
                               {scores.length === 0 ? (
-                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No one got it right yet.</span>
+                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{t('room.no_one_got_it_right')}</span>
                               ) : (
                                 scores.map((s) => (
                                   <div key={s.voterId} className="flex-between" style={{ fontSize: '0.8rem' }}>
@@ -10938,7 +10946,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                                 onClick={() => handleClosePoll(p.id)}
                                 style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
                               >
-                                Close poll
+                                {t('room.close_poll')}
                               </button>
                             )}
                           </div>
@@ -10951,7 +10959,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     totals only, never who voted. */}
                 {serverPolls.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>SERVER POLLS</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.server_polls')}</span>
                     {serverPolls.map((p: any) => {
                       const totalVotes = (p.votes || []).reduce((a: number, b: number) => a + b, 0);
                       const showResults = (p.hasVoted !== null && p.hasVoted !== undefined) || p.isClosed;
@@ -10967,7 +10975,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             )}
                           </div>
                           {p.isAnonymous && (
-                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Nobody sees who answered what, only the totals.</span>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('room.nobody_sees_who_answered_what')}</span>
                           )}
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             {p.options.map((opt: string, idx: number) => {
@@ -11009,7 +11017,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                                 onClick={() => handleCloseServerPoll(p.id)}
                                 style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
                               >
-                                Close poll
+                                {t('room.close_poll')}
                               </button>
                             )}
                           </div>
@@ -11021,7 +11029,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </div>
             ) : (
               <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>SUBMIT A QUESTION</span>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.submit_a_question')}</span>
                 <form 
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -11031,7 +11039,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 >
                   <input 
                     type="text" 
-                    placeholder="Type your question..."
+                    placeholder={t('room.type_your_question')}
                     value={newQuestionText}
                     onChange={(e) => setNewQuestionText(e.target.value)}
                     className="premium-input"
@@ -11042,7 +11050,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     className="premium-btn premium-btn-primary"
                     style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', height: '36px' }}
                   >
-                    Post Question
+                    {t('room.post_question')}
                   </button>
                 </form>
 
@@ -11050,7 +11058,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>QUESTIONS ({qaQuestions.filter(q => !q.answered).length})</span>
                   {qaQuestions.filter(q => !q.answered).length === 0 ? (
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', display: 'block', padding: '1rem 0' }}>
-                      No open questions. Be the first to ask!
+                      {t('room.no_open_questions_be_the')}
                     </span>
                   ) : (
                     [...qaQuestions]
@@ -11063,7 +11071,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           <div
                             key={q.id}
                             onClick={() => reannounceQuestion(q)}
-                            title="Tap to show this question again as a banner"
+                            title={t('room.tap_to_show_this_question')}
                             style={{
                               padding: '0.75rem 1rem',
                               borderRadius: '8px',
@@ -11083,7 +11091,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                                   onClick={(e) => { e.stopPropagation(); markQuestionAnswered(q.id, true); }}
                                   style={{ background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: 0, textAlign: 'left' }}
                                 >
-                                  ✓ Mark answered
+                                  {t('room.mark_answered')}
                                 </button>
                               )}
                             </div>
@@ -11137,7 +11145,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                                 onClick={() => markQuestionAnswered(q.id, false)}
                                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: 0, whiteSpace: 'nowrap' }}
                               >
-                                Reopen
+                                {t('room.reopen')}
                               </button>
                             )}
                           </div>
@@ -11164,11 +11172,11 @@ Media encrypted in transit (DTLS-SRTP).`;
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Sliders size={16} color="var(--color-accent)" />
-                <span>AV Enhancements</span>
+                <span>{t('room.av_enhancements')}</span>
               </h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                className="panel-close-btn" aria-label="Close panel"
+                className="panel-close-btn" aria-label={t('room.close_panel')}
               >
                 &times;
               </button>
@@ -11181,7 +11189,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 <div className="flex-between">
                   <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <AudioLines size={14} color={isNoiseSuppressionOn && noiseSuppressionStatus !== 'unavailable' ? 'var(--color-accent)' : '#64748B'} />
-                    NOISE CLEANING
+                    {t('room.noise_cleaning')}
                   </span>
                   <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                     <input
@@ -11222,7 +11230,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 <div className="flex-between">
                   <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Mic size={14} color={isAudioEnhanced ? 'var(--color-accent)' : '#64748B'} />
-                    STUDIO VOICE
+                    {t('room.studio_voice')}
                   </span>
                   <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                     <input 
@@ -11246,7 +11254,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
-                  Studio Voice focuses your voice with a gentle high-pass filter, presence band and soft compression. Echo cancellation and gain control are already on for every microphone, noise is handled by Noise Cleaning above.
+                  {t('room.studio_voice_focuses_your_voice')}
                 </p>
               </div>
 
@@ -11257,7 +11265,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 <div className="flex-between">
                   <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Sparkles size={14} color={isStudioLightEnabled ? 'var(--color-accent)' : '#64748B'} />
-                    STUDIO LIGHT
+                    {t('room.studio_light')}
                   </span>
                   <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                     <input 
@@ -11281,7 +11289,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
-                  Brightens your face and adds a warm, professional spotlight glow to counter poor room lighting.
+                  {t('room.brightens_your_face_and_adds')}
                 </p>
               </div>
 
@@ -11289,11 +11297,11 @@ Media encrypted in transit (DTLS-SRTP).`;
 
               {/* Camera Filters Section */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>CAMERA FILTER</span>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.camera_filter')}</span>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                   {[
                     { id: 'none', label: 'Normal' },
-                    { id: 'blur', label: 'Soft Blur' },
+                    { id: 'blur', label: t('room.soft_blur') },
                     { id: 'sepia', label: 'Sepia' },
                     { id: 'grayscale', label: 'B&W' },
                     { id: 'warm', label: 'Warm' },
@@ -11317,7 +11325,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   ))}
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
-                  Soft Blur blurs your whole video, it is not a background blur. For a true background effect, use Background below.
+                  {t('room.soft_blur_blurs_your_whole')}
                 </p>
               </div>
 
@@ -11330,8 +11338,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
                   {[
                     { id: 'none', label: 'Off' },
-                    { id: 'blur', label: 'Blur background' },
-                    { id: 'giin', label: 'GIIN background' }
+                    { id: 'blur', label: t('room.blur_background') },
+                    { id: 'giin', label: t('room.giin_background') }
                   ].map(f => (
                     <button
                       key={f.id}
@@ -11373,11 +11381,11 @@ Media encrypted in transit (DTLS-SRTP).`;
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Languages size={16} color="var(--color-accent)" />
-                <span>Transcript & AI Summary</span>
+                <span>{t('room.transcript_ai_summary')}</span>
               </h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                className="panel-close-btn" aria-label="Close panel"
+                className="panel-close-btn" aria-label={t('room.close_panel')}
               >
                 &times;
               </button>
@@ -11398,7 +11406,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   fontSize: '0.8rem'
                 }}
               >
-                🎙️ Captions
+                {t('room.captions')}
               </button>
               <button 
                 onClick={() => setIsSummaryTabActive(true)}
@@ -11413,7 +11421,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   fontSize: '0.8rem'
                 }}
               >
-                ✨ AI Copilot
+                {t('room.ai_copilot')}
               </button>
             </div>
 
@@ -11421,7 +11429,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               {!isSummaryTabActive ? (
                 <>
                   <div className="flex-between" style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'white' }}>Enable Speech Captions</span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'white' }}>{t('room.enable_speech_captions')}</span>
                     <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
                       <input 
                         type="checkbox" 
@@ -11447,12 +11455,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                   {captionsUnavailable && (
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4, padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>{captionsUnavailable}</p>
                   )}
-                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>Captions are yours alone to turn on or off, each person chooses for themselves. When the host ends the meeting, the full transcript is saved to the meeting record.</p>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>{t('room.captions_are_yours_alone_to')}</p>
                   {/* Phase C1 (36), caption language: ONE language per
                       person (or none), never all three at once. Kinyarwanda
                       captions are English text translated into Kinyarwanda. */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'white' }}>Caption language</span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'white' }}>{t('room.caption_language')}</span>
                     <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                       {([['none', 'Off'], ['en', 'English'], ['fr', 'French'], ['rw', 'Kinyarwanda']] as const).map(([value, label]) => (
                         <button
@@ -11476,13 +11484,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </div>
                     {translationUnavailable && (
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>
-                        Translation is not set up yet, so captions show in the language spoken. Ask your workspace admin to add a translation key.
+                        {t('room.translation_is_not_set_up')}
                       </p>
                     )}
                   </div>
 
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
-                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRANSCRIPT HISTORY</span>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.transcript_history')}</span>
                     
                     {transcripts.length === 0 ? (
                       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', height: '150px', textAlign: 'center' }}>
@@ -11505,14 +11513,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                 </>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', height: '100%' }}>
-                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>AI MEETING SUMMARY</span>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.ai_meeting_summary')}</span>
 
                   {isGeneratingSummary ? (
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', height: '200px' }}>
                       <div className="pulse" style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Sparkles size={20} color="black" />
                       </div>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Analyzing transcript audio...</span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{t('room.analyzing_transcript_audio')}</span>
                     </div>
                   ) : aiSummary ? (
                     <div className="scroll-refined" style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', gap: '1rem', overflowY: 'auto' }}>
@@ -11529,7 +11537,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         gap: '0.75rem'
                       }}>
                         <div style={{ color: 'var(--color-accent)', fontWeight: 700, fontSize: '0.9rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                          🌟 GIIN Meet AI Copilot Summary
+                          {t('room.giin_meet_ai_copilot_summary')}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                           <div>📅 <strong>Date:</strong> {new Date().toLocaleDateString()}</div>
@@ -11537,17 +11545,17 @@ Media encrypted in transit (DTLS-SRTP).`;
                         </div>
 
                         <div style={{ marginTop: '0.5rem' }}>
-                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📋 Meeting facts</div>
+                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>{t('room.meeting_facts')}</div>
                           <ul style={{ paddingLeft: '1.2rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             <li>Participants in this call: {participants.length + 1}</li>
                             <li>Chat messages sent: {messages.length}</li>
                             <li>Caption lines captured: {transcripts.length}</li>
-                            <li>Reactions and polls are shown live in the call, not in this summary.</li>
+                            <li>{t('room.reactions_and_polls_are_shown')}</li>
                           </ul>
                         </div>
 
                         <div style={{ marginTop: '0.5rem' }}>
-                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📝 Notes</div>
+                          <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>{t('room.notes')}</div>
                           <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
                             {aiSummary}
                           </p>
@@ -11555,7 +11563,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
                         {summaryDecisions.length > 0 && (
                           <div style={{ marginTop: '0.5rem' }}>
-                            <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>✅ Decisions</div>
+                            <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>{t('room.decisions')}</div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                               {summaryDecisions.map((d, i) => (
                                 <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.75rem', color: 'white', lineHeight: 1.45 }}>
@@ -11569,7 +11577,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
                         {summaryActionItems.length > 0 && (
                           <div style={{ marginTop: '0.5rem' }}>
-                            <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📌 Action items</div>
+                            <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>{t('room.action_items')}</div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                               {summaryActionItems.map((a, i) => (
                                 <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', justifyContent: 'space-between', fontSize: '0.75rem', color: 'white', lineHeight: 1.45 }}>
@@ -11587,12 +11595,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <button 
                         onClick={() => {
                           navigator.clipboard.writeText(aiSummary);
-                          alert('Summary copied to clipboard!');
+                          alert(t('room.summary_copied_to_clipboard'));
                         }}
                         className="premium-btn premium-btn-secondary"
                         style={{ width: '100%', justifyContent: 'center', fontSize: '0.75rem', height: '36px' }}
                       >
-                        Copy Summary Text
+                        {t('room.copy_summary_text')}
                       </button>
                     </div>
                   ) : (
@@ -11626,18 +11634,18 @@ Media encrypted in transit (DTLS-SRTP).`;
             zIndex: 5
           }}>
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
-              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>React Soundboard</h4>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>{t('room.react_soundboard')}</h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                className="panel-close-btn" aria-label="Close panel"
+                className="panel-close-btn" aria-label={t('room.close_panel')}
               >
                 &times;
               </button>
             </div>
 
             <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRIGGER SOUND EFFECTS</span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sounds play for everyone in the room, in real time. Muting only silences them for you.</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.trigger_sound_effects')}</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('room.sounds_play_for_everyone_in')}</span>
               <button
                 onClick={toggleSoundEffects}
                 title={soundEffectsEnabled ? 'Mute hand-raise and soundboard sounds for yourself' : 'Unmute hand-raise and soundboard sounds'}
@@ -11658,13 +11666,13 @@ Media encrypted in transit (DTLS-SRTP).`;
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 {[
-                  { id: 'applause', label: '👏 Applause' },
-                  { id: 'bell', label: '🔔 Bell Chime' },
-                  { id: 'horn', label: '🎉 Party Horn' },
-                  { id: 'alert', label: '⚠️ Warning' },
+                  { id: 'applause', label: t('room.applause') },
+                  { id: 'bell', label: t('room.bell_chime') },
+                  { id: 'horn', label: t('room.party_horn') },
+                  { id: 'alert', label: t('room.warning') },
                   // The waiting-room knock: tap to hear the exact sound
                   // that plays when a guest asks to be admitted.
-                  { id: 'admit-request', label: '🚪 Admit Knock' }
+                  { id: 'admit-request', label: t('room.admit_knock') }
                 ].map(s => (
                   <button 
                     key={s.id}
@@ -11697,10 +11705,10 @@ Media encrypted in transit (DTLS-SRTP).`;
             zIndex: 5
           }}>
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
-              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Meeting Credentials</h4>
+              <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>{t('room.meeting_credentials')}</h4>
               <button 
                 onClick={() => setActivePanel('none')}
-                className="panel-close-btn" aria-label="Close panel"
+                className="panel-close-btn" aria-label={t('room.close_panel')}
               >
                 &times;
               </button>
@@ -11708,12 +11716,12 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>MEETING TITLE</span>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.meeting_title')}</span>
                 <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'white' }}>{meetingTitle}</span>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>MEETING ID</span>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.meeting_id_2')}</span>
                 <div className="flex-between" style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '0.5rem 0.75rem', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
                   <code style={{ fontSize: '0.8rem', color: 'var(--color-accent)' }}>{meetingId}</code>
                   <button 
@@ -11737,7 +11745,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>INVITATION LINK</span>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.invitation_link')}</span>
                 <button
                   onClick={() => {
                     const inviteUrl = buildJoinLink(meetingId, passcode);
@@ -11754,7 +11762,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>INVITE BY EMAIL</span>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.invite_by_email')}</span>
                 <input
                   type="email"
                   className="premium-input"
@@ -11770,15 +11778,15 @@ Media encrypted in transit (DTLS-SRTP).`;
                       return;
                     }
                     const link = buildJoinLink(meetingId, passcode);
-                    const subject = encodeURIComponent(`Invitation: ${meetingTitle}, ${getLocalBrandName()}`);
-                    const body = encodeURIComponent(`Please join my ${getLocalBrandName()} video meeting:\nTopic: ${meetingTitle}\nJoin link: ${link}\nMeeting ID: ${meetingId}\nPasscode: ${passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
+                    const subject = encodeURIComponent(t('room.invite_subject', { v1: meetingTitle, v2: getLocalBrandName() }));
+                    const body = encodeURIComponent(t('room.please_join_my_video_meeting', { v1: getLocalBrandName(), v2: meetingTitle, v3: link, v4: meetingId, v5: passcode || 'none - open link' }));
                     window.location.href = `mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`;
-                    setInviteNote(`Your mail app opened with the invitation ready to send. No email is sent automatically, ${getLocalBrandName()} has no mail provider configured yet.`);
+                    setInviteNote(t('dash.your_mail_app_opened_with', { v1: getLocalBrandName() }));
                   }}
                   className="premium-btn premium-btn-secondary"
                   style={{ width: '100%', justifyContent: 'center', gap: '0.5rem', fontSize: '0.8rem' }}
                 >
-                  <span>Email Invite</span>
+                  <span>{t('room.email_invite')}</span>
                 </button>
                 {inviteNote && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>{inviteNote}</span>}
               </div>
@@ -11811,7 +11819,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   fontSize: '0.85rem'
                 }}
               >
-                📝 Notes
+                {t('room.notes')}
               </button>
               <button 
                 onClick={() => { setIsAgendaTabActive(true); setShowLiveTools(false); }}
@@ -11826,7 +11834,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   fontSize: '0.85rem'
                 }}
               >
-                📋 Agenda
+                {t('room.agenda')}
               </button>
               {/* Phase C2b, live tools: shared notes pad, document viewer, interpretation. */}
               <button 
@@ -11842,7 +11850,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   fontSize: '0.85rem'
                 }}
               >
-                🔴 Live
+                {t('room.live')}
               </button>
             </div>
 
@@ -11905,7 +11913,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               <div className="scroll-refined" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '0.75rem', overflowY: 'auto' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <ListChecks size={16} color="var(--color-accent)" />
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>MEETING AGENDA</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>{t('room.meeting_agenda_2')}</span>
                 </div>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
                   {isAdmin ? 'Set the agenda for this meeting. Everyone who joins sees it as a sticky note they can move or close.' : 'Set by the host. It appears as a sticky note when you join.'}
@@ -11913,20 +11921,20 @@ Media encrypted in transit (DTLS-SRTP).`;
                 {isAdmin && (
                   <form onSubmit={(e) => { e.preventDefault(); handleAddAgendaItem(); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <input value={agendaInput} onChange={(e) => setAgendaInput(e.target.value)} placeholder="Add an agenda item..." className="premium-input" style={{ flex: 1, padding: '0.5rem 0.65rem', fontSize: '0.8rem', minWidth: 0 }} />
-                      <button type="submit" className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Plus size={14} /> Add</button>
+                      <input value={agendaInput} onChange={(e) => setAgendaInput(e.target.value)} placeholder={t('room.add_an_agenda_item')} className="premium-input" style={{ flex: 1, padding: '0.5rem 0.65rem', fontSize: '0.8rem', minWidth: 0 }} />
+                      <button type="submit" className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Plus size={14} /> {t('room.add')}</button>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>Start
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>{t('room.start')}
                         <input type="time" value={newAgendaStart} onChange={(e) => setNewAgendaStart(e.target.value)} className="premium-input" style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem' }} />
                       </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>End
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>{t('room.end')}
                         <input type="time" value={newAgendaEnd} onChange={(e) => setNewAgendaEnd(e.target.value)} className="premium-input" style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem' }} />
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>{t('agenda.duration')}
                         <input type="number" min={1} max={480} value={newAgendaDuration} onChange={(e) => setNewAgendaDuration(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))} className="premium-input" style={{ width: '64px', padding: '0.35rem 0.5rem', fontSize: '0.8rem' }} aria-label={t('agenda.duration')} />
                       </label>
-                      <span>Optional. Timed items alert only the admin at start and end, and the timer counts down next to each item.</span>
+                      <span>{t('room.optional_timed_items_alert_only')}</span>
                     </div>
                   </form>
                 )}
@@ -11946,7 +11954,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         {item.text}
                       </span>
                       {isAdmin && (
-                        <button type="button" onClick={() => handleRemoveAgendaItem(item.id)} aria-label="Remove agenda item" style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: '0.1rem', flexShrink: 0 }}><Trash2 size={14} /></button>
+                        <button type="button" onClick={() => handleRemoveAgendaItem(item.id)} aria-label={t('room.remove_agenda_item')} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: '0.1rem', flexShrink: 0 }}><Trash2 size={14} /></button>
                       )}
                     </div>
                   ))}
@@ -11962,8 +11970,8 @@ Media encrypted in transit (DTLS-SRTP).`;
       {screenShareError && (
         <div role="alert" style={{ margin: '0 1rem', padding: '0.6rem 0.9rem', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.45)', borderRadius: '8px', color: '#FCA5A5', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ flex: 1, minWidth: '200px' }}>{screenShareError}</span>
-          <button type="button" onClick={() => { setScreenShareError(null); void handleToggleScreenShare(); }} style={{ padding: '0.4rem 0.9rem', minHeight: '44px', borderRadius: '6px', border: 'none', backgroundColor: '#EF4444', color: 'white', fontWeight: 700, cursor: 'pointer' }}>Try again</button>
-          <button type="button" onClick={() => setScreenShareError(null)} className="panel-close-btn" aria-label="Dismiss">&times;</button>
+          <button type="button" onClick={() => { setScreenShareError(null); void handleToggleScreenShare(); }} style={{ padding: '0.4rem 0.9rem', minHeight: '44px', borderRadius: '6px', border: 'none', backgroundColor: '#EF4444', color: 'white', fontWeight: 700, cursor: 'pointer' }}>{t('common.retry')}</button>
+          <button type="button" onClick={() => setScreenShareError(null)} className="panel-close-btn" aria-label={t('room.dismiss')}>&times;</button>
         </div>
       )}
 
@@ -12083,7 +12091,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               cursor: 'pointer',
               transition: 'all 0.2s ease'
             }}
-            title="Share Screen (S)"
+            title={t('room.share_screen_s')}
           >
             <Monitor size={18} />
             <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{screenShareStarting ? 'Starting…' : isScreenSharing ? 'Stop Share' : 'Share'}</span>
@@ -12181,7 +12189,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               cursor: 'pointer',
               transition: 'all 0.2s ease'
             }}
-            title="Pop out Floating Video (Picture-in-Picture)"
+            title={t('room.pop_out_floating_video_picture')}
           >
             <Maximize2 size={20} />
           </button>
@@ -12212,7 +12220,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               transition: 'all 0.2s ease',
               position: 'relative'
             }}
-            title="Chat (C)"
+            title={t('room.chat_c')}
           >
             <MessageSquare size={18} />
             <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{t('room.chat')}</span>
@@ -12256,7 +12264,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               cursor: 'pointer',
               transition: 'all 0.2s ease'
             }}
-            title="Workspace Notes"
+            title={t('room.workspace_notes')}
           >
             <Edit2 size={20} />
           </button>
@@ -12302,7 +12310,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               transition: 'all 0.2s ease',
               boxShadow: '0 8px 20px rgba(239, 68, 68, 0.4)'
             }}
-            title="End Call"
+            title={t('room.end_call')}
           >
             <PhoneOff size={24} />
           </button>
@@ -12328,8 +12336,8 @@ Media encrypted in transit (DTLS-SRTP).`;
               const color = word === 'Excellent' || word === 'Good' ? '#10B981' : word === 'Weak' ? '#F59E0B' : '#EF4444';
               return (
                 <span
-                  title={avg !== null ? `Connection: ${word.toLowerCase()} (${avg} ms)` : `Connection: ${word.toLowerCase()}`}
-                  aria-label={`Connection: ${word.toLowerCase()}`}
+                  title={avg !== null ? t('room.connection_with_ms', { v1: word.toLowerCase(), v2: avg }) : t('room.connection_status', { v1: word.toLowerCase() })}
+                  aria-label={t('room.connection_status', { v1: word.toLowerCase() })}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.5rem', color, fontSize: '0.8rem', fontWeight: 600 }}
                 >
                   <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: color }} />
@@ -12359,18 +12367,19 @@ Media encrypted in transit (DTLS-SRTP).`;
                 onClick={handleRetryLiveKit}
                 className="premium-btn premium-btn-secondary"
                 style={{ padding: '0.35rem 0.7rem', fontSize: '0.75rem', borderRadius: '6px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                title="The room is on a direct connection. Try the video again."
+                title={t('room.the_room_is_on_a')}
               >
-                Retry video
+                {t('room.retry_video')}
               </button>
             )}
             <button 
+              ref={infoToggleMobileRef}
               onClick={() => setShowMeetingInfo(!showMeetingInfo)}
               className="premium-btn premium-btn-secondary" 
               style={{ padding: '0.35rem 0.7rem', fontSize: '0.75rem', borderRadius: '6px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              title="View meeting info and share"
+              title={t('room.view_meeting_info_and_share')}
             >
-              Share
+              {t('room.share')}
             </button>
             {/* Meeting timer */}
             <span
@@ -12384,7 +12393,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 fontWeight: 600,
                 fontFamily: 'monospace'
               }}
-              title="Time in this meeting"
+              title={t('room.time_in_this_meeting')}
             >
               <Clock size={14} color="var(--color-accent)" />
               {formatElapsedTime(elapsedSeconds)}
@@ -12529,7 +12538,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 cursor: 'pointer',
                 transition: 'all var(--transition-fast)'
               }}
-              title="Device Settings"
+              title={t('room.device_settings')}
             >
               <Settings size={18} />
             </button>
@@ -12557,7 +12566,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             </button>
 
             {/* Hand Raise / Lower */}
-            <div style={{ position: 'relative' }}>
+            <div ref={handRaiseRef} style={{ position: 'relative' }}>
               <button 
                 className="toolbar-control-btn"
                 onClick={() => {
@@ -12580,7 +12589,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   cursor: 'pointer',
                   transition: 'all var(--transition-fast)'
                 }}
-                title={localHandRaised ? `Lower Hand (Reason: ${handRaiseReason || 'None'})` : "Raise Hand"}
+                title={localHandRaised ? t('room.lower_hand_reason', { v1: handRaiseReason || 'None' }) : "Raise Hand"}
               >
                 <Hand size={18} />
               </button>
@@ -12626,11 +12635,11 @@ Media encrypted in transit (DTLS-SRTP).`;
                   
                   <div className="flex-between" style={{ marginBottom: '0.25rem', flexShrink: 0 }}>
                     <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)' }}>
-                      Raise Hand
+                      {t('room.raise_hand')}
                     </span>
                     <button 
                       onClick={() => setShowHandRaiseMenu(false)}
-                      className="panel-close-btn" aria-label="Close raise hand menu"
+                      className="panel-close-btn" aria-label={t('room.close_raise_hand_menu')}
                     >
                       &times;
                     </button>
@@ -12646,10 +12655,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                     width: '100%'
                   }}>
                     {[
-                      { label: '🙋 Question', value: 'Question', desc: 'Ask a question', color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.12)' },
-                      { label: '💬 Comment', value: 'Comment', desc: 'Share a thought', color: '#10B981', bg: 'rgba(16, 185, 129, 0.12)' },
-                      { label: '💡 Idea', value: 'Idea', desc: 'Suggest an idea', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.12)' },
-                      { label: '🚨 Urgent', value: 'Urgent', desc: 'Interrupt host', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.12)' }
+                      { label: t('room.question'), value: 'Question', desc: 'Ask a question', color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.12)' },
+                      { label: t('room.comment'), value: 'Comment', desc: 'Share a thought', color: '#10B981', bg: 'rgba(16, 185, 129, 0.12)' },
+                      { label: t('room.idea'), value: 'Idea', desc: 'Suggest an idea', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.12)' },
+                      { label: t('room.urgent'), value: 'Urgent', desc: 'Interrupt host', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.12)' }
                     ].map(r => (
                       <button
                         key={r.value}
@@ -12708,7 +12717,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
                   >
-                    ✋ Just Raise Hand
+                    {t('room.just_raise_hand')}
                   </button>
                 </div>
               )}
@@ -12732,7 +12741,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   cursor: 'pointer',
                   transition: 'all var(--transition-fast)'
                 }}
-                title="Draw Annotations"
+                title={t('room.draw_annotations')}
               >
                 <Edit2 size={18} />
               </button>
@@ -12755,13 +12764,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                 cursor: 'pointer',
                 transition: 'all var(--transition-fast)'
               }}
-              title="More Options"
+              title={t('room.more_options')}
             >
               <MoreHorizontal size={18} />
             </button>
 
             {/* Emoji Reactions Trigger */}
-            <div style={{ position: 'relative' }}>
+            <div ref={emojiMenuRef} style={{ position: 'relative' }}>
               <button 
                 className="toolbar-control-btn"
                 onClick={() => setShowEmojiReactions(!showEmojiReactions)}
@@ -12778,7 +12787,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   cursor: 'pointer',
                   transition: 'all var(--transition-fast)'
                 }}
-                title="Send Reaction"
+                title={t('room.send_reaction')}
               >
                 <Smile size={18} />
               </button>
@@ -12880,7 +12889,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}
                   >
                     <Info size={16} style={{ flexShrink: 0 }} />
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Meeting Info</span>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.meeting_info')}</span>
                   </button>
 
                   {/* Workspace / Notes */}
@@ -12907,7 +12916,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}
                   >
                     <Edit2 size={16} style={{ flexShrink: 0 }} />
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Workspace Notes</span>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.workspace_notes')}</span>
                   </button>
 
                   <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem', borderTop: '1px solid #1E293B', marginTop: '0.35rem', paddingTop: '0.6rem' }}>ENGAGE</div>
@@ -12935,7 +12944,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}
                   >
                     <BarChart3 size={16} style={{ flexShrink: 0 }} />
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Interactive Polls</span>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.interactive_polls')}</span>
                   </button>
 
                   {/* Live Captions */}
@@ -12962,7 +12971,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}
                   >
                     <Languages size={16} style={{ flexShrink: 0 }} />
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Live Captions</span>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.live_captions')}</span>
                   </button>
 
                   <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem', borderTop: '1px solid #1E293B', marginTop: '0.35rem', paddingTop: '0.6rem' }}>MEDIA</div>
@@ -13017,7 +13026,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}
                   >
                     <Sliders size={16} style={{ flexShrink: 0 }} />
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>AV Enhancements</span>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.av_enhancements')}</span>
                   </button>
 
                   {/* React Soundboard */}
@@ -13044,7 +13053,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}
                   >
                     <Volume2 size={16} style={{ flexShrink: 0 }} />
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Soundboard Reacts</span>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.soundboard_reacts')}</span>
                   </button>
 
                   {/* Host Controls (host) / Moderator Controls (co-host or moderator) */}
@@ -13087,7 +13096,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'none', border: 'none', padding: '0.6rem 0.85rem', width: '100%', minHeight: '44px', borderRadius: '6px', color: 'white', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left' }}
                     >
                       <Keyboard size={16} style={{ flexShrink: 0 }} />
-                      <span style={{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Keyboard Shortcuts</span>
+                      <span style={{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('room.keyboard_shortcuts')}</span>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', flexShrink: 0 }}>{shortcutsExpanded ? '▲' : '▼'}</span>
                     </button>
                     {shortcutsExpanded && (
@@ -13104,7 +13113,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                             <span>{s.action}</span>
                           </div>
                         ))}
-                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.15rem 0.85rem' }}>Shortcuts are ignored while typing. Leaving the meeting is click-only, by design.</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.15rem 0.85rem' }}>{t('room.shortcuts_are_ignored_while_typing')}</span>
                       </div>
                     )}
                   </div>
@@ -13135,7 +13144,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 }}
               >
                 <ListChecks size={16} />
-                <span className="hide-mobile-text">Agenda</span>
+                <span className="hide-mobile-text">{t('brief.agenda')}</span>
               </button>
             )}
 
@@ -13206,24 +13215,24 @@ Media encrypted in transit (DTLS-SRTP).`;
           <div style={{ width: 'min(92vw, 760px)', maxHeight: '86dvh', backgroundColor: '#0B0F19', border: '1px solid #1E293B', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.9rem 1.1rem', borderBottom: '1px solid #1E293B' }}>
               <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📎 {fileViewer.name}</span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>View only, stays in this meeting</span>
-              <button onClick={() => setFileViewer(null)} className="panel-close-btn" aria-label="Close viewer">&times;</button>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t('room.view_only_stays_in_this')}</span>
+              <button onClick={() => setFileViewer(null)} className="panel-close-btn" aria-label={t('room.close_viewer')}>&times;</button>
             </div>
             <div className="scroll-refined" style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
               {fileViewerGone ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.5 }}>This file is no longer available, shared files are removed when the meeting ends.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.5 }}>{t('room.this_file_is_no_longer')}</p>
               ) : fileViewer.kind === 'image' ? (
                 <img src={fileViewer.url} alt={fileViewer.name} onError={() => setFileViewerGone(true)} style={{ maxWidth: '100%', maxHeight: 'calc(86dvh - 120px)', objectFit: 'contain', borderRadius: '8px' }} />
               ) : fileViewer.kind === 'pdf' ? (
                 <iframe src={fileViewer.url} title={fileViewer.name} style={{ width: '100%', height: 'calc(86dvh - 120px)', border: 'none', borderRadius: '8px', backgroundColor: 'white' }} />
               ) : fileViewer.kind === 'text' ? (
                 fileViewerText === null ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Loading preview…</p>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{t('room.loading_preview')}</p>
                 ) : (
                   <pre style={{ margin: 0, width: '100%', maxHeight: 'calc(86dvh - 120px)', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.85rem', color: 'white', fontFamily: 'monospace' }}>{fileViewerText}</pre>
                 )
               ) : (
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', maxWidth: '420px', lineHeight: 1.5 }}>Preview isn't available for this file type inside the meeting. Files shared here are view-only and are removed when the meeting ends.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', maxWidth: '420px', lineHeight: 1.5 }}>{t('room.preview_isnt_available_for_this')}</p>
               )}
             </div>
           </div>
@@ -13297,10 +13306,10 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             <div>
               <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-heading)', letterSpacing: '-0.02em' }}>
-                Exit Boardroom
+                {t('room.exit_boardroom')}
               </h3>
               <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                As the meeting host, you must choose how to exit. You cannot leave the meeting orphaned while other participants are present.
+                {t('room.as_the_meeting_host_you')}
               </p>
             </div>
 
@@ -13350,10 +13359,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white', marginBottom: '0.2rem' }}>
-                      Transfer Host & Leave
+                      {t('room.transfer_host_leave')}
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
-                      Designate an active participant to take over as the host. The meeting will continue without you.
+                      {t('room.designate_an_active_participant_to')}
                     </div>
                   </div>
                 </div>
@@ -13371,7 +13380,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     }}
                   >
                     <label style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Select New Host
+                      {t('room.select_new_host')}
                     </label>
                     <select
                       value={selectedNewAdminId}
@@ -13390,7 +13399,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         cursor: 'pointer'
                       }}
                     >
-                      <option value="">-- Choose from active participants --</option>
+                      <option value="">{t('room.choose_from_active_participants')}</option>
                       {participants.filter(p => !!p.userId).map(p => (
                         <option key={p.id} value={p.userId}>
                           {p.name}
@@ -13399,12 +13408,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </select>
                     {participants.length > 0 && participants.filter(p => !!p.userId).length === 0 && (
                       <div style={{ fontSize: '0.8rem', color: '#FCA5A5', lineHeight: 1.4 }}>
-                        Nobody signed in to take over yet, guests who joined without signing in cannot become host.
+                        {t('room.nobody_signed_in_to_take')}
                       </div>
                     )}
                     {participants.some(p => !p.userId) && participants.filter(p => !!p.userId).length > 0 && (
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                        Guests who joined without signing in cannot become host, only signed-in participants are listed.
+                        {t('room.guests_who_joined_without_signing')}
                       </div>
                     )}
                   </div>
@@ -13456,10 +13465,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white', marginBottom: '0.2rem' }}>
-                    End Meeting for All
+                    {t('room.end_meeting_for_all')}
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
-                    Terminate the boardroom call immediately. All participants will be disconnected.
+                    {t('room.terminate_the_boardroom_call_immediately')}
                   </div>
                 </div>
               </div>
@@ -13534,7 +13543,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     color: 'rgba(255,255,255,0.4)'
                   }}
                 >
-                  Select an Option Above
+                  {t('room.select_an_option_above')}
                 </button>
               )}
 
@@ -13561,7 +13570,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 onMouseEnter={(e) => e.currentTarget.style.color = 'white'}
                 onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
               >
-                Go Back to Meeting
+                {t('room.go_back_to_meeting')}
               </button>
             </div>
 
@@ -13603,7 +13612,7 @@ Media encrypted in transit (DTLS-SRTP).`;
             <button
               onClick={() => setConnectionNotice(null)}
               style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '1.25rem', lineHeight: 1, flexShrink: 0 }}
-              aria-label="Dismiss"
+              aria-label={t('room.dismiss')}
             >
               &times;
             </button>
@@ -13612,9 +13621,9 @@ Media encrypted in transit (DTLS-SRTP).`;
             <button
               onClick={handleRetryLiveKit}
               style={{ marginTop: '1rem', backgroundColor: 'var(--color-accent)', color: 'black', border: 'none', borderRadius: '6px', padding: '0.5rem 1rem', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' }}
-              title="Try joining the video again"
+              title={t('room.try_joining_the_video_again')}
             >
-              Retry
+              {t('room.retry')}
             </button>
           )}
         </div>
@@ -13641,15 +13650,15 @@ Media encrypted in transit (DTLS-SRTP).`;
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
             <span style={{ fontSize: '1.1rem' }}>✅</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700 }}>That part has ended</div>
+              <div style={{ fontWeight: 700 }}>{t('room.that_part_has_ended')}</div>
               <div style={{ color: 'rgba(255,255,255,0.75)', marginTop: '0.2rem' }}>
                 "{agendaEndPopup.text}" ended at {agendaEndPopup.endLabel}, time to move to the next part.
               </div>
               <button onClick={() => setAgendaEndPopup(null)} style={{ marginTop: '0.6rem', padding: '0.35rem 0.9rem', borderRadius: 'var(--radius-md)', border: 'none', backgroundColor: 'var(--color-accent)', color: 'var(--color-on-accent, #000)', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}>
-                Dismiss
+                {t('room.dismiss')}
               </button>
             </div>
-            <button onClick={() => setAgendaEndPopup(null)} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1 }}>&times;</button>
+            <button onClick={() => setAgendaEndPopup(null)} aria-label={t('room.dismiss')} style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1 }}>&times;</button>
           </div>
         </div>
       )}
@@ -13679,7 +13688,7 @@ Media encrypted in transit (DTLS-SRTP).`;
           <button
             onClick={() => setToastMessage(null)}
             style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '1rem', lineHeight: 1, marginLeft: 'auto', pointerEvents: 'auto', flexShrink: 0 }}
-            aria-label="Dismiss"
+            aria-label={t('room.dismiss')}
           >
             &times;
           </button>

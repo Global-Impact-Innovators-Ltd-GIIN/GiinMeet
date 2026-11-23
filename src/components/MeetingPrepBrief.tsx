@@ -132,7 +132,7 @@ export const MeetingPrepBrief: React.FC<Props> = ({ meetingId, meetingTitle, mee
                   <li key={item.id} style={{ fontSize: '0.85rem', lineHeight: 1.45 }}>
                     {item.text}
                     {item.startTime && item.endTime ? ` (${item.startTime} to ${item.endTime})` : ''}
-                    {!item.startTime && item.durationMinutes ? ` (${item.durationMinutes} min)` : ''}
+                    {!item.startTime && item.durationMinutes ? t('brief.duration_minutes', { v1: item.durationMinutes }) : ''}
                   </li>
                 ))}
               </ol>
@@ -172,7 +172,7 @@ export const MeetingPrepBrief: React.FC<Props> = ({ meetingId, meetingTitle, mee
             )}
             {openItems && openItems.length > 0 && (
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.5rem 0 0', display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
-                <ListChecks size={13} /> Open items carry into this meeting until they are marked done.
+                <ListChecks size={13} /> {t('brief.open_items_carry_into_meeting')}
               </p>
             )}
           </div>

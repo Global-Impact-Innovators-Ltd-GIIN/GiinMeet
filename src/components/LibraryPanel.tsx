@@ -57,10 +57,10 @@ export const LibraryPanel: React.FC<Props> = ({ onOpenRecord }) => {
     <div className="glass-panel" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
         <Library size={18} color="var(--color-accent)" />
-        <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)', margin: 0 }}>Recordings and notes library</h3>
+        <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)', margin: 0 }}>{t('dash.library')}</h3>
       </div>
       <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0.5rem 0 0.75rem' }}>
-        Transcripts, summaries, notes and files from your meetings, all searchable in one place.
+        {t('dash.libraryHint')}
       </p>
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
         <Search size={16} color="var(--text-muted)" style={{ flexShrink: 0 }} />
@@ -68,9 +68,9 @@ export const LibraryPanel: React.FC<Props> = ({ onOpenRecord }) => {
           type="search"
           value={query}
           onChange={(e) => void runSearch(e.target.value)}
-          placeholder="Search transcripts, summaries, notes, files…"
+          placeholder={t('lib.search_transcripts_summaries_notes_files')}
           maxLength={200}
-          aria-label="Search the library"
+          aria-label={t('lib.search_the_library')}
           style={{ flex: '1 1 auto', minWidth: 0, padding: '0.55rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.9rem' }}
         />
       </div>

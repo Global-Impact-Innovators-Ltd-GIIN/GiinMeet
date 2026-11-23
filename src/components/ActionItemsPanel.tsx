@@ -66,13 +66,13 @@ export default function ActionItemsPanel({
   };
 
   if (loading) {
-    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Loading action items…</p>;
+    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('act.loading_action_items')}</p>;
   }
   const openCount = (items || []).filter((i) => i.status !== 'done').length;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
       <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-        ACTION ITEMS{items && items.length > 0 ? ` (${openCount} open)` : ''}
+        ACTION ITEMS{items && items.length > 0 ? t('act.open_count', { v1: openCount }) : ''}
       </span>
       {items === null || items.length === 0 ? (
         (fallbackItems || []).length > 0 ? (
@@ -87,7 +87,7 @@ export default function ActionItemsPanel({
             ))}
           </div>
         ) : (
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No action items yet.</p>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('act.no_action_items_yet')}</p>
         )
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
@@ -102,7 +102,7 @@ export default function ActionItemsPanel({
               <span style={{ flex: '1 1 auto', minWidth: 0, textDecoration: item.status === 'done' ? 'line-through' : 'none', opacity: item.status === 'done' ? 0.6 : 1 }}>
                 {item.text}
                 {item.source === 'carried' && (
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}> (carried in)</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}> {t('act.carried_in')}</span>
                 )}
               </span>
               {item.owner && item.owner !== 'Unassigned' && (
@@ -123,7 +123,7 @@ export default function ActionItemsPanel({
               void addItem();
             }
           }}
-          placeholder="Add an action item"
+          placeholder={t('act.add_an_action_item')}
           style={{ flex: '1 1 auto', minWidth: 0, padding: '0.45rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.8rem' }}
         />
         <button
@@ -133,7 +133,7 @@ export default function ActionItemsPanel({
           disabled={adding || !newText.trim()}
           onClick={() => void addItem()}
         >
-          Add
+          {t('act.add')}
         </button>
       </div>
       {notice && <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>{notice}</p>}

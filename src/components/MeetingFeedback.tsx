@@ -38,15 +38,15 @@ export const MeetingFeedback: React.FC<MeetingFeedbackProps> = ({ meetingId, gue
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', fontSize: '0.9rem', color: '#10B981', fontWeight: 600 }}>
         <CheckCircle2 size={18} />
-        <span>Thanks for rating this meeting.</span>
+        <span>{t('feedback.thanks_for_rating_this_meeting')}</span>
       </div>
     );
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', width: '100%', maxWidth: '420px' }}>
-      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white' }}>How was this meeting?</span>
-      <div style={{ display: 'flex', gap: '0.35rem' }} role="radiogroup" aria-label="Rate this meeting from 1 to 5 stars">
+      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'white' }}>{t('feedback.how_was_this_meeting')}</span>
+      <div style={{ display: 'flex', gap: '0.35rem' }} role="radiogroup" aria-label={t('feedback.rate_this_meeting_from_1')}>
         {[1, 2, 3, 4, 5].map((stars) => (
           <button
             key={stars}
@@ -54,7 +54,7 @@ export const MeetingFeedback: React.FC<MeetingFeedbackProps> = ({ meetingId, gue
             onClick={() => setRating(stars)}
             onMouseEnter={() => setHover(stars)}
             onMouseLeave={() => setHover(0)}
-            aria-label={`${stars} star${stars === 1 ? '' : 's'}`}
+            aria-label={t(stars === 1 ? 'feedback.one_star' : 'feedback.many_stars', { v1: stars })}
             aria-checked={rating === stars}
             role="radio"
             style={{
@@ -77,7 +77,7 @@ export const MeetingFeedback: React.FC<MeetingFeedbackProps> = ({ meetingId, gue
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             maxLength={280}
-            placeholder="One line, optional (what worked, or what did not)"
+            placeholder={t('feedback.one_line_optional_what_worked')}
             className="premium-input"
             style={{ width: '100%', height: '40px', fontSize: '0.85rem' }}
           />

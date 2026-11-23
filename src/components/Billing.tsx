@@ -83,12 +83,12 @@ export const Billing: React.FC<BillingProps> = ({
 
       {/* Title Header */}
       <div style={{ textAlign: 'center' }}>
-        <span className="badge badge-premium" style={{ marginBottom: '1rem' }}>Pricing Tiers</span>
+        <span className="badge badge-premium" style={{ marginBottom: '1rem' }}>{t('bill.pricing_tiers')}</span>
         <h1 style={{ fontSize: '2.5rem', fontFamily: 'var(--font-heading)', fontWeight: 800, marginBottom: '0.5rem' }}>
-          Upgrade to GIIN MEET Pro
+          {t('bill.upgrade_to_giin_meet_pro')}
         </h1>
         <p style={{ color: 'var(--text-muted)', maxWidth: '600px', margin: '0 auto', fontSize: '1.05rem' }}>
-          Select the tier that fits your collaboration flow and experience virtualization at its peak.
+          {t('bill.select_the_tier_that_fits')}
         </p>
       </div>
 
@@ -110,14 +110,12 @@ export const Billing: React.FC<BillingProps> = ({
         }}>
           <Sparkles size={20} color="var(--color-accent)" style={{ flexShrink: 0, marginTop: '0.1rem' }} />
           <div>
-            <strong>Pro upgrade coming soon.</strong> Paid plans are not available yet — no payment
-            method is connected, so no card details are collected and nothing is charged.
-            You can keep using the Free plan for now.
+            <strong>{t('bill.pro_upgrade_coming_soon')}</strong> {t('bill.paid_plans_are_not_available')}
           </div>
           <button
             onClick={() => setShowComingSoon(false)}
             style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.25rem', flexShrink: 0 }}
-            aria-label="Dismiss"
+            aria-label={t('bill.dismiss')}
           >
             &times;
           </button>
@@ -161,7 +159,7 @@ export const Billing: React.FC<BillingProps> = ({
                 letterSpacing: '0.05em',
                 textTransform: 'uppercase'
               }}>
-                Most Popular
+                {t('bill.most_popular')}
               </span>
             )}
 
@@ -201,14 +199,14 @@ export const Billing: React.FC<BillingProps> = ({
                   fontSize: '0.85rem',
                   fontWeight: 600
                 }}>
-                  Active Subscription
+                  {t('bill.active_subscription')}
                 </div>
                 <button
                   onClick={onDowngrade}
                   className="premium-btn premium-btn-secondary"
                   style={{ width: '100%', padding: '0.5rem' }}
                 >
-                  Cancel Plan
+                  {t('bill.cancel_plan')}
                 </button>
               </div>
             ) : (
@@ -228,7 +226,7 @@ export const Billing: React.FC<BillingProps> = ({
       {/* Note: no payment is taken on this screen */}
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '640px', margin: '0 auto' }}>
         <Info size={16} style={{ flexShrink: 0, marginTop: '0.15rem' }} />
-        <span>Paid upgrades are coming soon. This screen does not collect payment details and does not charge anything.</span>
+        <span>{t('bill.paid_upgrades_are_coming_soon')}</span>
       </div>
     </div>
   );

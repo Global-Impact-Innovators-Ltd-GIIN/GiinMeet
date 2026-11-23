@@ -1,11 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2, Download } from 'lucide-react';
 import { buildJoinLink, buildShortPersonalRoomLink, generateMeetingPasscode, getSystemSettings, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
+import { readRecentMeetings } from '../utils/recent';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
-import { CalendarSyncPanel } from './CalendarSyncPanel';
-import { TemplatesPanel, type MeetingTemplate } from './TemplatesPanel';
-import { RecentMeetings } from './RecentMeetings';
-import { LibraryPanel } from './LibraryPanel';
 import SchedulingAssistant from './SchedulingAssistant';
 import MeetingInsights from './MeetingInsights';
 import ActionItemsPanel from './ActionItemsPanel';
@@ -13,9 +10,6 @@ import { MeetingRecordExtras } from './MeetingRecordExtras';
 import { ShortLinkBox } from './ShortLinkBox';
 import { CertificatesPanel } from './CertificatesPanel';
 import { NotesExport } from './NotesExport';
-import { ApiDeveloperPanel } from './ApiDeveloperPanel';
-import { OrganisationsPanel } from './OrganisationsPanel';
-import { MeetingPrepBrief } from './MeetingPrepBrief';
 import { t, useUiLanguage } from '../i18n';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
@@ -208,7 +202,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await giinApi.updateMeetingExpiry(meeting.id, mode, expiresAt);
       setLinkExpiries((prev) => ({ ...prev, [meeting.id]: { mode, expiresAt } }));
     } catch (err: any) {
-      window.alert('Could not save the link expiry, run giinmeet_link_expiry.sql in Supabase first, then try again.');
+      window.alert(t('dash.could_not_save_the_link'));
     }
   };
 
@@ -338,7 +332,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const historyEntries = useMemo((): HistoryEntry[] => {
     const groups: { seriesId: string; title: string; rule: string; meetings: Meeting[] }[] = [];
     const byId = new Map<string, (typeof groups)[number]>();
-    for (const m of meetingHistory) {
+    for (const m of historyWithLocal) {
       const sid = seriesIdFor(m);
       if (!sid) { groups.push({ seriesId: '', title: m.title, rule: '', meetings: [m] }); continue; }
       let g = byId.get(sid);
@@ -367,21 +361,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meetingHistory, expandedSeries]);
+  }, [historyWithLocal, expandedSeries]);
+
+  // ONE history list: server history plus local recents (guest joins
+  // never reach the server history, so without this merge a guest
+  // rejoin would vanish from the dashboard). Deduped by id, newest first.
+  const historyWithLocal = useMemo(() => {
+    const byId = new Map<string, Meeting>();
+    (meetingHistory || []).forEach((m) => byId.set(m.id, m));
+    readRecentMeetings().forEach((m) => {
+      if (!byId.has(m.id)) {
+        byId.set(m.id, { id: m.id, title: m.title, time: m.time, host: m.host || '', status: 'Completed', duration: '' });
+      }
+    });
+    return [...byId.values()].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  }, [meetingHistory]);
   // Top-level entries for the history count: one per series plus one per
   // single meeting, so the header reads "3 entries · 23 total meetings"
   // instead of pretending 23 separate meetings were scheduled.
   const historyTopLevelCount = useMemo(() => {
     const ids = new Set<string>();
     let n = 0;
-    for (const m of meetingHistory) {
+    for (const m of historyWithLocal) {
       const sid = seriesIdFor(m);
       if (!sid) { n++; continue; }
       if (!ids.has(sid)) { ids.add(sid); n++; }
     }
     return n;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meetingHistory]);
+  }, [historyWithLocal]);
   // Phase 1, meeting reminder: emailed to the host before the meeting.
   // Default on, 15 minutes before (the reminder itself only sends once
   // the Resend API key is configured, see src/utils/mailer.ts).
@@ -435,7 +443,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const result: any = await giinApi.sendFollowUp(id, extras);
     setFollowUpSending(null);
     if (result?.ok) {
-      setFollowUpStatus((prev) => ({ ...prev, [id]: `Follow-up sent to ${result.sent} ${result.sent === 1 ? 'person' : 'people'}.` }));
+      setFollowUpStatus((prev) => ({ ...prev, [id]: t('dash.follow_up_sent_to', { v1: result.sent, v2: result.sent === 1 ? 'person' : 'people' }) }));
     } else {
       setFollowUpStatus((prev) => ({ ...prev, [id]: result?.message || 'The follow-up could not be sent.' }));
     }
@@ -498,6 +506,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Phase C1 (33), smart scheduling assistant, opened from the
   // Schedule modal. Fills the schedule form when a slot is picked.
   const [showSchedulingAssistant, setShowSchedulingAssistant] = useState(false);
+  const [showHandleEditor, setShowHandleEditor] = useState(false);
+
+  // A template picked under Schedule opens pre-filled in the schedule
+  // form here. Schedule stores the pick in localStorage and navigates
+  // to the dashboard; this runs once on mount, applies it, then clears it.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('giin_pending_template');
+      if (!raw) return;
+      const tpl = JSON.parse(raw);
+      localStorage.removeItem('giin_pending_template');
+      if (tpl?.title) setMeetingTitle(tpl.title);
+      const match = durationOptions.find((o) => parseDurationMinutes(o.value) === tpl.duration_minutes);
+      if (match) setTemplateDuration(match.value);
+      if (typeof tpl.require_waiting_room === 'boolean') setRequireWaitingRoom(tpl.require_waiting_room);
+      setSchedulePasscodeEnabled(!!tpl.passcode);
+      setSchedulePasscode(tpl.passcode || '');
+      setShowScheduleModal(true);
+    } catch (e) { /* a bad stored template never blocks the dashboard */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const handleUseSuggestedSlot = (startIso: string, slotTitle: string, durationMinutes: number) => {
     const d = new Date(startIso);
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -594,20 +623,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return { ...meeting, passcode: passcode ?? null };
   };
 
-  // Phase C1 (24), templates: one tap starts the saved setup, or it
-  // opens pre-filled in the schedule form.
-  const handleStartTemplate = (t: MeetingTemplate) => {
-    onStartMeeting(t.title, undefined, true, undefined, t.require_waiting_room, t.passcode ?? null);
-  };
-  const handleScheduleTemplate = (t: MeetingTemplate) => {
-    setMeetingTitle(t.title);
-    const match = durationOptions.find((o) => parseDurationMinutes(o.value) === t.duration_minutes);
-    if (match) setTemplateDuration(match.value);
-    setRequireWaitingRoom(t.require_waiting_room);
-    setSchedulePasscodeEnabled(!!t.passcode);
-    setSchedulePasscode(t.passcode || '');
-    setShowScheduleModal(true);
-  };
 
   const handleScheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -730,170 +745,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       display: 'flex',
       flexDirection: 'column'
     }}>
-      {/* Welcome Banner, animated in code: laptop opens, a meeting plays on
-          its screen, it closes, then the GiinMeet lockup displays, After Effects
-          style, looping every 10s. Text stays exactly as it was (static,
-          white, name gold). No video file: the video budget is exhausted,
-          so this motion is pure CSS built live in the banner. */}
-      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: '16px', marginBottom: '1.5rem', minHeight: '190px', display: 'flex', alignItems: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', background: 'linear-gradient(115deg, #020617 0%, #001a4c 55%, #0a2a6b 100%)' }}>
-        {/* Static fallback image, only shown when the user prefers reduced motion. */}
-        <img className="welcome-banner-static-fallback" src="/welcome-banner-bg.webp" alt="" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'none' }} />
-        {/* Animated scene (decorative, aria-hidden) */}
-        <div className="bl-anim" aria-hidden="true">
-          <div className="bl-orb bl-orb-gold" />
-          <div className="bl-orb bl-orb-white" />
-          <div className="bl-orb bl-orb-blue" />
-          <div className="bl-streak bl-streak-a" />
-          <div className="bl-streak bl-streak-b" />
-          <span className="bl-bokeh bl-bokeh-a" />
-          <span className="bl-bokeh bl-bokeh-b" />
-          <span className="bl-bokeh bl-bokeh-c" />
-          <div className="bl-scene">
-            <div className="bl-laptop">
-              <div className="bl-screen">
-                <div className="bl-screen-face">
-                  <div className="bl-tile bl-tile-a"><span className="bl-person" /></div>
-                  <div className="bl-tile bl-tile-b"><span className="bl-person" /></div>
-                  <div className="bl-tile bl-tile-c"><span className="bl-person" /></div>
-                  <div className="bl-tile bl-tile-d"><span className="bl-person" /><span className="bl-speaking" /></div>
-                </div>
-              </div>
-              <div className="bl-base" />
-            </div>
-            <div className="bl-share">
-              <div className="bl-share-head">Real-Time Screen Share</div>
-              <div className="bl-share-body">
-                <div className="bl-bars"><i /><i /><i /><i /><i /></div>
-                <div className="bl-donut" />
-              </div>
-            </div>
-            <div className="bl-controls"><span className="bl-ctl" /><span className="bl-ctl" /><span className="bl-ctl" /><span className="bl-ctl bl-ctl-end" /></div>
-            <div className="bl-logo">
-              <div className="bl-logo-panel">
-                <img src={getLocalLogoUrl()} alt="" />
-                <div className="bl-logo-name">{getLocalBrandName()}</div>
-                <div className="bl-logo-tag">{getLocalBrandSlogan()}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(2,6,23,0.60) 0%, rgba(2,6,23,0.38) 55%, rgba(2,6,23,0.15) 100%)' }} />
-        <div style={{ position: 'relative', zIndex: 2, padding: '1.75rem 2rem' }}>
-          <h1 className="welcome-heading" style={{ color: 'white' }}>
-            Welcome back, <span style={{ color: 'var(--color-accent)' }}>{userName}</span>
-          </h1>
-          <p className="welcome-subtext" style={{ color: 'rgba(255,255,255,0.85)' }}>
-            Connect, collaborate, and virtualize with HD audio and video.
-          </p>
-          {/* Phase C1 (32), install GiinMeet on the home screen. Only
-              shown when it can actually be installed, and hidden once it is. */}
-          {!isStandalone && installPrompt && (
-            <button
-              type="button"
-              onClick={() => void handleInstallApp()}
-              style={{ marginTop: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.55rem 1rem', borderRadius: '999px', border: '1px solid rgba(255,255,255,0.5)', backgroundColor: 'rgba(255,255,255,0.12)', color: 'white', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}
-            >
-              <Download size={15} /> Install GiinMeet app
-            </button>
-          )}
-          {!isStandalone && !installPrompt && isIos && (
-            <p style={{ margin: '0.9rem 0 0', fontSize: '0.8rem', color: 'rgba(255,255,255,0.75)' }}>
-              On iPhone, tap Share, then Add to Home Screen to install GiinMeet.
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Phase 1, Your personal room: one permanent link. */}
-      <div className="glass-panel" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <Link2 size={18} color="var(--color-accent)" />
-          <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)' }}>{t('dash.personalRoom')}</h3>
-        </div>
-        {personalRoomLoading ? (
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Loading your room…</p>
-        ) : personalRoom ? (
-          <>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('dash.personalRoomHint')}</p>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <code style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>{buildShortPersonalRoomLink(personalRoom.slug)}</code>
-              <button className="premium-btn premium-btn-secondary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleCopyPersonalLink}>{copiedPersonalLink ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy link</>}</button>
-              <button className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleStartPersonalRoom}><Video size={14} /> Start my room</button>
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Your handle:</span>
-              <input
-                type="text"
-                value={handleInput}
-                onChange={(e) => setHandleInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                maxLength={30}
-                aria-label="Your personal room handle"
-                style={{ flex: '0 1 180px', minWidth: 0, padding: '0.45rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem' }}
-              />
-              <button className="premium-btn premium-btn-secondary" style={{ padding: '0.45rem 0.8rem', fontSize: '0.8rem' }} disabled={handleSaving || handleInput.trim().toLowerCase() === personalRoom.slug} onClick={() => void handleSaveHandle()}>
-                {handleSaving ? 'Saving…' : 'Save handle'}
-              </button>
-              {handleNote && <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{handleNote}</span>}
-            </div>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
-              Letters, numbers and hyphens, 3 to 30 characters. Your passcode and waiting-room settings still apply to everyone except you.
-            </p>
-          </>
-        ) : (
-          <>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Get one permanent link for your room, it never changes, so you only ever share it once.</p>
-            <div>
-              <button className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleCreatePersonalRoom} disabled={personalRoomCreating}>{personalRoomCreating ? 'Creating…' : 'Create my personal room'}</button>
-            </div>
-            {personalRoomUnavailable && (
-              <p style={{ fontSize: '0.8rem', color: '#F59E0B' }}>Personal rooms need the Phase 1 database setup, run giinmeet_phase1.sql in the Supabase SQL Editor first.</p>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Phase C1 (23), calendar sync: one grouped section, two provider rows. */}
-      <CalendarSyncPanel meetings={meetingHistory} />
-
-      {/* Phase C1 (24), meeting templates: one grouped section. */}
-      <TemplatesPanel
-        currentTitle={meetingTitle}
-        currentDurationMinutes={parseDurationMinutes(templateDuration) || 60}
-        currentRequireWaitingRoom={requireWaitingRoom}
-        currentPasscode={schedulePasscodeEnabled ? schedulePasscode : null}
-        onStartTemplate={handleStartTemplate}
-        onScheduleTemplate={handleScheduleTemplate}
-      />
-
-      {/* Phase D (42): API keys and webhooks, one grouped section. */}
-      <ApiDeveloperPanel />
-
-      {/* Phase D (47): organisations and white-label branding, one grouped section. */}
-      <OrganisationsPanel />
-
-      {/* Phase C1 (26), recent meetings, one-tap rejoin. */}
-      <RecentMeetings meetings={meetingHistory} />
-
-      {/* Phase C1 (28), recordings and notes library, search. */}
-      <LibraryPanel
-        onOpenRecord={(id) => {
-          setRecordMeetingId(id);
-          void loadMeetingRecord(id);
-          try {
-            document.getElementById('meeting-history')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          } catch (e) { /* scrolling is best effort */ }
-        }}
-      />
-
-      {/* Phase C2a (6): prep brief for the next upcoming meeting. */}
-      {(() => {
-        const now = Date.now();
-        const next = [...(meetingHistory || [])]
-          .filter((m: any) => new Date(m.time).getTime() >= now - 60 * 60 * 1000)
-          .sort((a: any, b: any) => new Date(a.time).getTime() - new Date(b.time).getTime())[0];
-        return next ? <MeetingPrepBrief meetingId={next.id} meetingTitle={next.title} meetingTime={next.time} /> : null;
-      })()}
-
       {/* Quick Action Grid */}
       <div style={{
         display: 'grid',
@@ -940,8 +791,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <Video size={24} color="var(--color-accent)" />
           </div>
           <div>
-            <h3 style={{ color: 'white', fontSize: '1.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>New Meeting</h3>
-            <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem' }}>Start an instant virtualization hub</p>
+            <h3 style={{ color: 'white', fontSize: '1.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>{t('dash.newMeeting')}</h3>
+            <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem' }}>{t('dash.start_now')}</p>
           </div>
         </div>
 
@@ -979,8 +830,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <UserPlus size={24} color="var(--color-primary)" />
           </div>
           <div>
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>Join Meeting</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Enter a code or invitation link</p>
+            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>{t('dash.joinMeeting')}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t('dash.enter_a_code_or_link')}</p>
           </div>
         </div>
 
@@ -1018,10 +869,140 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <Calendar size={24} color="var(--color-accent)" />
           </div>
           <div>
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>Schedule</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Plan your future team sync</p>
+            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>{t('schedule.title')}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t('dash.pick_a_time')}</p>
           </div>
         </div>
+      </div>
+
+
+      {/* Welcome Banner, animated in code: laptop opens, a meeting plays on
+          its screen, it closes, then the GiinMeet lockup displays, After Effects
+          style, looping every 10s. Text stays exactly as it was (static,
+          white, name gold). No video file: the video budget is exhausted,
+          so this motion is pure CSS built live in the banner. */}
+      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: '16px', marginBottom: '1.5rem', minHeight: '120px', display: 'flex', alignItems: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', background: 'linear-gradient(115deg, #020617 0%, #001a4c 55%, #0a2a6b 100%)' }}>
+        {/* Static fallback image, only shown when the user prefers reduced motion. */}
+        <img className="welcome-banner-static-fallback" src="/welcome-banner-bg.webp" alt="" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'none' }} />
+        {/* Animated scene (decorative, aria-hidden) */}
+        <div className="bl-anim" aria-hidden="true">
+          <div className="bl-orb bl-orb-gold" />
+          <div className="bl-orb bl-orb-white" />
+          <div className="bl-orb bl-orb-blue" />
+          <div className="bl-streak bl-streak-a" />
+          <div className="bl-streak bl-streak-b" />
+          <span className="bl-bokeh bl-bokeh-a" />
+          <span className="bl-bokeh bl-bokeh-b" />
+          <span className="bl-bokeh bl-bokeh-c" />
+          <div className="bl-scene">
+            <div className="bl-laptop">
+              <div className="bl-screen">
+                <div className="bl-screen-face">
+                  <div className="bl-tile bl-tile-a"><span className="bl-person" /></div>
+                  <div className="bl-tile bl-tile-b"><span className="bl-person" /></div>
+                  <div className="bl-tile bl-tile-c"><span className="bl-person" /></div>
+                  <div className="bl-tile bl-tile-d"><span className="bl-person" /><span className="bl-speaking" /></div>
+                </div>
+              </div>
+              <div className="bl-base" />
+            </div>
+            <div className="bl-share">
+              <div className="bl-share-head">{t('dash.real_time_screen_share')}</div>
+              <div className="bl-share-body">
+                <div className="bl-bars"><i /><i /><i /><i /><i /></div>
+                <div className="bl-donut" />
+              </div>
+            </div>
+            <div className="bl-controls"><span className="bl-ctl" /><span className="bl-ctl" /><span className="bl-ctl" /><span className="bl-ctl bl-ctl-end" /></div>
+            <div className="bl-logo">
+              <div className="bl-logo-panel">
+                <img src={getLocalLogoUrl()} alt="" />
+                <div className="bl-logo-name">{getLocalBrandName()}</div>
+                <div className="bl-logo-tag">{getLocalBrandSlogan()}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(2,6,23,0.60) 0%, rgba(2,6,23,0.38) 55%, rgba(2,6,23,0.15) 100%)' }} />
+        <div style={{ position: 'relative', zIndex: 2, padding: '1.25rem 1.5rem' }}>
+          <h1 className="welcome-heading" style={{ color: 'white' }}>
+            {t('dash.welcome_back')} <span style={{ color: 'var(--color-accent)' }}>{userName}</span>
+          </h1>
+          <p className="welcome-subtext" style={{ color: 'rgba(255,255,255,0.85)' }}>
+            {t('dash.hd_audio_and_video')}
+          </p>
+          {/* Phase C1 (32), install GiinMeet on the home screen. Only
+              shown when it can actually be installed, and hidden once it is. */}
+          {!isStandalone && installPrompt && (
+            <button
+              type="button"
+              onClick={() => void handleInstallApp()}
+              style={{ marginTop: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.55rem 1rem', borderRadius: '999px', border: '1px solid rgba(255,255,255,0.5)', backgroundColor: 'rgba(255,255,255,0.12)', color: 'white', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}
+            >
+              <Download size={15} /> {t('dash.install_giinmeet_app')}
+            </button>
+          )}
+          {!isStandalone && !installPrompt && isIos && (
+            <p style={{ margin: '0.9rem 0 0', fontSize: '0.8rem', color: 'rgba(255,255,255,0.75)' }}>
+              {t('dash.on_iphone_tap_share_then')}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Phase 1, Your personal room: one permanent link. */}
+      <div className="glass-panel" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <Link2 size={18} color="var(--color-accent)" />
+          <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-heading)' }}>{t('dash.personalRoom')}</h3>
+        </div>
+        {personalRoomLoading ? (
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('dash.loading_your_room')}</p>
+        ) : personalRoom ? (
+          <>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('dash.personalRoomHint')}</p>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <code style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>{buildShortPersonalRoomLink(personalRoom.slug)}</code>
+              <button className="premium-btn premium-btn-secondary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleCopyPersonalLink}>{copiedPersonalLink ? <><Check size={14} /> {t('common.copied')}</> : <><Copy size={14} /> {t('dash.copy_link')}</>}</button>
+              <button className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleStartPersonalRoom}><Video size={14} /> {t('dash.start_room')}</button>
+            </div>
+            <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.45rem 0.8rem', fontSize: '0.8rem', alignSelf: 'flex-start' }} onClick={() => setShowHandleEditor((v) => !v)}>
+              {showHandleEditor ? 'Hide handle' : 'Change handle'}
+            </button>
+            {showHandleEditor && (
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t('dash.your_handle')}</span>
+                <input
+                  type="text"
+                  value={handleInput}
+                  onChange={(e) => setHandleInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                  maxLength={30}
+                  aria-label={t('dash.your_personal_room_handle')}
+                  style={{ flex: '0 1 180px', minWidth: 0, padding: '0.45rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem' }}
+                />
+                <button className="premium-btn premium-btn-secondary" style={{ padding: '0.45rem 0.8rem', fontSize: '0.8rem' }} disabled={handleSaving || handleInput.trim().toLowerCase() === personalRoom.slug} onClick={() => void handleSaveHandle()}>
+                  {handleSaving ? 'Saving…' : 'Save handle'}
+                </button>
+                {handleNote && <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{handleNote}</span>}
+              </div>
+            )}
+            {showHandleEditor && (
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                {t('dash.letters_numbers_and_hyphens_3')}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('dash.one_permanent_link_for_your')}</p>
+            <div>
+              <button className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleCreatePersonalRoom} disabled={personalRoomCreating}>{personalRoomCreating ? 'Creating…' : 'Create my room'}</button>
+            </div>
+            {personalRoomUnavailable && (
+              <p style={{ fontSize: '0.8rem', color: '#F59E0B' }}>{t('dash.personal_rooms_need_the_phase')}</p>
+            )}
+          </>
+        )}
       </div>
 
       {/* Main Content Split: History & Upgrade Promo */}
@@ -1033,8 +1014,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {/* Left Side: Meeting History */}
         <div id="meeting-history" className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div className="flex-between">
-            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)' }}>Meeting Logs & History</h2>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{historyTopLevelCount === meetingHistory.length ? `${meetingHistory.length} total meetings` : `${historyTopLevelCount} entries · ${meetingHistory.length} total meetings`}</span>
+            <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)' }}>{t('dash.recentMeetings')}</h2>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{historyTopLevelCount === historyWithLocal.length ? t('dash.total_meetings', { v1: historyWithLocal.length }) : t('dash.entries_total_meetings', { v1: historyTopLevelCount, v2: historyWithLocal.length })}</span>
+            <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => onNavigate('schedule')}>{t('dash.see_all_meetings')}</button>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '380px', overflowY: 'auto', paddingRight: '0.5rem' }}>
@@ -1045,8 +1027,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div key={entry.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
                     <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>🔁 {entry.title}, {label} series · {entry.size} meetings</span>
                     <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <button onClick={() => setExpandedSeries((prev) => ({ ...prev, [`series:${entry.seriesId}`]: false }))} className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px' }} title="Collapse this series back to one row">Hide ▴</button>
-                      <button onClick={() => onCancelSeries?.(entry.seriesId, entry.title)} className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444' }} title="Cancel every upcoming meeting in this series">Cancel series</button>
+                      <button onClick={() => setExpandedSeries((prev) => ({ ...prev, [`series:${entry.seriesId}`]: false }))} className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px' }} title={t('dash.collapse_this_series_back_to')}>{t('dash.hide')}</button>
+                      <button onClick={() => onCancelSeries?.(entry.seriesId, entry.title)} className="premium-btn premium-btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444' }} title={t('dash.cancel_every_upcoming_meeting_in')}>{t('dash.cancel_series')}</button>
                     </span>
                   </div>
                 );
@@ -1108,7 +1090,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {isRepresentative && (
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.25rem 0 0', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                         <span>🔁 {repLabel} series · {repSize} meetings, this row is the next one</span>
-                        <button onClick={() => setExpandedSeries((prev) => ({ ...prev, [`series:${repSeriesId}`]: true }))} className="premium-btn premium-btn-secondary" style={{ padding: '0.15rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px' }} title="Show every meeting in this series">Show all {repSize} ▾</button>
+                        <button onClick={() => setExpandedSeries((prev) => ({ ...prev, [`series:${repSeriesId}`]: true }))} className="premium-btn premium-btn-secondary" style={{ padding: '0.15rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px' }} title={t('dash.show_every_meeting_in_this')}>Show all {repSize} ▾</button>
                       </p>
                     )}
                     {meeting.status !== 'Completed' && (
@@ -1142,7 +1124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <select
                           value={linkExpiryMode(meeting)}
                           onChange={(e) => handleLinkExpiryChange(meeting, e.target.value)}
-                          title="Change when this meeting link expires"
+                          title={t('dash.change_when_this_meeting_link')}
                           style={{ fontSize: '0.75rem', padding: '0.15rem 0.3rem', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-main)' }}
                         >
                           {LINK_EXPIRY_OPTIONS.map((o) => (
@@ -1179,7 +1161,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         }}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        title="Download a calendar file (.ics) for this meeting"
+                        title={t('dash.download_a_calendar_file_ics')}
                       >
                         <Calendar size={14} />
                         <span>.ics</span>
@@ -1191,7 +1173,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         }}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        title="Add this meeting to Google Calendar (opens Google Calendar with the details pre-filled)"
+                        title={t('dash.add_this_meeting_to_google')}
                       >
                         <Calendar size={14} />
                         <span>Google</span>
@@ -1200,10 +1182,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         onClick={() => openInviteModal(meeting)}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        title="Invite someone by email or from your contacts"
+                        title={t('dash.invite_someone_by_email_or')}
                       >
                         <UserPlus size={14} />
-                        <span>Invite</span>
+                        <span>{t('dash.invite')}</span>
                       </button>
                       <button
                         onClick={async () => {
@@ -1215,7 +1197,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         }}
                         className={`premium-btn ${copiedHistoryId === meeting.id ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        title="Copy Join Link"
+                        title={t('dash.copy_join_link')}
                       >
                         {copiedHistoryId === meeting.id ? <Check size={14} /> : <Copy size={14} />}
                         <span>{copiedHistoryId === meeting.id ? 'Copied' : 'Copy Link'}</span>
@@ -1225,15 +1207,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         className="premium-btn premium-btn-primary" 
                         style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', borderRadius: '4px' }}
                       >
-                        Start Call
+                        {t('dash.start_call')}
                       </button>
                       <button
                         onClick={() => onCancelMeeting?.(meeting.id, meeting.title)}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444' }}
-                        title="Cancel this scheduled meeting"
+                        title={t('dash.cancel_this_scheduled_meeting')}
                       >
-                        Cancel
+                        {t('common.cancel')}
                       </button>
                       {(() => {
                         // Phase 1, cancel the whole series from one button.
@@ -1247,9 +1229,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             onClick={() => onCancelSeries?.(info.seriesId, meeting.title)}
                             className="premium-btn premium-btn-secondary"
                             style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444' }}
-                            title="Cancel every upcoming meeting in this series"
+                            title={t('dash.cancel_every_upcoming_meeting_in')}
                           >
-                            Cancel series
+                            {t('dash.cancel_series')}
                           </button>
                         );
                       })()}
@@ -1258,10 +1240,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           onClick={() => onDeleteMeeting?.(meeting.id, meeting.title)}
                           className="premium-btn premium-btn-secondary"
                           style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444', display: 'flex', alignItems: 'center', gap: '4px' }}
-                          title="Delete this expired meeting from your history"
+                          title={t('dash.delete_this_expired_meeting_from')}
                         >
                           <Trash2 size={14} />
-                          <span>Delete</span>
+                          <span>{t('dash.delete')}</span>
                         </button>
                       )}
                     </div>
@@ -1274,9 +1256,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         onClick={() => setAttendanceMeetingId(attendanceMeetingId === meeting.id ? null : meeting.id)}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px' }}
-                        title="Who joined, when, and how long they stayed (recorded in this browser during the meeting)"
+                        title={t('dash.who_joined_when_and_how')}
                       >
-                        Attendance
+                        {t('dash.attendance')}
                       </button>
                       <button
                         onClick={() => {
@@ -1286,18 +1268,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         }}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px' }}
-                        title="Saved transcript and AI summary for this meeting"
+                        title={t('dash.saved_transcript_and_ai_summary')}
                       >
-                        Record
+                        {t('dash.record')}
                       </button>
                       <button
                         onClick={() => onDeleteMeeting?.(meeting.id, meeting.title)}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        title="Delete this meeting from your history"
+                        title={t('dash.delete_this_meeting_from_your')}
                       >
                         <Trash2 size={14} />
-                        <span>Delete</span>
+                        <span>{t('dash.delete')}</span>
                       </button>
                     </div>
                   )}
@@ -1309,10 +1291,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {(() => {
                     try {
                       const raw = localStorage.getItem(`giin_attendance_${meeting.id}`);
-                      if (!raw) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No attendance was recorded for this meeting in this browser.</p>;
+                      if (!raw) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('dash.no_attendance_was_recorded_for')}</p>;
                       const map = JSON.parse(raw);
                       const rows = Object.values(map) as { name: string; joinedAt: number; leftAt: number | null }[];
-                      if (rows.length === 0) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No attendance was recorded for this meeting in this browser.</p>;
+                      if (rows.length === 0) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('dash.no_attendance_was_recorded_for')}</p>;
                       const fmt = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                       const dur = (a: number, b: number | null) => {
                         const mins = Math.max(0, Math.round(((b || Date.now()) - a) / 60000));
@@ -1326,19 +1308,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               <span style={{ color: 'var(--text-muted)' }}>joined {fmt(r.joinedAt)} · {r.leftAt ? `left ${fmt(r.leftAt)}` : 'still in room at end'} · {dur(r.joinedAt, r.leftAt)}</span>
                             </div>
                           ))}
-                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Recorded in this browser during the meeting, not a server log.</span>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('dash.recorded_in_this_browser_during')}</span>
                           <button
                             type="button"
                             className="premium-btn premium-btn-secondary"
                             style={{ alignSelf: 'flex-start', padding: '0.35rem 0.75rem', fontSize: '0.75rem', marginTop: '0.25rem' }}
                             onClick={() => downloadAttendanceCsv(meeting, rows)}
                           >
-                            Download CSV
+                            {t('dash.download_csv')}
                           </button>
                         </div>
                       );
                     } catch (e) {
-                      return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Attendance could not be read.</p>;
+                      return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('dash.attendance_could_not_be_read')}</p>;
                     }
                   })()}
                 </div>
@@ -1348,7 +1330,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.5rem' }}>Transcript & Summary, {meeting.title}</h4>
                   {(() => {
                     const rec = meetingRecords[meeting.id];
-                    if (!rec || rec.loading) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Loading the meeting record…</p>;
+                    if (!rec || rec.loading) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('dash.loading_the_meeting_record')}</p>;
                     if (rec.note && !rec.transcript && !rec.summary) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{rec.note}</p>;
                     const lines = rec.transcript?.lines || [];
                     const summary = rec.summary;
@@ -1356,11 +1338,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                         {summary ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>AI SUMMARY</span>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('dash.ai_summary')}</span>
                             <p style={{ fontSize: '0.85rem', margin: 0, lineHeight: 1.5 }}>{summary.summary}</p>
                             {summary.decisions?.length > 0 && (
                               <div>
-                                <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>Decisions</span>
+                                <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>{t('dash.decisions')}</span>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.25rem' }}>
                                   {summary.decisions.map((d: string, i: number) => (
                                     <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.8rem', lineHeight: 1.45 }}>
@@ -1391,7 +1373,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             type="text"
                             value={followUpEmails}
                             onChange={(e) => setFollowUpEmails(e.target.value)}
-                            placeholder="Extra email addresses (optional, comma separated)"
+                            placeholder={t('dash.extra_email_addresses_optional_comma')}
                             style={{ flex: '1 1 220px', minWidth: 0, padding: '0.45rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.8rem' }}
                           />
                           <button
@@ -1410,7 +1392,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         )}
                         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRANSCRIPT ({lines.length} lines)</span>
                         {lines.length === 0 ? (
-                          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No transcript was saved for this meeting.</p>
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('dash.no_transcript_was_saved_for')}</p>
                         ) : (
                           <div className="scroll-refined" style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             {lines.map((l: any, i: number) => (
@@ -1476,20 +1458,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
               
               <div style={{ zIndex: 1 }}>
                 <span className="badge badge-premium" style={{ color: '#000', backgroundColor: 'var(--color-accent)', border: 'none', marginBottom: '1rem' }}>
-                  GO PRO
+                  {t('dash.go_pro')}
                 </span>
                 <h3 style={{ color: 'white', fontSize: '1.6rem', fontWeight: 800, marginBottom: '0.75rem', fontFamily: 'var(--font-heading)' }}>
-                  Upgrade to Pro Tiers
+                  {t('dash.upgrade_to_pro_tiers')}
                 </h3>
                 <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.9rem', lineHeight: 1.4, marginBottom: '1.5rem' }}>
-                  Unlock 24h meeting limits, customized backgrounds, virtualization overlays, interactive whiteboards, and priority support.
+                  {t('dash.longer_meetings_more_people_and')}
                 </p>
                 
                 <ul style={{ color: 'white', fontSize: '0.85rem', paddingLeft: '1.25rem', marginBottom: '2rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <li>Unlimited meeting durations (up to 24h)</li>
-                  <li>Up to 100 participants per room</li>
-                  <li>Pro customization virtualization tools</li>
-                  <li>Direct AI chat assistant response</li>
+                  <li>{t('dash.meetings_up_to_24_hours')}</li>
+                  <li>{t('dash.up_to_100_people_per')}</li>
+                  <li>{t('dash.your_logo_and_colours')}</li>
+                  <li>{t('dash.priority_support')}</li>
                 </ul>
               </div>
 
@@ -1498,7 +1480,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 className="premium-btn premium-btn-accent" 
                 style={{ width: '100%', justifyContent: 'space-between', padding: '0.85rem 1.25rem', zIndex: 1 }}
               >
-                <span>Upgrade for $9.99/mo</span>
+                <span>{t('dash.upgrade_for_9_99_mo')}</span>
                 <ArrowRight size={18} />
               </button>
             </div>
@@ -1518,23 +1500,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
             >
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-                  <span className="badge badge-premium">PRO MEMBER</span>
+                  <span className="badge badge-premium">{t('dash.pro_member')}</span>
                 </div>
                 <h3 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '0.75rem' }}>
-                  You are a GIIN MEET Pro
+                  {t('dash.you_are_a_giin_meet')}
                 </h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.4 }}>
-                  Thank you for subscribing! Your account has unlocked all next-generation virtualization platforms and meeting tools.
+                  {t('dash.thank_you_for_subscribing_your')}
                 </p>
               </div>
 
               <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '1rem', marginTop: '1rem' }}>
                 <div className="flex-between" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Status</span>
-                  <span style={{ fontWeight: 600, color: '#10B981' }}>Active</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{t('dash.status')}</span>
+                  <span style={{ fontWeight: 600, color: '#10B981' }}>{t('dash.active')}</span>
                 </div>
                 <div className="flex-between" style={{ fontSize: '0.85rem', marginBottom: '1.5rem' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Next billing date</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{t('dash.next_billing_date')}</span>
                   <span>July 21, 2026</span>
                 </div>
                 
@@ -1543,7 +1525,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   className="premium-btn premium-btn-secondary" 
                   style={{ width: '100%' }}
                 >
-                  Manage Subscription
+                  {t('dash.manage_subscription')}
                 </button>
               </div>
             </div>
@@ -1565,7 +1547,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
           justifyContent: 'center',
           zIndex: 1000,
           backdropFilter: 'blur(4px)'
-        }}>
+        }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowScheduleModal(false); }}>
           <div className="glass-panel" style={{
             width: '450px',
             backgroundColor: 'var(--bg-card)',
@@ -1574,23 +1557,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
             maxHeight: '90dvh',
             overflowY: 'auto'
           }}>
-            <h3 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>Schedule a Meeting</h3>
+            <h3 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>{t('dash.schedule_a_meeting')}</h3>
             
             <form onSubmit={handleScheduleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               {/* Round 9 (9D): one-click templates. */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>Start from a template</span>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>{t('dash.start_from_a_template')}</span>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('standup')}>Team standup</button>
-                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('client')}>Client call</button>
-                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('interview')}>Interview</button>
+                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('standup')}>{t('dash.team_standup')}</button>
+                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('client')}>{t('dash.client_call')}</button>
+                  <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('interview')}>{t('dash.interview')}</button>
                 </div>
               </div>
               {/* Phase C1 (35), carry open action items from earlier
                   meetings into this one. Only the host's own open items. */}
               {openActionItems.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>Bring open action items into this meeting</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>{t('dash.bring_open_action_items_into')}</span>
                   {openActionItems.map((item: any) => (
                     <label key={item.id} style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start', fontSize: '0.82rem', lineHeight: 1.45, cursor: 'pointer' }}>
                       <input type="checkbox" checked={!!carrySelected[item.id]} onChange={() => toggleCarryItem(item.id)} style={{ marginTop: '3px', flexShrink: 0 }} />
@@ -1604,20 +1587,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
               )}
               {/* Round 9 (9C): link expiry, a duration counts from the meeting date. */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Meeting link expires</label>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>{t('dash.meeting_link_expires')}</label>
                 <select value={scheduleLinkExpiry} onChange={(e) => setScheduleLinkExpiry(e.target.value)} className="premium-input" style={{ height: '44px' }}>
                   {LINK_EXPIRY_OPTIONS.map((o) => (
                     <option key={o.mode} value={o.mode}>{o.label}</option>
                   ))}
                 </select>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>A duration counts from the meeting date. "Expires when the meeting ends" is the default for instant meetings.</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('dash.a_duration_counts_from_the')}</span>
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Meeting Title</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>{t('dash.meeting_title')}</label>
                 <input 
                   type="text" 
                   className="premium-input" 
-                  placeholder="e.g. Weekly Operations Sync"
+                  placeholder={t('dash.e_g_weekly_operations_sync')}
                   value={meetingTitle}
                   onChange={(e) => setMeetingTitle(e.target.value)}
                   required
@@ -1625,7 +1608,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Date & Time</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>{t('dash.date_time')}</label>
                 <input 
                   type="datetime-local" 
                   className="premium-input" 
@@ -1642,11 +1625,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 style={{ alignSelf: 'flex-start', padding: '0.45rem 0.85rem', fontSize: '0.82rem' }}
                 onClick={() => setShowSchedulingAssistant(true)}
               >
-                <Clock size={15} style={{ marginRight: '0.4rem', verticalAlign: '-2px' }} /> Find a time that works for everyone
+                <Clock size={15} style={{ marginRight: '0.4rem', verticalAlign: '-2px' }} /> {t('dash.find_a_time_that_works')}
               </button>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Duration</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>{t('dash.duration')}</label>
                 <select value={templateDuration} onChange={(e) => setTemplateDuration(e.target.value)} className="premium-input" style={{ height: '44px' }}>
                   {durationOptions.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
@@ -1656,7 +1639,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Repeat</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>{t('dash.repeat')}</label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <select
                     className="premium-input"
@@ -1664,17 +1647,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     onChange={(e) => setScheduleRecurrence(e.target.value as 'none' | 'daily' | 'weekly' | 'monthly')}
                     style={{ flex: 1 }}
                   >
-                    <option value="none">Does not repeat</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
+                    <option value="none">{t('dash.does_not_repeat')}</option>
+                    <option value="daily">{t('dash.daily')}</option>
+                    <option value="weekly">{t('dash.weekly')}</option>
+                    <option value="monthly">{t('dash.monthly')}</option>
                   </select>
                 </div>
                 {scheduleRecurrence !== 'none' && (
                   <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer' }}>
                       <input type="radio" checked={scheduleEndMode === 'count'} onChange={() => setScheduleEndMode('count')} />
-                      After
+                      {t('dash.after')}
                     </label>
                     <input
                       type="number"
@@ -1684,13 +1667,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       value={scheduleRecurrenceCount}
                       disabled={scheduleEndMode !== 'count'}
                       onChange={(e) => setScheduleRecurrenceCount(parseInt(e.target.value) || 4)}
-                      title="Number of occurrences"
+                      title={t('dash.number_of_occurrences')}
                       style={{ width: '70px', textAlign: 'center' }}
                     />
                     <span style={{ fontSize: '0.85rem' }}>meetings</span>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer' }}>
                       <input type="radio" checked={scheduleEndMode === 'date'} onChange={() => setScheduleEndMode('date')} />
-                      Ends on
+                      {t('dash.ends_on')}
                     </label>
                     <input
                       type="date"
@@ -1717,7 +1700,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     checked={scheduleReminderEnabled}
                     onChange={(e) => setScheduleReminderEnabled(e.target.checked)}
                   />
-                  Email me a reminder before the meeting
+                  {t('dash.email_me_a_reminder_before')}
                 </label>
                 {scheduleReminderEnabled && (
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.5rem' }}>
@@ -1727,20 +1710,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       onChange={(e) => setScheduleReminderMinutes(parseInt(e.target.value, 10) || 15)}
                       style={{ height: '44px', flex: 1 }}
                     >
-                      <option value={5}>5 minutes before</option>
-                      <option value={15}>15 minutes before</option>
-                      <option value={30}>30 minutes before</option>
-                      <option value={60}>1 hour before</option>
+                      <option value={5}>{t('dash.5_minutes_before')}</option>
+                      <option value={15}>{t('dash.15_minutes_before')}</option>
+                      <option value={30}>{t('dash.30_minutes_before')}</option>
+                      <option value={60}>{t('dash.1_hour_before')}</option>
                     </select>
                   </div>
                 )}
                 <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                  The reminder goes to your email. Sending starts once email is configured for the app (Resend API key), until then the reminder is saved and queued.
+                  {t('dash.the_reminder_goes_to_your')}
                 </span>
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Security & Admission</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>{t('dash.security_admission')}</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
                   <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
                     <input 
@@ -1751,8 +1734,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       style={{ marginTop: '3px' }}
                     />
                     <div>
-                      <strong style={{ display: 'block' }}>Host Admission (Waiting Room)</strong>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Participants must wait to be admitted by the host.</span>
+                      <strong style={{ display: 'block' }}>{t('dash.host_admission_waiting_room')}</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('dash.participants_must_wait_to_be')}</span>
                     </div>
                   </label>
                   <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
@@ -1764,15 +1747,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       style={{ marginTop: '3px' }}
                     />
                     <div>
-                      <strong style={{ display: 'block' }}>Bypass Waiting Room (Auto-Join)</strong>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Anyone with the meeting link joins automatically.</span>
+                      <strong style={{ display: 'block' }}>{t('dash.bypass_waiting_room_auto_join')}</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('dash.anyone_with_the_meeting_link')}</span>
                     </div>
                   </label>
                 </div>
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Meeting Passcode</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>{t('dash.meeting_passcode')}</label>
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
                   <input
                     type="checkbox"
@@ -1784,8 +1767,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     style={{ marginTop: '3px' }}
                   />
                   <div>
-                    <strong style={{ display: 'block' }}>Require a passcode to join</strong>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Guests enter this code before joining. Turn it off for a fully open meeting link.</span>
+                    <strong style={{ display: 'block' }}>{t('dash.require_a_passcode_to_join')}</strong>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('dash.guests_enter_this_code_before')}</span>
                   </div>
                 </label>
                 {schedulePasscodeEnabled && (
@@ -1801,18 +1784,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       type="button"
                       className="premium-btn premium-btn-secondary"
                       onClick={() => setSchedulePasscode(generateMeetingPasscode())}
-                      title="Generate a new passcode"
+                      title={t('dash.generate_a_new_passcode')}
                       style={{ padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
                     >
                       <RefreshCw size={14} />
-                      <span>New code</span>
+                      <span>{t('dash.new_code')}</span>
                     </button>
                   </div>
                 )}
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>End-to-end encryption</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>{t('dash.end_to_end_encryption')}</label>
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: schedulePasscodeEnabled ? 'pointer' : 'default', color: 'white', opacity: schedulePasscodeEnabled ? 1 : 0.55 }}>
                   <input
                     type="checkbox"
@@ -1822,33 +1805,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     style={{ marginTop: '3px' }}
                   />
                   <div>
-                    <strong style={{ display: 'block' }}>Encrypt audio and video end to end</strong>
+                    <strong style={{ display: 'block' }}>{t('dash.encrypt_audio_and_video_end')}</strong>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      Audio and video are encrypted so only people in the meeting can hear and see them. Chat, files, names and the agenda are not covered by this, they stay protected by transport encryption only. Needs a passcode, the passcode is the key, so anyone with the passcode can join and decrypt.
+                      {t('dash.audio_and_video_are_encrypted')}
                     </span>
                   </div>
                 </label>
                 {!schedulePasscodeEnabled && (
-                  <span style={{ display: 'block', fontSize: '0.75rem', color: '#F59E0B', marginTop: '0.4rem' }}>Turn the passcode on above to use end-to-end encryption.</span>
+                  <span style={{ display: 'block', fontSize: '0.75rem', color: '#F59E0B', marginTop: '0.4rem' }}>{t('dash.turn_the_passcode_on_above')}</span>
                 )}
               </div>
 
               {myOrganisations.length > 0 && (
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Organisation brand</label>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>{t('dash.organisation_brand')}</label>
                   <select
                     className="premium-input"
                     value={scheduleOrganisationId}
                     onChange={(e) => setScheduleOrganisationId(e.target.value)}
                     style={{ height: '44px', width: '100%' }}
                   >
-                    <option value="">GiinMeet branding</option>
+                    <option value="">{t('dash.giinmeet_branding')}</option>
                     {myOrganisations.map((o) => (
                       <option key={o.id} value={o.id}>{o.name}</option>
                     ))}
                   </select>
                   <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                    The waiting room and invites carry the organisation's name, logo and colours, with a small powered by GiinMeet mark.
+                    {t('dash.the_waiting_room_and_invites')}
                   </span>
                 </div>
               )}
@@ -1859,10 +1842,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   className="premium-btn premium-btn-secondary" 
                   onClick={() => setShowScheduleModal(false)}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button type="submit" className="premium-btn premium-btn-primary">
-                  Schedule
+                  {t('schedule.title')}
                 </button>
               </div>
             </form>
@@ -1929,18 +1912,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   }
                   const full = await withHostPasscode(inviteMeeting);
                   const link = buildJoinLink(full.id, full.passcode);
-                  const subject = encodeURIComponent(`Invitation: ${full.title}, ${getLocalBrandName()}`);
-                  const body = encodeURIComponent(`Please join my ${getLocalBrandName()} video meeting:\nTopic: ${full.title}\nTime: ${new Date(full.time).toLocaleString()}\nJoin link: ${link}\nMeeting ID: ${full.id}\nPasscode: ${full.passcode || 'none - open link'}\n\nMedia encrypted in transit (DTLS-SRTP).`);
+                  const subject = encodeURIComponent(t('dash.invite_subject', { v1: full.title, v2: getLocalBrandName() }));
+                  const body = encodeURIComponent(t('dash.please_join_my_video_meeting', { v1: getLocalBrandName(), v2: full.title, v3: new Date(full.time).toLocaleString(), v4: link, v5: full.id, v6: full.passcode || 'none - open link' }));
                   window.location.href = `mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`;
-                  setInviteNote(`Your mail app opened with the invitation ready to send. No email is sent automatically, ${getLocalBrandName()} has no mail provider configured yet.`);
+                  setInviteNote(t('dash.your_mail_app_opened_with', { v1: getLocalBrandName() }));
                 }}
               >
-                Email Invite
+                {t('dash.email_invite')}
               </button>
             </div>
             {inviteContacts.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Or pick a workspace contact</span>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>{t('dash.or_pick_a_workspace_contact')}</span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '180px', overflowY: 'auto' }}>
                   {inviteContacts.map((c: any) => (
                     <button
@@ -1950,7 +1933,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       style={{ justifyContent: 'flex-start', fontSize: '0.85rem', padding: '0.5rem 0.75rem' }}
                       onClick={() => {
                         if (c.email) setInviteEmail(c.email);
-                        else setInviteNote(`${c.name || 'This contact'} has no email on their profile, copy the link instead.`);
+                        else setInviteNote(t('dash.has_no_email_on_their', { v1: c.name || 'This contact' }));
                       }}
                     >
                       {c.name || c.email} {c.email ? `(${c.email})` : '(no email)'}
@@ -1968,7 +1951,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 setInviteNote('Invite link copied, paste it anywhere (WhatsApp, chat, email).');
               }}
             >
-              <Copy size={14} /> Copy Invite Link
+              <Copy size={14} /> {t('dash.copy_invite_link')}
             </button>
             {/* Phase 2 (#2), WhatsApp + SMS invites. WhatsApp is a wa.me
                 share link and works now with no provider. SMS goes through
@@ -1976,11 +1959,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 the SMS button stays off and says so, nothing is ever
                 pretended sent. */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Invite by WhatsApp or SMS</span>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>{t('dash.invite_by_whatsapp_or_sms')}</span>
               <input
                 type="tel"
                 className="premium-input"
-                placeholder="Phone with country code, e.g. +250788123456"
+                placeholder={t('dash.phone_with_country_code_e')}
                 value={invitePhone}
                 onChange={(e) => setInvitePhone(e.target.value)}
               />
@@ -1995,7 +1978,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     setInviteNote('WhatsApp opened with the invitation ready to send.');
                   }}
                 >
-                  WhatsApp Invite
+                  {t('dash.whatsapp_invite')}
                 </button>
                 <button
                   className="premium-btn premium-btn-secondary"
@@ -2029,7 +2012,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       if (!res.ok) {
                         setSmsNote(data.message || 'Could not send the SMS invite.');
                       } else {
-                        setSmsNote(`SMS invite sent to ${phone}.`);
+                        setSmsNote(t('dash.sms_invite_sent_to', { v1: phone }));
                       }
                     } catch (e: any) {
                       setSmsNote(e?.message || 'Could not send the SMS invite.');
@@ -2059,7 +2042,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   onCancelMeeting?.(m.id, m.title);
                 }}
               >
-                Cancel this meeting
+                {t('dash.cancel_this_meeting')}
               </button>
             )}
             <button
@@ -2067,7 +2050,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               style={{ width: '100%', justifyContent: 'center' }}
               onClick={() => setInviteMeeting(null)}
             >
-              Done
+              {t('agenda.timerDone')}
             </button>
           </div>
         </div>
@@ -2096,15 +2079,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
             maxHeight: '90dvh',
             overflowY: 'auto'
           }}>
-            <h3 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>Join a Meeting</h3>
+            <h3 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', fontFamily: 'var(--font-heading)' }}>{t('dash.join_a_meeting')}</h3>
             
             <form onSubmit={handleJoinSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>Meeting Code or Link</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>{t('dash.meeting_code_or_link')}</label>
                 <input 
                   type="text" 
                   className="premium-input" 
-                  placeholder="Paste the full invite link or the meeting ID"
+                  placeholder={t('dash.paste_the_full_invite_link')}
                   value={meetingCode}
                   onChange={(e) => {
                     setMeetingCode(e.target.value);
@@ -2113,7 +2096,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   required
                 />
                 <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                  Paste the invite link from the host, or the meeting ID (the long code with dashes). A 6-character passcode alone cannot find a meeting, you enter that in the waiting room.
+                  {t('dash.paste_the_invite_link_from')}
                 </span>
                 {joinError && (
                   <div style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -2133,10 +2116,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     setMeetingCode('');
                   }}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button type="submit" className="premium-btn premium-btn-accent">
-                  Join Meeting
+                  {t('dash.joinMeeting')}
                 </button>
               </div>
             </form>
@@ -2184,11 +2167,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <CheckCircle2 size={32} color="#10B981" />
               </div>
               <h3 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', margin: 0 }}>
-                Meeting Scheduled Successfully
+                {t('dash.meeting_scheduled_successfully')}
               </h3>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
                 Your professional {getLocalBrandName()} room is ready.
-                {seriesCreated > 1 && ` This is a recurring series, ${seriesCreated} meetings were created (details below are for the first one).`}
+                {seriesCreated > 1 && t('dash.this_is_a_recurring_series', { v1: seriesCreated })}
               </p>
             </div>
 
@@ -2202,12 +2185,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
               gap: '0.75rem'
             }}>
               <div>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Topic</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>{t('dash.topic')}</span>
                 <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)' }}>{scheduledMeetingDetails.title}</div>
               </div>
 
               <div>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Time</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>{t('dash.time')}</span>
                 <div style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>
                   {(() => {
                     try {
@@ -2221,13 +2204,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Meeting ID</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>{t('dash.meeting_id')}</span>
                   <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-secondary)' }}>
                     {scheduledMeetingDetails.id}
                   </div>
                 </div>
                 <div>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Passcode</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>{t('dash.passcode')}</span>
                   <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-accent)' }}>
                     {scheduledMeetingDetails.passcode || 'No passcode'}
                   </div>
@@ -2237,7 +2220,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {/* Sharing Link Section */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Meeting Join Link</label>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>{t('dash.meeting_join_link')}</label>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <input
                   ref={joinLinkInputRef}
@@ -2272,16 +2255,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     return scheduledMeetingDetails.time;
                   }
                 })();
-                const invitation = `Please join my ${getLocalBrandName()} video conference:
-Topic: ${scheduledMeetingDetails.title}
-Time: ${timeStr}
-
-Join Meeting Link: ${link}
-
-Meeting ID: ${scheduledMeetingDetails.id}
-Passcode: ${scheduledMeetingDetails.passcode || 'none - open link'}
-
-Media encrypted in transit (DTLS-SRTP).`;
+                const invitation = t('dash.please_join_my_video_conference', { v1: getLocalBrandName(), v2: scheduledMeetingDetails.title, v3: timeStr, v4: link, v5: scheduledMeetingDetails.id, v6: scheduledMeetingDetails.passcode || 'none - open link' });
                 void copyTextHonest('details', invitation);
               }}
               className={`premium-btn ${copiedSuccessId === 'details' ? 'premium-btn-accent' : 'premium-btn-secondary'}`}
@@ -2300,7 +2274,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem' }}
             >
               <Calendar size={16} />
-              <span>Add to Calendar (.ics)</span>
+              <span>{t('dash.add_to_calendar_ics')}</span>
             </button>
             <button
               onClick={async () => {
@@ -2311,7 +2285,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '0.75rem' }}
             >
               <Calendar size={16} />
-              <span>Add to Google Calendar</span>
+              <span>{t('dash.add_to_google_calendar')}</span>
             </button>
 
             <button
@@ -2322,7 +2296,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               className="premium-btn premium-btn-primary"
               style={{ width: '100%', justifyContent: 'center', padding: '0.75rem', marginTop: '0.5rem' }}
             >
-              Close
+              {t('common.close')}
             </button>
           </div>
         </div>
@@ -2341,7 +2315,8 @@ Media encrypted in transit (DTLS-SRTP).`;
           justifyContent: 'center',
           zIndex: 1000,
           backdropFilter: 'blur(8px)'
-        }}>
+        }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowInstantModal(false); }}>
           <div className="glass-panel" style={{
             maxWidth: '450px',
             width: '100%',
@@ -2354,12 +2329,12 @@ Media encrypted in transit (DTLS-SRTP).`;
             gap: '1.5rem',
             border: '1px solid var(--border-color)'
           }}>
-            <h3 style={{ fontSize: '1.5rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)', color: 'white' }}>Start a New Meeting</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Configure your instant meeting preferences before launching.</p>
+            <h3 style={{ fontSize: '1.5rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)', color: 'white' }}>{t('dash.start_a_new_meeting')}</h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('dash.configure_your_instant_meeting_preferenc')}</p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Meeting Title</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>{t('dash.meeting_title')}</label>
                 <input 
                   type="text" 
                   className="premium-input" 
@@ -2370,7 +2345,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Security & Admission</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>{t('dash.security_admission')}</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
                   <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
                     <input 
@@ -2381,8 +2356,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                       style={{ marginTop: '3px' }}
                     />
                     <div>
-                      <strong style={{ display: 'block' }}>Host Admission (Waiting Room)</strong>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Participants must wait to be admitted by the host.</span>
+                      <strong style={{ display: 'block' }}>{t('dash.host_admission_waiting_room')}</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('dash.participants_must_wait_to_be')}</span>
                     </div>
                   </label>
                   <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
@@ -2394,8 +2369,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                       style={{ marginTop: '3px' }}
                     />
                     <div>
-                      <strong style={{ display: 'block' }}>Bypass Waiting Room (Auto-Join)</strong>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Anyone with the meeting link joins automatically.</span>
+                      <strong style={{ display: 'block' }}>{t('dash.bypass_waiting_room_auto_join')}</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('dash.anyone_with_the_meeting_link')}</span>
                     </div>
                   </label>
                 </div>
@@ -2407,10 +2382,10 @@ Media encrypted in transit (DTLS-SRTP).`;
                   className="premium-btn premium-btn-secondary" 
                   onClick={() => setShowInstantModal(false)}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Meeting Passcode</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>{t('dash.meeting_passcode')}</label>
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
                   <input
                     type="checkbox"
@@ -2422,8 +2397,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                     style={{ marginTop: '3px' }}
                   />
                   <div>
-                    <strong style={{ display: 'block' }}>Require a passcode to join</strong>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Guests enter this code before joining. Turn it off for a fully open meeting link.</span>
+                    <strong style={{ display: 'block' }}>{t('dash.require_a_passcode_to_join')}</strong>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('dash.guests_enter_this_code_before')}</span>
                   </div>
                 </label>
                 {instantPasscodeEnabled && (
@@ -2439,11 +2414,11 @@ Media encrypted in transit (DTLS-SRTP).`;
                       type="button"
                       className="premium-btn premium-btn-secondary"
                       onClick={() => setInstantPasscode(generateMeetingPasscode())}
-                      title="Generate a new passcode"
+                      title={t('dash.generate_a_new_passcode')}
                       style={{ padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
                     >
                       <RefreshCw size={14} />
-                      <span>New code</span>
+                      <span>{t('dash.new_code')}</span>
                     </button>
                   </div>
                 )}
@@ -2451,11 +2426,11 @@ Media encrypted in transit (DTLS-SRTP).`;
 
                 {/* Round 9 (9D): one-click templates (instant meetings always expire when they end). */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>Start from a template</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>{t('dash.start_from_a_template')}</span>
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('standup')}>Team standup</button>
-                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('client')}>Client call</button>
-                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('interview')}>Interview</button>
+                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('standup')}>{t('dash.team_standup')}</button>
+                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('client')}>{t('dash.client_call')}</button>
+                    <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('interview')}>{t('dash.interview')}</button>
                   </div>
                 </div>
 
@@ -2468,7 +2443,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   }}
                   className="premium-btn premium-btn-primary"
                 >
-                  Start Meeting
+                  {t('dash.start_meeting')}
                 </button>
               </div>
             </div>

@@ -19,6 +19,7 @@ import {
   errorWithSecurity,
   getAdminClient,
   getCaller,
+  canCallerUseDeveloperApi,
   internalError,
   isUuid,
   jsonWithSecurity,
@@ -58,6 +59,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'create') {
+      // Developer API is a paid feature: Free cannot create keys or
+      // webhooks. The check is server-side, on the caller's profile
+      // tier, so hiding the button is never the only defence.
+      const allowed = await canCallerUseDeveloperApi(admin, user.id);
+      if (!allowed) {
+        return errorWithSecurity('UPGRADE_REQUIRED', 'Webhooks are a Pro feature. Upgrade your plan to create webhooks.', 403);
+      }
       const url = typeof body.url === 'string' ? body.url.trim() : '';
       let parsed: URL | null = null;
       try {

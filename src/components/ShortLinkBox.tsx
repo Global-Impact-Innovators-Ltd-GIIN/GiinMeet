@@ -40,7 +40,7 @@ export const ShortLinkBox: React.FC<Props> = ({ meetingId, showQr = true }) => {
       // view: a plain note, not an error, and no retry button.
       setOnlyHost(true);
     } else if (result?.reason === 'NO_SESSION') {
-      setError('Sign in to create a short link.');
+      setError(t('short.sign_in_to_create_a'));
     } else if (result?.reason === 'NOT_CONFIGURED') {
       setError(t('room.shortLinkUnavailable'));
     } else {
@@ -82,7 +82,7 @@ export const ShortLinkBox: React.FC<Props> = ({ meetingId, showQr = true }) => {
         <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>{t('room.shortLink')}</span>
       </div>
       {loading && <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('common.loading')}</p>}
-      {onlyHost && <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Only the host can create a short link for this meeting.</p>}
+      {onlyHost && <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('short.only_host_can_create')}</p>}
       {error && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-start' }}>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{error}</p>
