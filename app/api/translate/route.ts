@@ -1,6 +1,13 @@
 // Phase C1 (36), real-time translation of captions (English, French,
 // Kinyarwanda). Each user chooses ONE caption language (or none), never
 // all three at once.
+// Phase C2b (4): the same route now powers chat auto-translation too,
+// and it tries GiinMeet's own self-hosted Ollama server FIRST
+// (GIINMEET_OLLAMA_URL, GIINMEET_OLLAMA_MODEL), so translation costs
+// nothing per minute. The LibreTranslate provider from C1 stays as a
+// fallback when its key is configured. No paid cloud translation
+// service is wired in. When neither is available the route says so
+// plainly and the client shows the original language.
 //
 // POST { accessToken?, meetingId?, participantRowId?, text, sourceLang,
 //        targetLang }
@@ -33,6 +40,32 @@ import {
 } from '../_lib/security';
 
 const LANGS = new Set(['en', 'fr', 'rw']);
+const SOURCE_LANGS = new Set(['en', 'fr', 'rw', 'auto']);
+const LANG_NAMES: Record<string, string> = { en: 'English', fr: 'French', rw: 'Kinyarwanda' };
+
+async function translateWithOllama(text: string, sourceLang: string, targetLang: string): Promise<string | null> {
+  const base = (process.env.GIINMEET_OLLAMA_URL || '').trim().replace(/\/$/, '');
+  if (!base) return null;
+  const model = (process.env.GIINMEET_OLLAMA_MODEL || 'qwen2.5:7b').trim();
+  const sourceName = sourceLang === 'auto' ? 'the language this text is written in (English, French, or Kinyarwanda, detect it)' : LANG_NAMES[sourceLang];
+  const res = await fetch(`${base}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      messages: [
+        { role: 'system', content: `You are a translator. Translate the user's text from ${sourceName} into ${LANG_NAMES[targetLang]}. Reply with ONLY the translation, no explanation, no quotes, no extra words.` },
+        { role: 'user', content: text },
+      ],
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => ({}));
+  const out = typeof data?.message?.content === 'string' ? data.message.content.trim() : '';
+  return out || null;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -73,19 +106,34 @@ export async function POST(req: NextRequest) {
     const text = cleanText(body.text, 500);
     const sourceLang = String(body.sourceLang || 'en');
     const targetLang = String(body.targetLang || 'en');
-    if (!text || !LANGS.has(sourceLang) || !LANGS.has(targetLang)) {
+    if (!text || !SOURCE_LANGS.has(sourceLang) || !LANGS.has(targetLang)) {
       return errorWithSecurity('BAD_REQUEST', 'Send caption text and a valid language (English, French or Kinyarwanda).', 400);
     }
     if (sourceLang === targetLang) {
       return jsonWithSecurity({ ok: true, translatedText: text, sameLanguage: true });
     }
+    // Phase C2b (4): self-hosted Ollama first, it costs nothing per
+    // minute. A null return means Ollama is not configured (no URL)
+    // or did not answer; the LibreTranslate fallback below runs then.
+    try {
+      const ollamaText = await translateWithOllama(text, sourceLang, targetLang);
+      if (ollamaText) {
+        return jsonWithSecurity({ ok: true, translatedText: ollamaText, provider: 'ollama' });
+      }
+    } catch (e) {
+      // Ollama unreachable: fall through to the configured provider,
+      // or the graceful no-translation answer below.
+    }
     const apiUrl = (process.env.GIINMEET_TRANSLATE_API_URL || 'https://libretranslate.com/translate').trim();
     const apiKey = (process.env.GIINMEET_TRANSLATE_API_KEY || '').trim();
     if (!apiKey) {
+      const ollamaConfigured = !!(process.env.GIINMEET_OLLAMA_URL || '').trim();
       return jsonWithSecurity({
         ok: false,
-        reason: 'NO_TRANSLATE_KEY',
-        message: 'Translated captions are not set up yet. Captions show in the language spoken.',
+        reason: ollamaConfigured ? 'OLLAMA_UNREACHABLE' : 'NO_TRANSLATE_KEY',
+        message: ollamaConfigured
+          ? 'The GiinMeet translation server (Ollama) could not be reached. Messages show in the language they were written for now.'
+          : 'Translated captions are not set up yet. Captions show in the language spoken.',
       });
     }
     const res = await fetch(apiUrl, {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { resolveC2bCaller } from '../../_lib/c2b';
 
 // Breakout-room control, host-verified server-side. (Phase 3,
 // Feature 1 built the rooms; Feature 2 enforces who may run them.)
@@ -56,7 +57,65 @@ async function broadcastToMeetingEvents(admin: any, meetingId: string, event: st
   }
 }
 
-const BREAKOUT_EVENTS = ['start-breakout', 'end-breakout', 'move-breakout', 'breakout-broadcast', 'breakout-state'];
+const BREAKOUT_EVENTS = ['start-breakout', 'end-breakout', 'move-breakout', 'breakout-broadcast', 'breakout-state', 'self-select'];
+
+// Phase C2b (6), breakout self-select: the live session, persisted so
+// a refresh lands a participant back in their room (Phase A (6)) and
+// a participant's own room choice survives. Best effort: when the
+// Phase C2b table is not set up yet, the broadcast still moves people
+// and the in-tab snapshot still restores them.
+async function saveBreakoutState(admin: any, meetingId: string, roomsCount: number, endsAt: Date, assignments: Record<string, number>) {
+  try {
+    await admin.from('meeting_breakout_state').upsert(
+      [{ meeting_id: meetingId, rooms_count: roomsCount, ends_at: endsAt.toISOString(), assignments, updated_at: new Date().toISOString() }],
+      { onConflict: 'meeting_id' },
+    );
+  } catch (e) { /* table not set up yet: broadcast still works */ }
+}
+
+async function clearBreakoutState(admin: any, meetingId: string) {
+  try { await admin.from('meeting_breakout_state').delete().eq('meeting_id', meetingId); } catch (e) { /* ignore */ }
+}
+
+async function loadBreakoutState(admin: any, meetingId: string): Promise<{ roomsCount: number; endsAt: string; assignments: Record<string, number> } | null> {
+  try {
+    const { data } = await admin
+      .from('meeting_breakout_state')
+      .select('rooms_count, ends_at, assignments')
+      .eq('meeting_id', meetingId)
+      .maybeSingle();
+    if (!data) return null;
+    return { roomsCount: (data as any).rooms_count, endsAt: (data as any).ends_at, assignments: (data as any).assignments || {} };
+  } catch (e) { return null; }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const meetingId = req.nextUrl.searchParams.get('meetingId') || '';
+    const accessToken = req.nextUrl.searchParams.get('accessToken') || undefined;
+    const participantRowId = req.nextUrl.searchParams.get('participantRowId') || undefined;
+    if (!meetingId || typeof meetingId !== 'string') {
+      return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
+    }
+    const admin = getAdminClient();
+    if (!admin) {
+      return NextResponse.json({ error: 'SERVER_MISCONFIGURED', message: 'The video service is not configured on this server.' }, { status: 500 });
+    }
+    const caller = await resolveC2bCaller(admin, meetingId, { accessToken, participantRowId });
+    if (!caller) {
+      return NextResponse.json({ error: 'UNAUTHORIZED', message: 'Join the meeting to see breakout rooms.' }, { status: 401 });
+    }
+    const state = await loadBreakoutState(admin, meetingId);
+    if (!state || new Date(state.endsAt).getTime() <= Date.now()) {
+      return NextResponse.json({ ok: true, active: false });
+    }
+    const remainingSeconds = Math.max(0, Math.floor((new Date(state.endsAt).getTime() - Date.now()) / 1000));
+    return NextResponse.json({ ok: true, active: true, roomsCount: state.roomsCount, durationSeconds: remainingSeconds, assignments: state.assignments, myRoom: state.assignments[caller.key] ?? null });
+  } catch (err: any) {
+    console.error('[Breakout API] GET Exception:', err);
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });
+  }
+}
 
 function isValidAssignments(v: any): boolean {
   // An empty object is valid: the host may start breakouts before
@@ -127,6 +186,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'SERVER_MISCONFIGURED', message: 'The video service is not configured on this server.' }, { status: 500 });
     }
 
+    // Phase C2b (6), self-select: ANY admitted participant may choose
+    // their own room while breakouts are live. It does not need host
+    // powers, so it is authorised here, before the host/moderator
+    // check below. The choice is written to the persisted state and
+    // broadcast as a server-verified move, so it is respected by every
+    // client and survives a refresh, and it can never strand the
+    // participant: roomNumber null means back to the main room.
+    if (event === 'self-select') {
+      if (roomNumber !== null && (!Number.isInteger(roomNumber) || roomNumber < 1 || roomNumber > 5)) {
+        return NextResponse.json({ error: 'BAD_REQUEST', message: 'Room must be 1-5, or the main room.' }, { status: 400 });
+      }
+      const adminSelf = getAdminClient();
+      if (!adminSelf) {
+        return NextResponse.json({ error: 'SERVER_MISCONFIGURED', message: 'The video service is not configured on this server.' }, { status: 500 });
+      }
+      const callerSelf = await resolveC2bCaller(adminSelf, meetingId, body);
+      if (!callerSelf) {
+        return NextResponse.json({ error: 'UNAUTHORIZED', message: 'Join the meeting to choose a breakout room.' }, { status: 401 });
+      }
+      const state = await loadBreakoutState(adminSelf, meetingId);
+      if (!state || new Date(state.endsAt).getTime() <= Date.now()) {
+        return NextResponse.json({ error: 'NO_BREAKOUT', message: 'Breakout rooms are not running right now.' }, { status: 409 });
+      }
+      if (roomNumber !== null && roomNumber > state.roomsCount) {
+        return NextResponse.json({ error: 'BAD_REQUEST', message: 'That room does not exist in this session.' }, { status: 400 });
+      }
+      const nextAssignments = { ...state.assignments };
+      if (roomNumber === null) delete nextAssignments[callerSelf.key];
+      else nextAssignments[callerSelf.key] = roomNumber;
+      const remainingSeconds = Math.max(0, Math.floor((new Date(state.endsAt).getTime() - Date.now()) / 1000));
+      await saveBreakoutState(adminSelf, meetingId, state.roomsCount, new Date(state.endsAt), nextAssignments);
+      try {
+        await broadcastToMeetingEvents(adminSelf, meetingId, 'move-breakout', { server: true, peerKey: callerSelf.key, roomNumber: roomNumber === undefined ? null : roomNumber, durationSeconds: remainingSeconds });
+      } catch (e: any) {
+        console.error('[Breakout API] Self-select broadcast failed:', e?.message || e);
+        return NextResponse.json({ error: 'BROADCAST_FAILED', message: 'The rooms could not be reached. Please try again.' }, { status: 502 });
+      }
+      return NextResponse.json({ ok: true, event: 'self-select', roomNumber: roomNumber === undefined ? null : roomNumber });
+    }
+
     // Caller credential: a signed-in user's session token, or a guest
     // role-holder's participant row id (the same dual credential the
     // token and control routes use). One of them is required.
@@ -193,6 +292,22 @@ export async function POST(req: NextRequest) {
     }
     if (!isHost && !isModerator) {
       return NextResponse.json({ error: 'FORBIDDEN', message: 'Only the host, a co-host or a moderator can manage breakout rooms.' }, { status: 403 });
+    }
+
+    // Persist the live session for self-select + refresh restore.
+    if (event === 'start-breakout') {
+      const rooms = Number.isInteger(roomsCount) ? roomsCount : Math.max(1, ...(Object.values(assignments) as number[]));
+      await saveBreakoutState(admin, meetingId, rooms, new Date(Date.now() + durationSeconds * 1000), assignments);
+    } else if (event === 'end-breakout') {
+      await clearBreakoutState(admin, meetingId);
+    } else if (event === 'move-breakout') {
+      const state = await loadBreakoutState(admin, meetingId);
+      if (state) {
+        const next = { ...state.assignments };
+        if (roomNumber === null) delete next[peerKey];
+        else next[peerKey] = roomNumber;
+        await saveBreakoutState(admin, meetingId, state.roomsCount, new Date(state.endsAt), next);
+      }
     }
 
     // Broadcast with the server marker. Receivers ignore breakout
