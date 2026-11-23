@@ -6,21 +6,21 @@ import {
 
 // Pre-join prerequisite check. Runs BEFORE the passcode gate and the
 // waiting room for everyone who follows a join link (guests and signed-in
-// non-hosts alike). The host never sees it — the hash router sends the host
+// non-hosts alike). The host never sees it, the hash router sends the host
 // straight into the room.
 //
 // Checks, each with its own pass/fail verdict and plain-language fix:
-//   1. Camera — live preview + a working verdict (track live + frames moving)
-//   2. Microphone — live level meter (AnalyserNode, same technique as the
+//   1. Camera, live preview + a working verdict (track live + frames moving)
+//   2. Microphone, live level meter (AnalyserNode, same technique as the
 //      in-room speaking indicator) + a working verdict
-//   3. Speaker — a real test sound the user confirms they heard
-//   4. Display name — the single source the Waitroom then uses (passed up
+//   3. Speaker, a real test sound the user confirms they heard
+//   4. Display name, the single source the Waitroom then uses (passed up
 //      via onComplete; nothing else stores the name)
-//   5. Browser/device permissions — camera + microphone permission state
-//   6. Connection / network — online state + a round-trip probe
+//   5. Browser/device permissions, camera + microphone permission state
+//   6. Connection / network, online state + a round-trip probe
 //
 // The Proceed button is gated on the essentials: a display name, a live
-// network, and no hard camera/mic failure — unless the user explicitly
+// network, and no hard camera/mic failure, unless the user explicitly
 // chooses "join without camera/microphone", in which case they enter with
 // those devices off and the room is told so. The speaker test NEVER gates
 // proceeding: it cannot auto-pass (only the user knows if they heard the
@@ -28,7 +28,7 @@ import {
 //
 // Every check is BOUNDED (Fix Round 5, item 4): a permission prompt, a
 // network probe or a getUserMedia call that never settles used to leave
-// this screen stuck on "Checking…" forever — on a phone, where a dismissed
+// this screen stuck on "Checking…" forever, on a phone, where a dismissed
 // permission prompt or a saved desktop deviceId can stall it, with no
 // escape. Each step now resolves to pass/fail within a fixed timeout, and
 // a failed/timed-out camera/mic always offers the join-without-devices
@@ -51,21 +51,21 @@ interface PreJoinCheckProps {
 const fixFor = (kind: 'camera' | 'mic', errName?: string): string => {
   if (errName === 'NotAllowedError')
     return kind === 'camera'
-      ? 'Camera blocked — click the camera icon in the browser address bar, allow the camera, then press Retry. On a phone, use the browser site settings (the lock/tune icon by the address) instead.'
-      : 'Microphone blocked — click the microphone icon in the browser address bar, allow the microphone, then press Retry. On a phone, use the browser site settings (the lock/tune icon by the address) instead.';
+      ? 'Camera blocked, click the camera icon in the browser address bar, allow the camera, then press Retry. On a phone, use the browser site settings (the lock/tune icon by the address) instead.'
+      : 'Microphone blocked, click the microphone icon in the browser address bar, allow the microphone, then press Retry. On a phone, use the browser site settings (the lock/tune icon by the address) instead.';
   if (errName === 'NotFoundError')
     return kind === 'camera'
-      ? 'No camera was found on this device — plug one in or join without a camera below.'
-      : 'No microphone was found on this device — plug one in or join without a microphone below.';
+      ? 'No camera was found on this device, plug one in or join without a camera below.'
+      : 'No microphone was found on this device, plug one in or join without a microphone below.';
   if (errName === 'NotReadableError')
     return kind === 'camera'
-      ? 'Your camera is in use by another app — close that app (or the other browser tab using it), then press Retry.'
-      : 'Your microphone is in use by another app — close that app, then press Retry.';
+      ? 'Your camera is in use by another app, close that app (or the other browser tab using it), then press Retry.'
+      : 'Your microphone is in use by another app, close that app, then press Retry.';
   if (errName === 'OverconstrainedError')
-    return 'Your browser refused the camera settings — press Retry to try the default camera instead.';
+    return 'Your browser refused the camera settings, press Retry to try the default camera instead.';
   return kind === 'camera'
-    ? 'The camera could not be started — check the browser permission in the address bar, then press Retry.'
-    : 'The microphone could not be started — check the browser permission in the address bar, then press Retry.';
+    ? 'The camera could not be started, check the browser permission in the address bar, then press Retry.'
+    : 'The microphone could not be started, check the browser permission in the address bar, then press Retry.';
 };
 
 export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
@@ -166,7 +166,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
     let active = true;
 
     // getUserMedia with a hard timeout. If the prompt is dismissed or the
-    // browser stalls, the promise may never settle — so a late-arriving
+    // browser stalls, the promise may never settle, so a late-arriving
     // stream is stopped immediately instead of leaking a live camera.
     const timeoutError = () => Object.assign(new Error('getUserMedia timed out'), { name: 'TimeoutError' });
     const boundedGum = (useSaved: boolean): Promise<MediaStream> => {
@@ -243,7 +243,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       // Camera + microphone, together.
       if (!navigator.mediaDevices?.getUserMedia) {
         if (!active) return;
-        const msg = 'This browser cannot access a camera or microphone on this page — check the browser site permissions, or join without camera/microphone below.';
+        const msg = 'This browser cannot access a camera or microphone on this page, check the browser site permissions, or join without camera/microphone below.';
         setCameraStatus('fail');
         setMicStatus('fail');
         setCameraError(msg);
@@ -300,7 +300,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             };
             tick();
           } catch (e) {
-            // Meter failure is not a mic failure — the track itself works.
+            // Meter failure is not a mic failure, the track itself works.
           }
         }
       } catch (err: any) {
@@ -313,7 +313,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
         setCameraStatus('fail');
         setMicStatus('fail');
         if (name === 'TimeoutError') {
-          const msg = 'The camera/microphone check timed out — the browser may still be waiting for permission, or the device is busy. Press Retry, or join without camera/microphone below.';
+          const msg = 'The camera/microphone check timed out, the browser may still be waiting for permission, or the device is busy. Press Retry, or join without camera/microphone below.';
           setCameraError(msg);
           setMicError(msg);
         } else {
@@ -368,7 +368,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
     setSpeakerStatus('checking');
     // Bounded: if the audio context cannot start (mobile browsers suspend
     // it, the tab is muted, …) the row must not sit on "Checking…"
-    // forever — after 3 s it reports honestly instead.
+    // forever, after 3 s it reports honestly instead.
     speakerTimerRef.current = window.setTimeout(() => {
       setSpeakerStatus((s) => (s === 'checking' ? 'warn' : s));
     }, 3000);
@@ -394,8 +394,8 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
           osc.start();
           osc.stop(ctx!.currentTime + 0.9);
           setSpeakerPlayed(true);
-          // The tone lasts 0.9 s. The test can never auto-pass — only the
-          // user knows if they heard it — so once the tone has played the
+          // The tone lasts 0.9 s. The test can never auto-pass, only the
+          // user knows if they heard it, so once the tone has played the
           // row stops saying "Checking…" and waits for the user's answer.
           if (speakerTimerRef.current) window.clearTimeout(speakerTimerRef.current);
           speakerTimerRef.current = window.setTimeout(() => {
@@ -435,14 +435,14 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       (cameraStatus !== 'fail' && micStatus !== 'fail' && cameraStatus !== 'checking' && micStatus !== 'checking'));
 
   // Fix Round 8 (#1): the first blocker, in the order the user meets
-  // it on the screen — name, connection, camera, microphone.
+  // it on the screen, name, connection, camera, microphone.
   const firstBlocker = (): { key: string; text: string } | null => {
-    if (!displayName.trim()) return { key: 'name', text: 'Enter your display name above — the host and other participants will see this name.' };
+    if (!displayName.trim()) return { key: 'name', text: 'Enter your display name above, the host and other participants will see this name.' };
     if (networkStatus === 'fail' && !proceedDespiteNetwork) return { key: 'network', text: 'The connection check failed. Tap "Continue anyway" in the amber box above, or press Retry checks.' };
-    if (networkStatus === 'checking') return { key: 'network', text: 'The connection check is still running — give it a moment, or press Retry checks.' };
-    if (cameraStatus === 'checking' || micStatus === 'checking') return { key: cameraStatus === 'checking' ? 'camera' : 'mic', text: 'The camera/microphone check is still running — give it a moment, or tick "Join without camera / microphone" below.' };
-    if (cameraStatus === 'fail' && !joinWithoutDevices) return { key: 'camera', text: 'Your camera is not working — press Retry, or tick "Join without camera / microphone" below.' };
-    if (micStatus === 'fail' && !joinWithoutDevices) return { key: 'mic', text: 'Your microphone is not working — press Retry, or tick "Join without camera / microphone" below.' };
+    if (networkStatus === 'checking') return { key: 'network', text: 'The connection check is still running, give it a moment, or press Retry checks.' };
+    if (cameraStatus === 'checking' || micStatus === 'checking') return { key: cameraStatus === 'checking' ? 'camera' : 'mic', text: 'The camera/microphone check is still running, give it a moment, or tick "Join without camera / microphone" below.' };
+    if (cameraStatus === 'fail' && !joinWithoutDevices) return { key: 'camera', text: 'Your camera is not working, press Retry, or tick "Join without camera / microphone" below.' };
+    if (micStatus === 'fail' && !joinWithoutDevices) return { key: 'mic', text: 'Your microphone is not working, press Retry, or tick "Join without camera / microphone" below.' };
     return null;
   };
 
@@ -454,7 +454,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
     }
     const blocker = firstBlocker();
     if (!blocker) {
-      setBlockerMessage('Something is still being checked — give it a moment, then tap Continue again.');
+      setBlockerMessage('Something is still being checked, give it a moment, then tap Continue again.');
       return;
     }
     setBlockerMessage(blocker.text);
@@ -551,7 +551,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
 
         <div>
           <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', margin: 0 }}>
-            Check your setup — {meetingTitle}
+            Check your setup, {meetingTitle}
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0.35rem 0 0' }}>
             A quick check so you join with working camera, microphone and sound. Nothing here joins the meeting yet.
@@ -566,7 +566,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem' }}>
               <VideoOff size={32} style={{ margin: '0 auto 0.5rem' }} />
               <div style={{ fontSize: '0.85rem' }}>
-                {cameraStatus === 'checking' ? 'Starting your camera…' : 'Camera preview unavailable — see the camera check below.'}
+                {cameraStatus === 'checking' ? 'Starting your camera…' : 'Camera preview unavailable, see the camera check below.'}
               </div>
             </div>
           )}
@@ -580,7 +580,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
           </div>
         </div>
 
-        {/* Display name — the single source the Waitroom then uses */}
+        {/* Display name, the single source the Waitroom then uses */}
         <div id="pjc-name-field" style={highlightKey === 'name' ? { outline: '2px solid #EF4444', outlineOffset: '2px', borderRadius: '10px', padding: '0.25rem' } : undefined}>
           <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
             <User size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} />
@@ -595,7 +595,8 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             onChange={(e) => setDisplayName(e.target.value)}
             style={{ height: '46px' }}
           />
-          {!displayName.trim() && <span style={{ display: 'block', fontSize: '0.75rem', color: '#FCA5A5', marginTop: '0.4rem' }}>Enter a name to continue — the host and other participants will see this name.</span>}
+          {!displayName.trim() && <span style={{ display: 'block', fontSize: '0.75rem', color: '#FCA5A5', marginTop: '0.4rem' }}>Enter a name to continue, the host and other participants will see this name.</span>}
+          {!user && <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>No account needed. Just your name, and you are in. If this meeting has a passcode or a waiting room, the next step asks for it.</span>}
         </div>
 
         {/* Checks */}
@@ -618,7 +619,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             icon={<Mic size={16} />}
             title="Microphone"
             status={micStatus}
-            detail={micStatus === 'pass' ? (micHeard ? 'Microphone is live — your voice is registering on the meter. Speak to test it.' : 'Microphone is live. Speak now — the meter below should move.') : micStatus === 'checking' ? 'Starting your microphone…' : 'Your microphone is not working.'}
+            detail={micStatus === 'pass' ? (micHeard ? 'Microphone is live, your voice is registering on the meter. Speak to test it.' : 'Microphone is live. Speak now, the meter below should move.') : micStatus === 'checking' ? 'Starting your microphone…' : 'Your microphone is not working.'}
             fix={micStatus === 'fail' ? micError : undefined}
           >
             {micStatus !== 'fail' && (
@@ -633,8 +634,8 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             icon={<Volume2 size={16} />}
             title="Speakers"
             status={speakerFailed ? 'fail' : speakerHeard ? 'pass' : speakerStatus}
-            detail={speakerHeard ? 'You confirmed the test sound — your speakers work.' : speakerSkipped ? 'Speaker test skipped — speakers are not required to join.' : speakerPlayed ? "Test sound played — tap 'I heard it' or 'I didn't hear it' below." : 'Play the test sound and confirm you hear it.'}
-            fix={speakerFailed ? 'You did not hear the test sound — check your volume, that the right speakers/headphones are selected, and that the browser tab is not muted, then play it again.' : undefined}
+            detail={speakerHeard ? 'You confirmed the test sound, your speakers work.' : speakerSkipped ? 'Speaker test skipped, speakers are not required to join.' : speakerPlayed ? "Test sound played, tap 'I heard it' or 'I didn't hear it' below." : 'Play the test sound and confirm you hear it.'}
+            fix={speakerFailed ? 'You did not hear the test sound, check your volume, that the right speakers/headphones are selected, and that the browser tab is not muted, then play it again.' : undefined}
           >
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
               <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={playSpeakerTest}>
@@ -658,13 +659,13 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             icon={networkStatus === 'fail' ? <WifiOff size={16} /> : <Wifi size={16} />}
             title="Connection"
             status={networkStatus}
-            detail={networkStatus === 'pass' ? `You are online${networkMs !== null ? ` — server answered in ${networkMs} ms` : ''}.` : networkStatus === 'checking' ? 'Checking your connection…' : 'You appear to be offline — check your Wi-Fi or mobile data, then press Retry.'}
+            detail={networkStatus === 'pass' ? `You are online${networkMs !== null ? `, server answered in ${networkMs} ms` : ''}.` : networkStatus === 'checking' ? 'Checking your connection…' : 'You appear to be offline, check your Wi-Fi or mobile data, then press Retry.'}
           />
         </div>
 
         {/* Always offered, not only after a camera/mic failure: on a phone
             the checks can fail, time out, or the user may simply want to
-            join audio-only — the escape must exist whatever state the
+            join audio-only, the escape must exist whatever state the
             checks are in. */}
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-main)' }}>
           <input type="checkbox" checked={joinWithoutDevices} onChange={() => setJoinWithoutDevices(!joinWithoutDevices)} style={{ marginTop: '3px' }} />

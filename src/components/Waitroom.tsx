@@ -6,14 +6,14 @@ interface WaitroomProps {
   meetingId: string;
   initialPasscode?: string;
   // Display name already collected on the pre-join check screen. This is
-  // the single source: the check screen writes it, the Waitroom uses it —
+  // the single source: the check screen writes it, the Waitroom uses it ,
   // no second name store, no re-typing for guests who already gave it.
   initialDisplayName?: string;
   user: { id: string; name: string; email: string } | null;
   onAdmitted: (meetingTitle: string, participantId: string, displayName: string) => void;
   onDeclined: () => void;
   onBack: () => void;
-  // Phase 3 (Feature 4) — shared workspace brand, passed from App.
+  // Phase 3 (Feature 4), shared workspace brand, passed from App.
   brandName?: string;
   logoUrl?: string;
 }
@@ -38,7 +38,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const [passcodeValidated, setPasscodeValidated] = useState(false);
   const [passcodeError, setPasscodeError] = useState('');
 
-  // Profile entry states — the name comes from the pre-join check screen
+  // Profile entry states, the name comes from the pre-join check screen
   // (initialDisplayName) or the signed-in account; guests who skipped the
   // check still get the form below.
   const [displayName, setDisplayName] = useState(initialDisplayName || user?.name || '');
@@ -46,12 +46,12 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const [waitingStatus, setWaitingStatus] = useState<'Waiting' | 'Admitted' | 'Declined' | 'None'>('None');
   const [guestKey] = useState(() => user?.id || crypto.randomUUID());
 
-  // Round 9 (9A/9B/9C): a hard stop shown instead of the join form —
+  // Round 9 (9A/9B/9C): a hard stop shown instead of the join form ,
   // removed by the host, link expired, or meeting ended.
   const [blocked, setBlocked] = useState<null | 'removed' | 'expired' | 'ended'>(null);
 
   // Round 9 (9B/9C): an ended meeting or an expired link stops here,
-  // with a plain message — before any join is attempted. Both reads
+  // with a plain message, before any join is attempted. Both reads
   // are best-effort; the token route is the final gate either way.
   useEffect(() => {
     (async () => {
@@ -68,7 +68,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     })();
   }, [meetingId]);
 
-  // If already admitted once, bypass waitroom completely — unless the
+  // If already admitted once, bypass waitroom completely, unless the
   // meeting has since ENDED, in which case the old link must not
   // re-enter (the flag is per-browser and was never cleared on the
   // guest's side). Check the meeting status first.
@@ -83,7 +83,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           return;
         }
         // Round 9 (9A): a removed guest must never slip through the
-        // admitted-flag bypass — their row is 'Removed', not 'Admitted'.
+        // admitted-flag bypass, their row is 'Removed', not 'Admitted'.
         // A guest who left and came back gets the same row reactivated;
         // a Waiting/Declined row falls back to the normal form (the
         // token route refuses anyone who is not Admitted anyway).
@@ -152,7 +152,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
             return;
           }
           // Passcode: verified SERVER-side (see giinApi.verifyPasscode).
-          // The passcode is never compared in this component any more —
+          // The passcode is never compared in this component any more ,
           // the meetings table is publicly readable, so a client-side
           // comparison was only ever a UI gate, not a secret. A code that
           // arrived in the invite link is verified the same way; a meeting
@@ -180,7 +180,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     fetchDetails();
   }, [meetingId, initialPasscode, user]);
 
-  // Fix Round 6 (Phase 6) — the host may end the meeting while someone
+  // Fix Round 6 (Phase 6), the host may end the meeting while someone
   // is still here (passcode screen or waiting room, before any
   // participant row exists). Poll the meeting itself, not just the
   // participant row: an ended meeting shows the ended message instead
@@ -266,7 +266,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           senderKey: guestKey,
           name: displayName,
           // The database participant row id, once we have it. The host
-          // admits by this id — the signalling key alone matches no
+          // admits by this id, the signalling key alone matches no
           // database row, so the host's admit used to leave the guest
           // stuck on 'Waiting' in the database forever.
           participantRowId: participantId || undefined
@@ -289,7 +289,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     };
   }, [participantId, waitingStatus, meetingDetails, displayName, onAdmitted, onDeclined, guestKey, meetingId]);
 
-  // Handle Passcode Validation — server-side only. The typed code is sent
+  // Handle Passcode Validation, server-side only. The typed code is sent
   // to /api/meetings/verify-passcode and only a true/false comes back;
   // the real passcode never reaches this component.
   const handleVerifyPasscode = async (e: React.FormEvent) => {
@@ -321,7 +321,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       // Fix Round 7 (#6): a locked meeting does NOT auto-admit.
       const isLockedForJoin = meetingDetails?.require_waiting_room === false ? await giinApi.getMeetingLock(meetingId) : false;
       if (meetingDetails?.require_waiting_room === false && !isLockedForJoin) {
-        // Immediately admit — but still write the participant row, so the
+        // Immediately admit, but still write the participant row, so the
         // host sees this guest in the room and host controls (kick) work.
         // The old code returned without a row, leaving the guest invisible
         // to the host's participant list. Best-effort: admission itself
@@ -363,8 +363,8 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     }
   };
 
-  // Anyone who already has a display name — signed-in account name, or
-  // the name collected on the pre-join check screen — joins straight away
+  // Anyone who already has a display name, signed-in account name, or
+  // the name collected on the pre-join check screen, joins straight away
   // once the passcode step is done (or there is none). Guests without a
   // name yet still get the name form below.
   useEffect(() => {
@@ -452,7 +452,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     <div className="flex-center" style={{ minHeight: '80vh', padding: '2rem' }}>
       <div className="glass-panel" style={{ maxWidth: '450px', width: '100%', padding: '2.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         
-        {/* Header Title details — workspace brand, then the meeting */}
+        {/* Header Title details, workspace brand, then the meeting */}
         <div style={{ textAlign: 'center' }}>
           <img
             src={logoUrl}
@@ -506,7 +506,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
           </form>
         )}
 
-        {/* Step 2: Name Entry — only for guests who did not already give a
+        {/* Step 2: Name Entry, only for guests who did not already give a
             name on the pre-join check screen; signed-in users auto-join
             with their account name. */}
         {passcodeValidated && waitingStatus === 'None' && !user?.name && !initialDisplayName && (
@@ -525,7 +525,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
                 style={{ height: '46px' }}
               />
               <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                This is how other participants and the host will identify you in the room.
+                This is how other participants and the host will identify you in the room. No account needed, just your name.
               </span>
             </div>
 
