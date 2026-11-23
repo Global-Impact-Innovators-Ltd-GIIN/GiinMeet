@@ -1672,6 +1672,18 @@ h1, h2, h3, h4, h5, h6 {
   max-width: 170px;
 }
 
+/* Phase B (15): side-by-side layout — the spotlight tile takes the
+   left column and spans the rows; the other tiles stack in a rail on
+   the right. The tiles wrapper switches to a grid inline (see
+   MeetingRoom); these rules only place the tiles in that grid. */
+.meeting-grid.side-mode .meeting-card.spotlight {
+  grid-column: 1;
+  grid-row: 1 / span 99;
+}
+.meeting-grid.side-mode .meeting-card:not(.spotlight) {
+  grid-column: 2;
+}
+
 /* Screen share layout responsive overrides */
 @media (max-width: 768px) {
   .screenshare-layout {

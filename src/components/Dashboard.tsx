@@ -374,6 +374,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [smsSending, setSmsSending] = useState(false);
   // Attendance (recorded in this browser during the meeting).
   const [attendanceMeetingId, setAttendanceMeetingId] = useState<string | null>(null);
+  // Phase B (9 + 10) — meeting record: saved transcript + AI summary,
+  // fetched from the server routes (host or admitted participant only).
+  const [recordMeetingId, setRecordMeetingId] = useState<string | null>(null);
+  const [meetingRecords, setMeetingRecords] = useState<Record<string, { transcript: any; summary: any; loading: boolean; note: string | null }>>({});
+  const loadMeetingRecord = async (id: string) => {
+    setMeetingRecords(prev => ({ ...prev, [id]: { transcript: prev[id]?.transcript || null, summary: prev[id]?.summary || null, loading: true, note: null } }));
+    const result: any = await giinApi.getMeetingRecord(id);
+    if (result?.ok) {
+      setMeetingRecords(prev => ({ ...prev, [id]: { transcript: result.transcript, summary: result.summary, loading: false, note: null } }));
+    } else {
+      setMeetingRecords(prev => ({ ...prev, [id]: { transcript: null, summary: null, loading: false, note: result?.message || 'The meeting record could not be loaded.' } }));
+    }
+  };
+  const regenerateSummary = async (id: string) => {
+    setMeetingRecords(prev => ({ ...prev, [id]: { ...(prev[id] || { transcript: null, summary: null }), loading: true, note: null } }));
+    const result: any = await giinApi.generateMeetingSummary(id);
+    if (result?.ok) {
+      setMeetingRecords(prev => ({ ...prev, [id]: { ...(prev[id] || { transcript: null }), summary: { summary: result.summary, decisions: result.decisions, actionItems: result.actionItems, generatedAt: new Date().toISOString() }, loading: false, note: null } }));
+    } else {
+      setMeetingRecords(prev => ({ ...prev, [id]: { ...(prev[id] || { transcript: null, summary: null }), loading: false, note: result?.message || 'The summary could not be generated.' } }));
+    }
+  };
 
   // Phase 1 — personal room: one permanent link for this user. Fetched on
   // mount (never auto-created — the user creates it with one click).
@@ -1002,6 +1024,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         Attendance
                       </button>
                       <button
+                        onClick={() => {
+                          const next = recordMeetingId === meeting.id ? null : meeting.id;
+                          setRecordMeetingId(next);
+                          if (next) void loadMeetingRecord(meeting.id);
+                        }}
+                        className="premium-btn premium-btn-secondary"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px' }}
+                        title="Saved transcript and AI summary for this meeting"
+                      >
+                        Record
+                      </button>
+                      <button
                         onClick={() => onDeleteMeeting?.(meeting.id, meeting.title)}
                         className="premium-btn premium-btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', borderRadius: '4px', color: '#EF4444', display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -1051,6 +1085,66 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     } catch (e) {
                       return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Attendance could not be read.</p>;
                     }
+                  })()}
+                </div>
+              )}
+              {recordMeetingId === meeting.id && (
+                <div style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.5rem' }}>Transcript & Summary — {meeting.title}</h4>
+                  {(() => {
+                    const rec = meetingRecords[meeting.id];
+                    if (!rec || rec.loading) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Loading the meeting record…</p>;
+                    if (rec.note && !rec.transcript && !rec.summary) return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{rec.note}</p>;
+                    const lines = rec.transcript?.lines || [];
+                    const summary = rec.summary;
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {summary ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>AI SUMMARY</span>
+                            <p style={{ fontSize: '0.85rem', margin: 0, lineHeight: 1.5 }}>{summary.summary}</p>
+                            {summary.decisions?.length > 0 && (
+                              <div>
+                                <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>Decisions</span>
+                                <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.2rem', fontSize: '0.8rem' }}>
+                                  {summary.decisions.map((d: string, i: number) => (<li key={i}>{d}</li>))}
+                                </ul>
+                              </div>
+                            )}
+                            {summary.actionItems?.length > 0 && (
+                              <div>
+                                <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>Action items</span>
+                                <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.2rem', fontSize: '0.8rem' }}>
+                                  {summary.actionItems.map((a: any, i: number) => (<li key={i}>{a.text}{a.owner ? ` — ${a.owner}` : ''}</li>))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+                            No summary yet{lines.length === 0 ? ' — there is no saved transcript for this meeting (captions were off or the meeting ended before transcripts were saved).' : ' — the summary provider key is not configured, or generation has not run.'}
+                          </p>
+                        )}
+                        {rec.note && <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>{rec.note}</p>}
+                        <button type="button" className="premium-btn premium-btn-secondary" style={{ alignSelf: 'flex-start', padding: '0.35rem 0.75rem', fontSize: '0.75rem' }} onClick={() => void regenerateSummary(meeting.id)}>
+                          {summary ? 'Regenerate summary' : 'Generate summary'}
+                        </button>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRANSCRIPT ({lines.length} lines)</span>
+                        {lines.length === 0 ? (
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No transcript was saved for this meeting.</p>
+                        ) : (
+                          <div className="scroll-refined" style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            {lines.map((l: any, i: number) => (
+                              <div key={i} style={{ fontSize: '0.8rem', lineHeight: 1.4 }}>
+                                <span style={{ fontWeight: 700, color: 'var(--color-accent)' }}>{l.name}</span>{' '}
+                                <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{l.time}</span>
+                                <div>{l.text}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
                   })()}
                 </div>
               )}

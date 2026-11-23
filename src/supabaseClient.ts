@@ -1113,6 +1113,57 @@ export const giinApi = {
     }
   },
 
+  // Phase B (9 + 10) — meeting record: transcript save / read and AI
+  // summary generation. All three go through the server routes, which
+  // verify the caller server-side (host for save/generate; host or an
+  // admitted participant for read). Never throws — callers are
+  // fire-and-forget at the end of a meeting, so a record failure must
+  // never look like an end failure. Returns the route's answer so the
+  // caller can log it or show the honest reason (e.g. NO_LLM_KEY).
+  saveTranscript: async (meetingId: string, lines: { name: string; text: string; time: string }[]) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/meetings/transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, accessToken: session.access_token, lines }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  getMeetingRecord: async (meetingId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch(`/api/meetings/transcript?meetingId=${encodeURIComponent(meetingId)}&accessToken=${encodeURIComponent(session.access_token)}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  generateMeetingSummary: async (meetingId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/meetings/summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
   // Transfer the host role, server-verified (Fix Round 6 / Phase 6).
   // POST /api/meetings/transfer-host checks the caller is the current
   // host and the new host is a signed-in participant in the meeting.
