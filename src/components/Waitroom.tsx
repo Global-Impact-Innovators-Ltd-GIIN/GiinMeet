@@ -42,6 +42,8 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   // (initialDisplayName) or the signed-in account; guests who skipped the
   // check still get the form below.
   const [displayName, setDisplayName] = useState(initialDisplayName || user?.name || '');
+  // Phase C2b (11), organisation badge text (optional, guests).
+  const [organisation, setOrganisation] = useState('');
   const [participantId, setParticipantId] = useState<string>('');
   const [waitingStatus, setWaitingStatus] = useState<'Waiting' | 'Admitted' | 'Declined' | 'None'>('None');
   const [guestKey] = useState(() => user?.id || crypto.randomUUID());
@@ -314,7 +316,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   };
 
   // Join wait list in database
-  const joinWaitingRoom = async (name: string, _pcode?: string) => {
+  const joinWaitingRoom = async (name: string, _pcode?: string, org?: string) => {
     if (!name.trim()) return;
     setLoading(true);
     try {
@@ -327,7 +329,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
         // to the host's participant list. Best-effort: admission itself
         // does not depend on the write.
         try {
-          const data = await giinApi.joinMeetingRoom(meetingId, name, user?.id, 'Participant', 'Admitted');
+          const data = await giinApi.joinMeetingRoom(meetingId, name, user?.id, 'Participant', 'Admitted', org || organisation || undefined);
           if (data) {
             setParticipantId(data.id);
             try { localStorage.setItem(`giin_participant_row_${meetingId}`, data.id); } catch (e) {}
@@ -345,7 +347,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       }
 
       setWaitingStatus('Waiting');
-      const data = await giinApi.joinMeetingRoom(meetingId, name, user?.id);
+      const data = await giinApi.joinMeetingRoom(meetingId, name, user?.id, 'Participant', undefined, org || organisation || undefined);
       if (data) {
         setParticipantId(data.id);
         // Remember our own participant row id. Guests have user_id NULL in
@@ -378,7 +380,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const handleNameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!displayName.trim() || !meetingDetails) return;
-    joinWaitingRoom(displayName, meetingDetails.passcode);
+    joinWaitingRoom(displayName, meetingDetails.passcode, organisation);
   };
 
   if (loading) {
@@ -526,6 +528,23 @@ export const Waitroom: React.FC<WaitroomProps> = ({
               />
               <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
                 This is how other participants and the host will identify you in the room. No account needed, just your name.
+              </span>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
+                Organisation (optional)
+              </label>
+              <input
+                type="text"
+                className="premium-input"
+                placeholder="Your company, school or church"
+                value={organisation}
+                onChange={(e) => setOrganisation(e.target.value)}
+                maxLength={80}
+                style={{ height: '46px' }}
+              />
+              <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                Shown as a small badge next to your name in the meeting. Leave it blank for no badge.
               </span>
             </div>
 

@@ -111,6 +111,8 @@ export const Settings: React.FC<SettingsProps> = ({
   const [avatarUrl, setAvatarUrl] = useState(userAvatarUrl || '');
   const [phone, setPhone] = useState(userPhone);
   const [role, setRole] = useState(userRole);
+  // Phase C2b (11), organisation badge text.
+  const [organisation, setOrganisation] = useState('');
   const [timezone, setTimezone] = useState(userTimezone);
   const [location, setLocation] = useState(userLocation);
   const [skillsText, setSkillsText] = useState((userSkills || []).join(', '));
@@ -243,6 +245,17 @@ export const Settings: React.FC<SettingsProps> = ({
   const animationFrameRef = useRef<number | null>(null);
   const telemetryFrameRef = useRef<number | null>(null);
 
+  // Phase C2b (11), load the organisation badge text from the profile.
+  useEffect(() => {
+    let alive = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!alive || !data?.user) return;
+      supabase.from('profiles').select('organisation').eq('id', data.user.id).maybeSingle().then(({ data: row }) => {
+        if (alive && row && typeof (row as any).organisation === 'string') setOrganisation((row as any).organisation);
+      }).catch(() => { /* column not set up yet: badge stays blank */ });
+    }).catch(() => { /* not signed in */ });
+    return () => { alive = false; };
+  }, []);
   // Sync props to state changes
   useEffect(() => {
     setName(userName);
@@ -400,8 +413,18 @@ export const Settings: React.FC<SettingsProps> = ({
     setTimeout(() => setShowSavedToast(false), 3000);
   };
 
-  const handleProfileSave = (e: React.FormEvent) => {
+  const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Phase C2b (11), organisation badge text, saved on the profile.
+    // A missing column (Phase C2b SQL not run yet) only skips the
+    // badge, it never blocks the rest of the profile save.
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { error } = await supabase.from('profiles').update({ organisation: organisation.trim().slice(0, 80) }).eq('id', user.id);
+        if (error) console.warn('[Settings] Organisation could not be saved yet:', error.message);
+      }
+    } catch (err) { /* badge save is best effort */ }
     const skillsArray = skillsText
       .split(',')
       .map(s => s.trim())
@@ -931,6 +954,11 @@ export const Settings: React.FC<SettingsProps> = ({
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Job Title / Role</label>
                   <input type="text" value={role} onChange={(e) => setRole(e.target.value)} className="premium-input" />
                 </div>
+              </div>
+              <div style={{ marginTop: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>Organisation (company, school or church)</label>
+                <input type="text" value={organisation} onChange={(e) => setOrganisation(e.target.value)} placeholder="e.g. Global Impact Innovators" maxLength={80} className="premium-input" />
+                <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Shown as a small badge next to your name in meetings. Leave it blank for no badge.</span>
               </div>
               </SectionCard>
 

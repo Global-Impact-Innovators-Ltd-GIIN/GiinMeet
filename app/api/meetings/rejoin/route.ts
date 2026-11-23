@@ -40,6 +40,16 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const { meetingId, participantRowId, accessToken, name, role, status } = body;
+    // Phase C2b (11), organisation badge text for guests (and for
+    // signed-in users whose profile has none). Saved best-effort: a
+    // missing column must never break a rejoin.
+    const organisation = typeof body.organisation === 'string' ? body.organisation.trim().slice(0, 80) : '';
+    const saveOrganisation = async (rowId: string) => {
+      if (!organisation) return;
+      try {
+        await admin.from('meeting_participants').update({ organisation }).eq('id', rowId);
+      } catch (e) { /* column not set up yet: badge stays blank */ }
+    };
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
     }
@@ -90,6 +100,7 @@ export async function POST(req: NextRequest) {
         await admin.from('meeting_participants').update({ name, updated_at: new Date().toISOString() }).eq('id', row.id);
         row = { ...row, name };
       }
+      await saveOrganisation(row.id);
       return NextResponse.json({ found: true, row });
     }
 
@@ -138,6 +149,7 @@ export async function POST(req: NextRequest) {
       console.error('[Rejoin API] Failed to reactivate participant row:', updateError);
       return NextResponse.json({ error: 'DB_ERROR', message: 'Could not rejoin the meeting.' }, { status: 500 });
     }
+    if (updated) await saveOrganisation(updated.id);
     return NextResponse.json({ found: true, row: updated });
   } catch (err: any) {
     console.error('[Rejoin API] Internal Exception:', err);

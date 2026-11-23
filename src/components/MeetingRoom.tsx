@@ -16,6 +16,7 @@ import { startBackgroundFx, type BackgroundFxMode } from '../utils/backgroundFx'
 import { getLocalBrandName } from '../utils/brand';
 import { recordRecentMeeting } from '../utils/recent';
 import TranslatedCaption from './TranslatedCaption';
+import { LiveNotesPad, DocumentViewerPanel, InterpretationPanel, RemoteControlPanel, OrgBadge, VoiceNoteButton, TranslatedChatText, PrivateNote, LANG_LABEL, type InterpretationState, type RemoteControlStatus } from './C2bTools';
 import { isNoiseSuppressionSupported, loadRnnoiseBinary, readNoiseSuppressionPreference, saveNoiseSuppressionPreference, NOISE_SUPPRESSION_WORKLET_URL, type NoiseSuppressionStatus } from '../utils/noiseSuppression';
 
 // Web Audio API Synthesized sound effects
@@ -1257,6 +1258,47 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // leaderboard without a separate broadcast.
   const [newPollIsQuiz, setNewPollIsQuiz] = useState(false);
   const [newPollCorrectOption, setNewPollCorrectOption] = useState<number | null>(null);
+  // Phase C2b state. Each feature owns its server route (see
+  // app/api/meetings/*); this room only holds what the UI needs.
+  // Organisation badges (11), keyed by user id and participant row id.
+  const [orgBadges, setOrgBadges] = useState<Record<string, string>>({});
+  // Chat auto-translation (4): 'original' means no translation.
+  const [chatLang, setChatLang] = useState<'original' | 'en' | 'fr' | 'rw'>('original');
+  const [chatTranslationUnavailable, setChatTranslationUnavailable] = useState<string | null>(null);
+  // Whispers (10) and voice notes (9), both rendered inside the chat feed.
+  const [whispers, setWhispers] = useState<any[]>([]);
+  const [whisperRecipient, setWhisperRecipient] = useState<string>('everyone');
+  const [voiceNotes, setVoiceNotes] = useState<any[]>([]);
+  // Server-run polls (8): anonymous polls live on the server, named
+  // polls keep the Phase 1 broadcast flow.
+  const [serverPolls, setServerPolls] = useState<any[]>([]);
+  const [newPollIsAnonymous, setNewPollIsAnonymous] = useState(false);
+  // Interpretation (3): the channel state, and which voice this
+  // listener hears. The interpreter always hears the original room.
+  const [interpretation, setInterpretation] = useState<InterpretationState | null>(null);
+  const [listenMode, setListenMode] = useState<'original' | 'interpretation'>('original');
+  // Remote control (1): the live grant, the remote pointer, and the
+  // click ripple the sharer sees. The grant ref is what the LiveKit
+  // data handler trusts, state alone would go stale in its closure.
+  const [remoteControlStatus, setRemoteControlStatus] = useState<RemoteControlStatus | null>(null);
+  const [remoteCursor, setRemoteCursor] = useState<{ x: number; y: number; name: string } | null>(null);
+  const [remoteClick, setRemoteClick] = useState<{ x: number; y: number; id: number } | null>(null);
+  const remoteGrantRef = useRef<{ sharerKey: string; controllerKey: string } | null>(null);
+  const remotePointerLastSentRef = useRef(0);
+  // Screen share with sound (5): the sharer's sound toggle.
+  const [shareSoundOn, setShareSoundOn] = useState(true);
+  const shareSoundOnRef = useRef(true);
+  const screenAudioTrackRef = useRef<MediaStreamTrack | null>(null);
+  // Live tools tab inside the workspace panel (notes / docs / interpret).
+  const [liveToolsTab, setLiveToolsTab] = useState<'notes' | 'docs' | 'interpret'>('notes');
+  const [showLiveTools, setShowLiveTools] = useState(false);
+  const interpretationRef = useRef<InterpretationState | null>(null);
+  const listenModeRef = useRef<'original' | 'interpretation'>('original');
+  useEffect(() => { interpretationRef.current = interpretation; }, [interpretation]);
+  useEffect(() => { listenModeRef.current = listenMode; }, [listenMode]);
+  useEffect(() => { shareSoundOnRef.current = shareSoundOn; }, [shareSoundOn]);
+  // (currentSharerKey and friends live further down, after myKey,
+  // peerStates and remoteScreenStreams exist, so no TDZ trap.)
   const [videoFilter, setVideoFilter] = useState('none');
 
   const [isAudioEnhanced, setIsAudioEnhanced] = useState(false);
@@ -1918,6 +1960,46 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (!active) return;
           setIsLivekitReconnecting(false);
           if (livekitReconnectTimerRef.current) { clearTimeout(livekitReconnectTimerRef.current); livekitReconnectTimerRef.current = null; }
+        });
+
+        // Phase C2b (1), remote control data channel. The controller
+        // sends pointer, click and key events; the sharer applies them
+        // ONLY while a live server grant names that controller for
+        // this sharer, and only while this client is still sharing.
+        // A packet from anyone else, or after the grant is revoked,
+        // is ignored outright.
+        room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant: any) => {
+          if (!active) return;
+          const grant = remoteGrantRef.current;
+          if (!grant || grant.sharerKey !== myKey) return;
+          if (!participant || participant.identity !== grant.controllerKey) return;
+          if (!livekitScreenTrackRef.current) return;
+          let msg: any = null;
+          try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (e) { return; }
+          if (!msg || msg.kind !== 'remote-control') return;
+          const controllerName = (participant as any).name || 'Controller';
+          if (msg.type === 'pointer' && typeof msg.x === 'number' && typeof msg.y === 'number') {
+            setRemoteCursor({ x: Math.min(1, Math.max(0, msg.x)), y: Math.min(1, Math.max(0, msg.y)), name: controllerName });
+          } else if (msg.type === 'click' && typeof msg.x === 'number' && typeof msg.y === 'number') {
+            const click = { x: Math.min(1, Math.max(0, msg.x)), y: Math.min(1, Math.max(0, msg.y)), id: Date.now() };
+            setRemoteClick(click);
+            window.setTimeout(() => setRemoteClick((prev) => (prev && prev.id === click.id ? null : prev)), 800);
+          } else if (msg.type === 'key' && typeof msg.key === 'string') {
+            // Type into whatever editable element the sharer has
+            // focused (the shared notes pad, normally). A synthetic
+            // keyboard event does not type on its own, so the text is
+            // inserted explicitly, which also fires the pad's input
+            // handling so it syncs to everyone.
+            const el = document.activeElement as any;
+            if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)) {
+              try {
+                if (msg.key === 'Backspace') document.execCommand('delete');
+                else if (msg.key === 'Enter') document.execCommand('insertText', false, '\n');
+                else if (msg.key.length === 1) document.execCommand('insertText', false, msg.key);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+              } catch (e) { /* the focused element refused the edit */ }
+            }
+          }
         });
 
         // Fix Round 5: room membership is NOT the same as media tracks.
@@ -2698,6 +2780,45 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const screenSendersRef = useRef<{ [peerKey: string]: RTCRtpSender }>({});
   const [remoteScreenStreams, setRemoteScreenStreams] = useState<{ [peerKey: string]: MediaStream }>({});
+
+  // Phase C2b derived values (kept here, after myKey, peerStates and
+  // remoteScreenStreams exist).
+  // Who is sharing right now (myKey when I share, else their room key).
+  const currentSharerKey = isScreenSharing
+    ? myKey
+    : (Object.keys(peerStates).find(k => peerStates[k]?.isScreenSharing) || Object.keys(remoteScreenStreams)[0] || null);
+  const currentSharerName = isScreenSharing
+    ? (currentUser?.name || 'You')
+    : (currentSharerKey ? (peerStates[currentSharerKey]?.name || 'Participant') : '');
+  const amRemoteController = !!(remoteControlStatus?.grant && remoteControlStatus.grant.controller_key === myKey && remoteControlStatus.grant.sharer_key === currentSharerKey);
+  // Interpretation muting: when I listen to the interpreter, every
+  // voice except the interpreter's is muted for me only.
+  const isInterpretationMutedFor = (peerKey: string) =>
+    listenMode === 'interpretation' && !!interpretation?.active && !!interpretation?.interpreterKey && peerKey !== interpretation.interpreterKey && peerKey !== myKey;
+
+  // Phase C2b (3): picking the interpreter also turns spatial audio
+  // off for this listener, because spatial audio plays voices through
+  // the WebAudio panner, past the muted audio element. Without that,
+  // the other voices would still be heard through the panner.
+  const changeListenMode = (mode: 'original' | 'interpretation') => {
+    setListenMode(mode);
+    if (mode === 'interpretation' && isSpatialAudioEnabled) {
+      setIsSpatialAudioEnabled(false);
+      try { localStorage.setItem('giin_spatial_audio', 'false'); } catch (e) { /* storage unavailable */ }
+      triggerToast('Spatial audio is off while you listen to the interpreter, so only the interpreter is heard.');
+    }
+  };
+
+  // Phase C2b (6): choose my own breakout room. The server verifies
+  // the session is live and broadcasts the move, so every roster
+  // follows it and a refresh restores it.
+  const handleSelfSelectRoom = async (roomNumber: number | null) => {
+    try {
+      await giinApi.breakoutControl(meetingId, 'self-select', { roomNumber });
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not change rooms, please try again.');
+    }
+  };
 
   // Fix Round 8 (#4): speaker mute + live connection quality.
   // Speakers muted breaks a feedback loop in one tap (laptop and
@@ -3758,6 +3879,126 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
   }, [meetingId, currentUser]);
 
+  // Phase C2b (11), organisation badges, refreshed with the roster.
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      giinApi.getOrganisations(meetingId).then((res: any) => {
+        if (alive && res?.ok && res?.badges) setOrgBadges(res.badges);
+      }).catch(() => { /* badges are best effort, a missing badge just hides */ });
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    return () => { alive = false; clearInterval(interval); };
+  }, [meetingId]);
+
+  // Phase C2b (10 + 9), whispers and voice notes, same 4 s rhythm as chat.
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      giinApi.getWhispers(meetingId).then((res: any) => {
+        if (alive && res?.ok && Array.isArray(res.whispers)) setWhispers(res.whispers);
+      }).catch(() => { /* whispers are best effort, the next poll retries */ });
+      giinApi.getVoiceNotes(meetingId).then((res: any) => {
+        if (alive && res?.ok && Array.isArray(res.notes)) setVoiceNotes(res.notes);
+      }).catch(() => { /* same, next poll retries */ });
+    };
+    load();
+    const interval = setInterval(load, 4000);
+    return () => { alive = false; clearInterval(interval); };
+  }, [meetingId]);
+
+  // Phase C2b (8), server-run polls (anonymous polls live here).
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      giinApi.getServerPolls(meetingId).then((res: any) => {
+        if (alive && res?.ok && Array.isArray(res.polls)) setServerPolls(res.polls);
+      }).catch(() => { /* next poll retries */ });
+    };
+    load();
+    const interval = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(interval); };
+  }, [meetingId]);
+
+  // Phase C2b (3), interpretation channel state. The interpreter
+  // always hears the original room, so their listen mode is forced
+  // back when they are the interpreter or the channel stops.
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      giinApi.getInterpretation(meetingId).then((res: any) => {
+        if (!alive) return;
+        if (res?.ok === false && res?.reason === 'NOT_CONFIGURED') return;
+        const next: InterpretationState = res?.active
+          ? { active: true, interpreterKey: res.interpreterKey, interpreterName: res.interpreterName, interpreterLang: res.interpreterLang }
+          : { active: false };
+        setInterpretation(next);
+        if (!res?.active && listenModeRef.current === 'interpretation') setListenMode('original');
+        if (res?.active && res?.interpreterKey === myKey && listenModeRef.current === 'interpretation') setListenMode('original');
+      }).catch(() => { /* next poll retries */ });
+    };
+    load();
+    const interval = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(interval); };
+  }, [meetingId, myKey]);
+
+  // Phase C2b (1), remote control grant state, while anyone shares.
+  // The grant ref is what the LiveKit data handler trusts.
+  const sharingActive = isScreenSharing || Object.keys(peerStates).some(k => peerStates[k]?.isScreenSharing) || Object.keys(remoteScreenStreams).length > 0;
+  useEffect(() => {
+    if (!sharingActive) {
+      setRemoteControlStatus(null);
+      remoteGrantRef.current = null;
+      setRemoteCursor(null);
+      return;
+    }
+    let alive = true;
+    const load = () => {
+      giinApi.getRemoteControl(meetingId).then((res: any) => {
+        if (!alive || res?.ok === false) return;
+        setRemoteControlStatus({ requests: res.requests || [], grant: res.grant || null });
+        remoteGrantRef.current = res.grant
+          ? { sharerKey: res.grant.sharer_key, controllerKey: res.grant.controller_key }
+          : null;
+        if (!res.grant) setRemoteCursor(null);
+      }).catch(() => { /* next poll retries */ });
+    };
+    load();
+    const interval = setInterval(load, 3000);
+    return () => { alive = false; clearInterval(interval); };
+  }, [meetingId, sharingActive]);
+
+  // Phase C2b (6), breakout restore from the server when this tab has
+  // no stored snapshot (fresh join mid-session, or a cleared tab).
+  // Mirrors the breakout-state receiver below, without its alert.
+  useEffect(() => {
+    if (storedBreakout) return;
+    let alive = true;
+    giinApi.getBreakoutState(meetingId).then((res: any) => {
+      if (!alive || !res?.ok || !res?.active) return;
+      breakoutActiveRef.current = true;
+      setBreakoutAssignments(res.assignments || {});
+      if (typeof res.roomsCount === 'number') setBreakoutRoomsCount(res.roomsCount);
+      const remaining = typeof res.durationSeconds === 'number' ? Math.max(0, res.durationSeconds) : null;
+      if (remaining !== null) setBreakoutTimeRemaining(remaining);
+      const myRoom = typeof res.myRoom === 'number' ? res.myRoom : null;
+      if (remaining !== null) {
+        writeStoredBreakout(meetingId, {
+          room: myRoom,
+          endsAt: Date.now() + remaining * 1000,
+          roomsCount: res.roomsCount || 2,
+          assignments: res.assignments || {},
+        });
+      }
+      if (myRoom !== null && myRoom !== breakoutRoomRef.current) {
+        enterBreakoutRoom(myRoom);
+        triggerToast(`You are in Breakout Room ${myRoom}.`);
+      }
+    }).catch(() => { /* no server state: the stored snapshot stands */ });
+    return () => { alive = false; };
+  }, [meetingId]);
+
   // Load admitted participants from database periodically and in realtime
   useEffect(() => {
     const loadParticipants = async () => {
@@ -4809,6 +5050,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         return false;
       }
       const screenAudioTrack = displayStream.getAudioTracks()[0] || null;
+      // Phase C2b (5): keep the audio track so the sound toggle can
+      // silence and resume it while sharing. The track starts in the
+      // state of the toggle.
+      screenAudioTrackRef.current = screenAudioTrack;
+      if (screenAudioTrack) screenAudioTrack.enabled = shareSoundOnRef.current;
 
       setScreenStream(displayStream);
       screenStreamRef.current = displayStream;
@@ -4972,6 +5218,70 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
   }, []);
 
+  // Phase C2b (1), send one remote control event to the sharer over
+  // the LiveKit data channel. Only the granted controller sends, and
+  // only to the sharer named in the live grant.
+  const sendRemoteControlData = (msg: Record<string, unknown>) => {
+    const room = livekitRoomRef.current;
+    const grant = remoteGrantRef.current;
+    if (!room || !grant || grant.controllerKey !== myKey) return;
+    try {
+      const data = new TextEncoder().encode(JSON.stringify({ kind: 'remote-control', ...msg }));
+      room.localParticipant.publishData(data, { reliable: true, destinationIdentities: [grant.sharerKey] });
+    } catch (e) { /* data channel down: the control just does not move */ }
+  };
+  // Pointer over the shared screen frame: position is relative
+  // (0..1), so it lands in the same place on any screen size.
+  // Moves are throttled to about 30 per second.
+  const handleSharePointer = (e: React.PointerEvent, type: 'move' | 'down') => {
+    if (!amRemoteController || !currentSharerKey) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    if (type === 'move') {
+      const now = Date.now();
+      if (now - remotePointerLastSentRef.current < 33) return;
+      remotePointerLastSentRef.current = now;
+    }
+    sendRemoteControlData({ type: type === 'move' ? 'pointer' : 'click', x, y });
+  };
+  // Keys go to the sharer while controlling, unless the controller is
+  // typing in their own input (chat, notes), which stays theirs.
+  useEffect(() => {
+    if (!amRemoteController) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return;
+      if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter') {
+        sendRemoteControlData({ type: 'key', key: e.key });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amRemoteController]);
+
+  // Phase C2b (5), screen share sound toggle. The audio track is
+  // captured with the share and silenced with enabled=false, so the
+  // toggle works on both the LiveKit and the peer-to-peer path, and
+  // turning it back on resumes the same track. Sound shares only
+  // while the sharer has it on.
+  const setShareSound = (on: boolean) => {
+    setShareSoundOn(on);
+    const track = screenAudioTrackRef.current;
+    if (track) {
+      track.enabled = on;
+      triggerToast(on
+        ? 'Screen sound is on, others can hear the sound of what you share.'
+        : 'Screen sound is off, others hear your voice but not the sound of what you share.');
+    } else if (isScreenSharing) {
+      triggerToast(on
+        ? 'This share has no audio track, stop sharing and start again to share sound.'
+        : 'Screen sound is off for the next share.');
+    }
+  };
+
   const stopScreenShare = () => {
     // Stop via the ref mirror: this is also called from the track's
     // onended handler and the unmount cleanup, both of which close over
@@ -4986,6 +5296,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     screenVideoRef.current = null;
     // Unpublish from LiveKit so remote tiles stop showing the screen.
     livekitScreenTrackRef.current = null;
+    screenAudioTrackRef.current = null;
     unpublishLiveKitTrack(Track.Source.ScreenShare);
     unpublishLiveKitTrack(Track.Source.ScreenShareAudio);
 
@@ -5879,6 +6190,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       void sendAttendanceReport();
       // Phase C1 (34), attendance + speaking time to Supabase (fire-and-forget).
       void flushAttendanceEvents();
+      // Phase C2b (2), the shared notes pad is saved to the library
+      // when the meeting ends, so it lives on next to the other notes.
+      void giinApi.saveNotesToLibrary(meetingId).catch(() => { /* empty pad or setup pending: nothing to save */ });
       // Phase B (9 + 10), transcript save + AI summary (fire-and-forget).
       void saveTranscriptAndSummary();
     } catch (err: any) {
@@ -6653,7 +6967,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (isNewGuest) playSynthesizedSound('admit-request');
   }, [waitingList]);
 
-  const handleCreatePoll = () => {
+  const handleCreatePoll = async () => {
     if (!newPollQuestion.trim()) return;
     const cleanOptions = newPollOptions.filter(o => o.trim() !== '');
     if (cleanOptions.length < 2) return;
@@ -6665,6 +6979,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       : '';
     const correctIndex = correctText ? cleanOptions.indexOf(correctText) : -1;
     if (newPollIsQuiz && correctIndex < 0) return;
+
+    // Phase C2b (8): an anonymous poll runs on the server, never on
+    // the broadcast channel, so no voter identity is ever sent or
+    // stored where a client could read it back. A quiz cannot be
+    // anonymous: it needs to know who got it right.
+    if (newPollIsAnonymous) {
+      if (newPollIsQuiz) {
+        triggerToast('A quiz cannot be anonymous, it needs to know who got it right.');
+        return;
+      }
+      try {
+        const res: any = await giinApi.createServerPoll(meetingId, newPollQuestion.trim(), cleanOptions, true);
+        if (res?.poll) setServerPolls(prev => [...prev.filter(p => p.id !== res.poll.id), res.poll]);
+        setNewPollQuestion('');
+        setNewPollOptions(['', '']);
+        setNewPollIsAnonymous(false);
+        triggerToast('Anonymous poll launched. Nobody sees who answered what, only the totals.');
+      } catch (err: any) {
+        triggerToast(err?.message || 'The anonymous poll could not be launched.');
+      }
+      return;
+    }
 
     const newPoll = {
       id: 'poll-' + Math.random().toString(36).substring(2, 9),
@@ -6743,6 +7079,25 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         event: 'close-poll',
         payload: { pollId }
       });
+    }
+  };
+
+  // Phase C2b (8): vote and close for server-run (anonymous) polls.
+  // The server returns totals only, never who voted.
+  const handleVoteServerPoll = async (pollId: string, optionIndex: number) => {
+    try {
+      const res: any = await giinApi.voteServerPoll(meetingId, pollId, optionIndex);
+      if (res?.poll) setServerPolls(prev => prev.map(p => p.id === pollId ? res.poll : p));
+    } catch (err: any) {
+      triggerToast(err?.message || 'Your vote did not go through.');
+    }
+  };
+  const handleCloseServerPoll = async (pollId: string) => {
+    try {
+      const res: any = await giinApi.closeServerPoll(meetingId, pollId);
+      if (res?.poll) setServerPolls(prev => prev.map(p => p.id === pollId ? res.poll : p));
+    } catch (err: any) {
+      triggerToast(err?.message || 'The poll could not be closed.');
     }
   };
 
@@ -6920,6 +7275,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
     const senderName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Guest';
     const text = chatInput;
+    // Phase C2b (10): a whisper goes only to the tagged person, never
+    // into the shared messages table, so it never reaches the shared
+    // transcript or the library.
+    if (whisperRecipient !== 'everyone') {
+      const whisperText = chatInput;
+      setChatInput('');
+      try {
+        const res: any = await giinApi.sendWhisper(meetingId, whisperRecipient, whisperText);
+        if (res?.whisper) setWhispers(prev => [...prev, res.whisper]);
+      } catch (err: any) {
+        setChatInput(whisperText);
+        triggerToast(err?.message || 'The whisper did not go through.');
+      }
+      return;
+    }
     // Show the message immediately (optimistic render) so the sender sees
     // it in their own history right away. The temporary copy is swapped
     // for the real database row when the reload / realtime echo arrives
@@ -7815,7 +8185,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                         // played twice, centre + panned, slightly out of
                         // sync: the echo / interference in a two-person
                         // call.
-                        muted={isSpatialAudioEnabled}
+                        muted={isSpatialAudioEnabled || isInterpretationMutedFor(peerKey)}
                       />
                     )}
                     {tile.showVideo && peerStreamObj && (
@@ -7897,6 +8267,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                       zIndex: 10
                     }}>
                       <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>{p.name}{tileRoleSuffix(p.role)}</span>
+                    {/* Phase C2b (11), organisation badge on the tile. */}
+                    <OrgBadge org={orgBadges[peerKey]} />
                       {pState.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />}
                       {/* Latency badge removed to run in the background */}
                     </div>
@@ -8542,7 +8914,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                           }
                         }}
                         autoPlay
-                        muted={isSpatialAudioEnabled}
+                        muted={isSpatialAudioEnabled || isInterpretationMutedFor(peerKey)}
                       />
                     )}
                   {tile.showVideo && activeStreamObj ? (
@@ -8683,6 +9055,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                     zIndex: 10
                   }}>
                     <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>{p.name}{tileRoleSuffix(p.role)}</span>
+                    {/* Phase C2b (11), organisation badge on the tile. */}
+                    <OrgBadge org={orgBadges[peerKey]} />
                     {pState.isMuted ? <MicOff size={11} color="#EF4444" /> : <Mic size={11} color="#10B981" />}
                     {(() => {
                       // Signal dot: shown ONLY when this participant's
@@ -8731,9 +9105,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                   background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E'
                 }}>
                   {/* Main Screen Share Frame */}
-                  <div style={{
+                  <div
+                    onPointerMove={(e) => handleSharePointer(e, 'move')}
+                    onPointerDown={(e) => handleSharePointer(e, 'down')}
+                    style={{
                     flex: 1,
                     position: 'relative',
+                    cursor: amRemoteController ? 'crosshair' : undefined,
                     borderRadius: window.innerWidth < 768 ? '8px' : 'var(--radius-lg)',
                     overflow: 'hidden',
                     border: '2px solid var(--color-accent)',
@@ -8783,6 +9161,36 @@ Media encrypted in transit (DTLS-SRTP).`;
                       })()
                     )}
 
+                    {/* Phase C2b (1), remote control: the controller's
+                        pointer and click ripple on the sharer's screen,
+                        plus the permission panel for this share. */}
+                    {remoteCursor && isScreenSharing && (
+                      <div style={{ position: 'absolute', left: `${remoteCursor.x * 100}%`, top: `${remoteCursor.y * 100}%`, transform: 'translate(-2px, -2px)', zIndex: 30, pointerEvents: 'none', display: 'flex', alignItems: 'flex-start', gap: '4px' }}>
+                        <span style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid var(--color-accent)', backgroundColor: 'rgba(250,189,2,0.35)', flexShrink: 0 }} />
+                        <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'white', backgroundColor: 'rgba(7,9,14,0.85)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>{remoteCursor.name}</span>
+                      </div>
+                    )}
+                    {remoteClick && isScreenSharing && (
+                      <span style={{ position: 'absolute', left: `${remoteClick.x * 100}%`, top: `${remoteClick.y * 100}%`, transform: 'translate(-50%, -50%)', width: '28px', height: '28px', borderRadius: '50%', border: '2px solid var(--color-accent)', backgroundColor: 'rgba(250,189,2,0.25)', zIndex: 30, pointerEvents: 'none', animation: 'pop-in 0.25s ease' }} />
+                    )}
+                    {currentSharerKey && (
+                      <div style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 30, width: 'min(320px, calc(100% - 24px))' }}>
+                        <RemoteControlPanel
+                          meetingId={meetingId}
+                          myKey={myKey}
+                          sharerKey={currentSharerKey}
+                          sharerName={currentSharerName}
+                          status={remoteControlStatus}
+                          onRefresh={() => {
+                            giinApi.getRemoteControl(meetingId).then((res: any) => {
+                              if (res?.ok === false) return;
+                              setRemoteControlStatus({ requests: res.requests || [], grant: res.grant || null });
+                              remoteGrantRef.current = res.grant ? { sharerKey: res.grant.sharer_key, controllerKey: res.grant.controller_key } : null;
+                            }).catch(() => { /* the 3 s poll refreshes it */ });
+                          }}
+                        />
+                      </div>
+                    )}
                     {/* Secure Fintech Watermark Overlay, wired to the
                         Branding & Layout watermark settings: hidden when
                         the mode is 'none'; size and opacity follow the
@@ -8992,6 +9400,19 @@ Media encrypted in transit (DTLS-SRTP).`;
           }}>
             <div className="flex-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #1E293B' }}>
               <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)' }}>Meeting Chat</h4>
+              {/* Phase C2b (4), chat auto-translation: each reader picks their own language. */}
+              <select
+                value={chatLang}
+                onChange={(e) => { setChatLang(e.target.value as 'original' | 'en' | 'fr' | 'rw'); setChatTranslationUnavailable(null); }}
+                aria-label="Translate chat messages into"
+                title="Translate chat messages into your language"
+                style={{ height: '28px', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px', cursor: 'pointer', marginLeft: 'auto' }}
+              >
+                <option value="original" style={{ color: 'black' }}>Original language</option>
+                <option value="en" style={{ color: 'black' }}>English</option>
+                <option value="fr" style={{ color: 'black' }}>French</option>
+                <option value="rw" style={{ color: 'black' }}>Kinyarwanda</option>
+              </select>
               <button 
                 onClick={() => setActivePanel('none')}
                 className="panel-close-btn" aria-label="Close panel"
@@ -9002,6 +9423,12 @@ Media encrypted in transit (DTLS-SRTP).`;
             
             {/* Messages Feed */}
             <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {chatTranslationUnavailable && chatLang !== 'original' && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', paddingBottom: '0.5rem', borderBottom: '1px solid #1E293B' }}>
+                  Translation is not set up yet, messages show in the language they were written.
+                  {chatTranslationUnavailable === 'OLLAMA_UNREACHABLE' ? ' The GiinMeet translation server could not be reached.' : ''}
+                </div>
+              )}
               {messages.map((m, idx) => (
                 <div key={idx} style={{
                   alignSelf: m.self ? 'flex-end' : 'flex-start',
@@ -9022,14 +9449,61 @@ Media encrypted in transit (DTLS-SRTP).`;
                     lineHeight: 1.3,
                     opacity: m.pending ? 0.65 : 1
                   }}>
-                    {renderChatText(m.text)}
+                    {chatLang !== 'original' && !m.text.startsWith('📎')
+                    ? <TranslatedChatText messageId={m.id} text={m.text} lang={chatLang} meetingId={meetingId} onUnavailable={(reason) => setChatTranslationUnavailable(reason)} />
+                    : renderChatText(m.text)}
                   </div>
                 </div>
               ))}
+              {/* Phase C2b (10), private whispers: only you and the other person see these. */}
+              {whispers.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid #1E293B', paddingTop: '0.75rem' }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#FBBF24' }}>PRIVATE WHISPERS, ONLY YOU SEE THESE</span>
+                  {whispers.map((w) => (
+                    <div key={w.id} style={{ alignSelf: w.self ? 'flex-end' : 'flex-start', maxWidth: '85%', display: 'flex', flexDirection: 'column', alignItems: w.self ? 'flex-end' : 'flex-start' }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.15rem' }}>
+                        {w.self ? `Whisper to ${w.recipientName}` : `Whisper from ${w.senderName}`} &bull; {new Date(w.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <div style={{ padding: '0.6rem 0.85rem', borderRadius: '8px', backgroundColor: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.4)', color: 'white', fontSize: '0.85rem', lineHeight: 1.3 }}>
+                        <PrivateNote text="Private" /> <span style={{ marginLeft: '0.25rem' }}>{w.text}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Phase C2b (9), voice notes: private playback on your own device only. */}
+              {voiceNotes.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid #1E293B', paddingTop: '0.75rem' }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>VOICE NOTES, TAP TO PLAY ON YOUR DEVICE ONLY</span>
+                  {voiceNotes.map((n) => (
+                    <div key={n.id} style={{ alignSelf: n.self ? 'flex-end' : 'flex-start', maxWidth: '85%', display: 'flex', flexDirection: 'column', alignItems: n.self ? 'flex-end' : 'flex-start' }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.15rem' }}>
+                        {n.senderName} &bull; {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} &bull; {n.durationSeconds}s
+                      </span>
+                      <audio controls preload="none" src={n.url} style={{ maxWidth: '220px', height: '36px' }} />
+                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Plays only on your device, never into the meeting audio.</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Chat Input */}
             <form onSubmit={sendChatMessage} className="meeting-chat-form" style={{ padding: '0.75rem', borderTop: '1px solid #1E293B', display: 'flex', gap: '0.5rem' }}>
+              {/* Phase C2b (10), whisper to one person instead of everyone. */}
+              <select
+                value={whisperRecipient}
+                onChange={(e) => setWhisperRecipient(e.target.value)}
+                disabled={(!canSendChat || (isChatLocked && !isAdmin))}
+                aria-label="Send to everyone or whisper to one person"
+                title="Send to everyone, or whisper privately to one person"
+                style={{ height: '34px', fontSize: '0.75rem', backgroundColor: '#1E293B', color: 'white', border: '1px solid #1E293B', borderRadius: '4px', cursor: 'pointer', maxWidth: '104px', flexShrink: 0 }}
+              >
+                <option value="everyone" style={{ color: 'black' }}>Everyone</option>
+                {participants.filter(p => (p.userId || p.id) !== myKey).map(p => (
+                  <option key={p.userId || p.id} value={p.userId || p.id} style={{ color: 'black' }}>Whisper: {p.name}</option>
+                ))}
+              </select>
               <label
                 title="Share a file (up to 25 MB; signed-in users only)"
                 style={{
@@ -9051,7 +9525,7 @@ Media encrypted in transit (DTLS-SRTP).`;
               </label>
               <input 
                 type="text" 
-                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !canSendChat ? "Sign in to send messages, guests can read chat" : "Send message to everyone..."} 
+                placeholder={isChatLocked && !isAdmin ? "Chat is disabled by the host." : !canSendChat ? "Sign in to send messages, guests can read chat" : whisperRecipient !== 'everyone' ? `Whisper privately to ${(participants.find(p => (p.userId || p.id) === whisperRecipient)?.name) || 'that person'}...` : "Send message to everyone..."} 
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 disabled={(!canSendChat || (isChatLocked && !isAdmin))}
@@ -9085,6 +9559,8 @@ Media encrypted in transit (DTLS-SRTP).`;
               >
                 <SendHorizontal size={16} />
               </button>
+              {/* Phase C2b (9), hold to record a voice note. */}
+              <VoiceNoteButton meetingId={meetingId} disabled={(!canSendChat || (isChatLocked && !isAdmin))} onSent={(note) => setVoiceNotes(prev => [...prev, note])} />
             </form>
           </div>
         )}
@@ -9111,6 +9587,38 @@ Media encrypted in transit (DTLS-SRTP).`;
             </div>
 
             <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Phase C2b (6), breakout self-select: anyone in a live
+                  breakout session picks their own room here. The host
+                  can still move people, and a refresh lands each person
+                  back in the room they chose. */}
+              {breakoutTimeRemaining !== null && (
+                <div style={{ padding: '0.75rem', border: '1px solid var(--color-accent)', borderRadius: '8px', backgroundColor: 'rgba(250, 189, 2, 0.05)' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white' }}>Breakout rooms, choose your room</div>
+                  <p style={{ margin: '0.3rem 0 0.6rem', fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                    You are in {breakoutRoom ? `Room ${breakoutRoom}` : 'the main room'}. Pick a room to move yourself.
+                  </p>
+                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => handleSelfSelectRoom(null)}
+                      style={{ padding: '4px 8px', fontSize: '0.75rem', borderRadius: '4px', border: 'none', backgroundColor: breakoutRoom === null ? 'var(--color-accent)' : 'rgba(255,255,255,0.1)', color: breakoutRoom === null ? 'black' : 'white', cursor: 'pointer', fontWeight: 600 }}
+                    >
+                      Main room
+                    </button>
+                    {Array.from({ length: breakoutRoomsCount }).map((_, idx) => {
+                      const rNum = idx + 1;
+                      return (
+                        <button
+                          key={rNum}
+                          onClick={() => handleSelfSelectRoom(rNum)}
+                          style={{ padding: '4px 8px', fontSize: '0.75rem', borderRadius: '4px', border: 'none', backgroundColor: breakoutRoom === rNum ? 'var(--color-accent)' : 'rgba(255,255,255,0.1)', color: breakoutRoom === rNum ? 'black' : 'white', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          Room {rNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {/* Speaker Queue (Handraises) */}
               {handRaises.length > 0 && (
                 <div style={{
@@ -9209,7 +9717,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                     Y
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>You</div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', minWidth: 0 }}>You<OrgBadge org={orgBadges[myKey] || (myParticipantRowId ? orgBadges[myParticipantRowId] : undefined)} /></div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{isAdmin ? 'Host' : isCoHost ? 'Co-host' : isModerator ? 'Moderator' : 'Guest'}</div>
                   </div>
                 </div>
@@ -9226,7 +9734,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       {p.avatar}
                     </div>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', minWidth: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span><OrgBadge org={orgBadges[p.userId || p.id]} /></div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{displayRoleLabel(p.role)}</div>
                     </div>
                   </div>
@@ -9960,6 +10468,19 @@ Media encrypted in transit (DTLS-SRTP).`;
                     {newPollIsQuiz && newPollCorrectOption === null && (
                       <span style={{ fontSize: '0.75rem', color: '#F59E0B' }}>Pick the correct answer above before launching.</span>
                     )}
+                    {/* Phase C2b (8), anonymous polls run on the server. */}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'white', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={newPollIsAnonymous}
+                        disabled={newPollIsQuiz}
+                        onChange={(e) => setNewPollIsAnonymous(e.target.checked)}
+                      />
+                      Anonymous, nobody sees who answered what, only the totals
+                    </label>
+                    {newPollIsQuiz && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>A quiz cannot be anonymous, it needs to know who got it right.</span>
+                    )}
                     <button
                       onClick={handleCreatePoll}
                       className="premium-btn premium-btn-primary"
@@ -9974,7 +10495,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 {/* Active Polls List */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>ACTIVE POLLS</span>
-                  {polls.length === 0 ? (
+                  {polls.length === 0 && serverPolls.length === 0 ? (
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', display: 'block', padding: '1rem 0' }}>No active polls yet.</span>
                   ) : (
                     polls.map(p => {
@@ -10064,6 +10585,77 @@ Media encrypted in transit (DTLS-SRTP).`;
                     })
                   )}
                 </div>
+                {/* Phase C2b (8), server-run polls. Anonymous polls show
+                    totals only, never who voted. */}
+                {serverPolls.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>SERVER POLLS</span>
+                    {serverPolls.map((p: any) => {
+                      const totalVotes = (p.votes || []).reduce((a: number, b: number) => a + b, 0);
+                      const showResults = (p.hasVoted !== null && p.hasVoted !== undefined) || p.isClosed;
+                      return (
+                        <div key={p.id} style={{ padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white', flex: 1, minWidth: 0 }}>{p.question}</span>
+                            {p.isAnonymous && (
+                              <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#FBBF24', border: '1px solid #FBBF24', borderRadius: '4px', padding: '0.1rem 0.35rem', whiteSpace: 'nowrap' }}>ANONYMOUS</span>
+                            )}
+                            {p.isClosed && (
+                              <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '0.1rem 0.35rem', whiteSpace: 'nowrap' }}>CLOSED</span>
+                            )}
+                          </div>
+                          {p.isAnonymous && (
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Nobody sees who answered what, only the totals.</span>
+                          )}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            {p.options.map((opt: string, idx: number) => {
+                              const voteCount = p.votes[idx] || 0;
+                              const percent = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
+                              const isMyVote = p.hasVoted === idx;
+                              if (showResults) {
+                                return (
+                                  <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <div className="flex-between" style={{ fontSize: '0.8rem' }}>
+                                      <span style={{ color: isMyVote ? 'var(--color-accent)' : 'white' }}>
+                                        {opt} {isMyVote && '✓'}
+                                      </span>
+                                      <span style={{ color: 'var(--text-muted)' }}>{voteCount} ({percent}%)</span>
+                                    </div>
+                                    <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                                      <div style={{ width: `${percent}%`, height: '100%', backgroundColor: isMyVote ? 'var(--color-accent)' : 'var(--color-primary)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <button
+                                  key={idx}
+                                  onClick={() => handleVoteServerPoll(p.id, idx)}
+                                  disabled={p.isClosed}
+                                  className="premium-btn premium-btn-secondary"
+                                  style={{ width: '100%', justifyContent: 'flex-start', fontSize: '0.8rem', padding: '0.5rem 0.75rem' }}
+                                >
+                                  {opt}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="flex-between" style={{ alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total votes: {totalVotes}</span>
+                            {(isAdmin || p.createdBy === myKey) && !p.isClosed && (
+                              <button
+                                onClick={() => handleCloseServerPoll(p.id)}
+                                style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                              >
+                                Close poll
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -10845,13 +11437,13 @@ Media encrypted in transit (DTLS-SRTP).`;
             {/* Tab Selector */}
             <div style={{ display: 'flex', borderBottom: '1px solid #1E293B' }}>
               <button 
-                onClick={() => setIsAgendaTabActive(false)}
+                onClick={() => { setIsAgendaTabActive(false); setShowLiveTools(false); }}
                 style={{
                   flex: 1,
                   padding: '1rem',
-                  background: !isAgendaTabActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  background: (!isAgendaTabActive && !showLiveTools) ? 'rgba(255,255,255,0.05)' : 'none',
                   border: 'none',
-                  color: !isAgendaTabActive ? 'var(--color-accent)' : 'white',
+                  color: (!isAgendaTabActive && !showLiveTools) ? 'var(--color-accent)' : 'white',
                   cursor: 'pointer',
                   fontWeight: 600,
                   fontSize: '0.85rem'
@@ -10860,13 +11452,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                 📝 Notes
               </button>
               <button 
-                onClick={() => setIsAgendaTabActive(true)}
+                onClick={() => { setIsAgendaTabActive(true); setShowLiveTools(false); }}
                 style={{
                   flex: 1,
                   padding: '1rem',
-                  background: isAgendaTabActive ? 'rgba(255,255,255,0.05)' : 'none',
+                  background: (isAgendaTabActive && !showLiveTools) ? 'rgba(255,255,255,0.05)' : 'none',
                   border: 'none',
-                  color: isAgendaTabActive ? 'var(--color-accent)' : 'white',
+                  color: (isAgendaTabActive && !showLiveTools) ? 'var(--color-accent)' : 'white',
                   cursor: 'pointer',
                   fontWeight: 600,
                   fontSize: '0.85rem'
@@ -10874,10 +11466,65 @@ Media encrypted in transit (DTLS-SRTP).`;
               >
                 📋 Agenda
               </button>
+              {/* Phase C2b, live tools: shared notes pad, document viewer, interpretation. */}
+              <button 
+                onClick={() => setShowLiveTools(true)}
+                style={{
+                  flex: 1,
+                  padding: '1rem',
+                  background: showLiveTools ? 'rgba(255,255,255,0.05)' : 'none',
+                  border: 'none',
+                  color: showLiveTools ? 'var(--color-accent)' : 'white',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.85rem'
+                }}
+              >
+                🔴 Live
+              </button>
             </div>
 
             {/* Content */}
-            {!isAgendaTabActive ? (
+            {showLiveTools ? (
+              <div className="scroll-refined" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '0.75rem', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                  {([['notes', 'Notes pad'], ['docs', 'Document'], ['interpret', 'Interpret']] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => setLiveToolsTab(key)}
+                      style={{
+                        padding: '4px 10px', fontSize: '0.75rem', borderRadius: '20px', border: 'none',
+                        backgroundColor: liveToolsTab === key ? 'var(--color-accent)' : 'rgba(255,255,255,0.1)',
+                        color: liveToolsTab === key ? 'black' : 'white', cursor: 'pointer', fontWeight: 700,
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {liveToolsTab === 'notes' && <LiveNotesPad meetingId={meetingId} myKey={myKey} />}
+                {liveToolsTab === 'docs' && <DocumentViewerPanel meetingId={meetingId} isAdmin={isAdmin} canTurnExtra={amRemoteController} />}
+                {liveToolsTab === 'interpret' && (
+                  <InterpretationPanel
+                    meetingId={meetingId}
+                    isAdmin={isAdmin}
+                    myKey={myKey}
+                    participants={[{ key: myKey, name: currentUser?.name || 'You' }, ...participants.map(p => ({ key: p.userId || p.id, name: p.name }))]}
+                    state={interpretation}
+                    listenMode={listenMode}
+                    onListenModeChange={changeListenMode}
+                    onChanged={() => {
+                      giinApi.getInterpretation(meetingId).then((res: any) => {
+                        if (res?.ok === false) return;
+                        setInterpretation(res?.active
+                          ? { active: true, interpreterKey: res.interpreterKey, interpreterName: res.interpreterName, interpreterLang: res.interpreterLang }
+                          : { active: false });
+                      }).catch(() => { /* the 5 s poll refreshes it */ });
+                    }}
+                  />
+                )}
+              </div>
+            ) : !isAgendaTabActive ? (
               <WorkspacePanel 
                 meetingId={meetingId}
                 workspaceUsers={participants.map(p => ({ name: p.name, role: p.role }))}
@@ -11078,6 +11725,31 @@ Media encrypted in transit (DTLS-SRTP).`;
           >
             <Monitor size={18} />
             <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{screenShareStarting ? 'Starting…' : isScreenSharing ? 'Stop Share' : 'Share'}</span>
+          </button>
+
+          {/* Phase C2b (5), screen share sound, one clear toggle.
+              Sound shares only while the sharer has it on. */}
+          <button
+            onClick={() => setShareSound(!shareSoundOn)}
+            style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '14px',
+              backgroundColor: shareSoundOn ? 'var(--color-accent)' : 'rgba(255, 255, 255, 0.1)',
+              border: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              color: shareSoundOn ? 'black' : 'white',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            title={shareSoundOn ? 'Screen sound is on, others hear the sound of what you share' : 'Screen sound is off, others hear your voice only'}
+          >
+            {shareSoundOn ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{shareSoundOn ? 'Sound On' : 'Sound Off'}</span>
           </button>
 
           {/* Speakers, one-tap feedback breaker (Fix Round 8 #4) */}

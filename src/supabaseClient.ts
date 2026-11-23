@@ -1820,6 +1820,150 @@ export const giinApi = {
     return data;
   },
 
+  // Phase C2b, one small client for every C2b API route. Same dual
+  // credential as the rest of the app (signed-in session token, or
+  // the admitted guest's participant row id). GETs return the parsed
+  // body even on a NOT_CONFIGURED answer, so the UI can say plainly
+  // that the Phase C2b database setup is still needed; POSTs throw
+  // with the server's honest message.
+  c2bFetch: async (path: string, meetingId: string, init?: { method?: string; body?: Record<string, unknown>; timeoutMs?: number }) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    let participantRowId: string | null = null;
+    try { participantRowId = localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { /* storage unavailable */ }
+    const method = init?.method || 'GET';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), init?.timeoutMs || 15000);
+    try {
+      let url = path;
+      let fetchInit: RequestInit = { method, headers: { 'Content-Type': 'application/json' }, signal: controller.signal };
+      const creds: Record<string, unknown> = { accessToken: session?.access_token || undefined, participantRowId: participantRowId || undefined };
+      if (method === 'GET') {
+        const qs = new URLSearchParams({ meetingId });
+        if (creds.accessToken) qs.set('accessToken', String(creds.accessToken));
+        if (creds.participantRowId) qs.set('participantRowId', String(creds.participantRowId));
+        url = `${path}?${qs.toString()}`;
+      } else {
+        fetchInit.body = JSON.stringify({ meetingId, ...creds, ...(init?.body || {}) });
+      }
+      const res = await fetch(url, fetchInit);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error('The room did not answer in time, check your connection and try again.');
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
+  // Phase C2b (6), read the live breakout session (refresh restore).
+  getBreakoutState: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/breakout', meetingId);
+  },
+
+  // Phase C2b (1), remote control grants.
+  getRemoteControl: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/remote-control', meetingId);
+  },
+  remoteControl: async (meetingId: string, action: 'request' | 'grant' | 'deny' | 'revoke', opts?: { sharerKey?: string; controllerKey?: string }) => {
+    const data: any = await giinApi.c2bFetch('/api/meetings/remote-control', meetingId, { method: 'POST', body: { action, ...(opts || {}) } });
+    if (!data.ok) throw new Error(data.message || 'Remote control did not answer.');
+    return data;
+  },
+
+  // Phase C2b (2), live notes pad.
+  getNotesPad: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/notes-pad', meetingId);
+  },
+  saveNotesPad: async (meetingId: string, bodyText: string) => {
+    return giinApi.c2bFetch('/api/meetings/notes-pad', meetingId, { method: 'POST', body: { body: bodyText } });
+  },
+  saveNotesToLibrary: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/notes-pad', meetingId, { method: 'POST', body: { action: 'save-to-library' } });
+  },
+
+  // Phase C2b (3), interpretation channel.
+  getInterpretation: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/interpretation', meetingId);
+  },
+  setInterpretation: async (meetingId: string, interpreterKey: string, interpreterLang: string) => {
+    const data: any = await giinApi.c2bFetch('/api/meetings/interpretation', meetingId, { method: 'POST', body: { action: 'set', interpreterKey, interpreterLang } });
+    if (!data.ok) throw new Error(data.message || 'Interpretation did not answer.');
+    return data;
+  },
+  stopInterpretation: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/interpretation', meetingId, { method: 'POST', body: { action: 'stop' } });
+  },
+
+  // Phase C2b (8), server-run polls (anonymous polls live here).
+  getServerPolls: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/polls', meetingId);
+  },
+  createServerPoll: async (meetingId: string, question: string, options: string[], isAnonymous: boolean) => {
+    const data: any = await giinApi.c2bFetch('/api/meetings/polls', meetingId, { method: 'POST', body: { action: 'create', question, options, isAnonymous } });
+    if (!data.ok) throw new Error(data.message || 'The poll could not be created.');
+    return data;
+  },
+  voteServerPoll: async (meetingId: string, pollId: string, optionIndex: number) => {
+    const data: any = await giinApi.c2bFetch('/api/meetings/polls', meetingId, { method: 'POST', body: { action: 'vote', pollId, optionIndex } });
+    if (!data.ok) throw new Error(data.message || 'Your vote did not go through.');
+    return data;
+  },
+  closeServerPoll: async (meetingId: string, pollId: string) => {
+    return giinApi.c2bFetch('/api/meetings/polls', meetingId, { method: 'POST', body: { action: 'close', pollId } });
+  },
+
+  // Phase C2b (9), voice notes in chat.
+  getVoiceNotes: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/voice-notes', meetingId);
+  },
+  requestVoiceNoteUpload: async (meetingId: string, fileSize: number, durationSeconds: number) => {
+    const data: any = await giinApi.c2bFetch('/api/meetings/voice-notes', meetingId, { method: 'POST', body: { action: 'request-upload', fileSize, durationSeconds } });
+    if (!data.ok) throw new Error(data.message || 'Voice notes are not set up yet.');
+    return data;
+  },
+  confirmVoiceNote: async (meetingId: string, storagePath: string, durationSeconds: number) => {
+    const data: any = await giinApi.c2bFetch('/api/meetings/voice-notes', meetingId, { method: 'POST', body: { action: 'confirm', storagePath, durationSeconds } });
+    if (!data.ok) throw new Error(data.message || 'The voice note could not be saved.');
+    return data;
+  },
+
+  // Phase C2b (10), private whispers.
+  getWhispers: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/whispers', meetingId);
+  },
+  sendWhisper: async (meetingId: string, recipientKey: string, text: string) => {
+    const data: any = await giinApi.c2bFetch('/api/meetings/whispers', meetingId, { method: 'POST', body: { recipientKey, text } });
+    if (!data.ok) throw new Error(data.message || 'The whisper did not go through.');
+    return data;
+  },
+
+  // Phase C2b (7), document viewer.
+  getDocViewer: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/doc-viewer', meetingId);
+  },
+  openDocViewer: async (meetingId: string, storagePath: string, title: string, kind: 'pdf' | 'image', pageCount: number) => {
+    const data: any = await giinApi.c2bFetch('/api/meetings/doc-viewer', meetingId, { method: 'POST', body: { action: 'open', storagePath, title, kind, pageCount } });
+    if (!data.ok) throw new Error(data.message || 'The document could not be opened.');
+    return data;
+  },
+  setDocPage: async (meetingId: string, page: number) => {
+    const data: any = await giinApi.c2bFetch('/api/meetings/doc-viewer', meetingId, { method: 'POST', body: { action: 'page', page } });
+    if (!data.ok) throw new Error(data.message || 'The page could not be turned.');
+    return data;
+  },
+  setDocViewerAllowTurn: async (meetingId: string, allowed: boolean) => {
+    return giinApi.c2bFetch('/api/meetings/doc-viewer', meetingId, { method: 'POST', body: { action: 'allow-turn', allowed } });
+  },
+  closeDocViewer: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/doc-viewer', meetingId, { method: 'POST', body: { action: 'close' } });
+  },
+
+  // Phase C2b (11), organisation badges for the room.
+  getOrganisations: async (meetingId: string) => {
+    return giinApi.c2bFetch('/api/meetings/organisations', meetingId);
+  },
+
   // Admit or decline a waiting-room participant, host-verified
   // server-side (Fix Round 7, #4). The route flips the row and
   // broadcasts the decision; the old direct client-side row update is
@@ -2183,7 +2327,7 @@ export const giinApi = {
   // Add a participant to the waiting room. Always writes the real
   // meeting_participants row, guests included (the table allows public
   // inserts), and throws when the write fails, so a join is never faked.
-  joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant', status?: 'Waiting' | 'Admitted' | 'Declined') => {
+  joinMeetingRoom: async (meetingId: string, name: string, userId?: string, role: string = 'Participant', status?: 'Waiting' | 'Admitted' | 'Declined', organisation?: string) => {
     const finalStatus = status || (role === 'Admin' ? 'Admitted' : 'Waiting');
 
     // Round 9 (9A): rejoin reactivates the existing row instead of
@@ -2203,7 +2347,7 @@ export const giinApi = {
       const res = await fetch('/api/meetings/rejoin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meetingId, participantRowId: rowId, userId, accessToken, name, role, status: finalStatus }),
+        body: JSON.stringify({ meetingId, participantRowId: rowId, userId, accessToken, name, role, status: finalStatus, organisation: organisation || undefined }),
       });
       const rej: any = await res.json().catch(() => ({}));
       if (res.status === 403 && rej?.error === 'REMOVED') {
@@ -2218,18 +2362,36 @@ export const giinApi = {
       console.warn('[Supabase Client] Rejoin check failed, inserting a fresh participant row:', e?.message);
     }
 
-    const { data, error } = await supabase
+    // Phase C2b (11), organisation badge text. A missing column
+    // (Phase C2b SQL not run yet) retries without it, so joining
+    // never fails over the badge.
+    let insertRow: Record<string, unknown> = {
+      meeting_id: meetingId,
+      user_id: userId || null,
+      name: name,
+      status: finalStatus,
+      role: role,
+      ...(organisation ? { organisation } : {}),
+    };
+    let { data, error } = await supabase
       .from('meeting_participants')
-      .insert([{
-        meeting_id: meetingId,
-        user_id: userId || null,
-        name: name,
-        status: finalStatus,
-        role: role
-      }])
+      .insert([insertRow])
       .select()
       .maybeSingle();
 
+    if (error && organisation) {
+      // The organisation column is not set up yet (Phase C2b SQL not
+      // run): retry the join without it instead of failing the join.
+      const retry = await supabase
+        .from('meeting_participants')
+        .insert([{ meeting_id: meetingId, user_id: userId || null, name: name, status: finalStatus, role: role }])
+        .select()
+        .maybeSingle();
+      if (!retry.error && retry.data) {
+        data = retry.data;
+        error = null as any;
+      }
+    }
     if (error) {
       throw new Error(`Could not join the meeting: ${error.message}`);
     }
