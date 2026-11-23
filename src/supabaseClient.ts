@@ -1262,6 +1262,48 @@ export const giinApi = {
     }
   },
 
+  // Phase C1 (24) — meeting templates. Server-verified, owner-only.
+  // Never throws: callers show the honest reason instead.
+  getTemplates: async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch(`/api/templates?accessToken=${encodeURIComponent(session.access_token)}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  saveTemplate: async (template: { name: string; title: string; durationMinutes: number; requireWaitingRoom: boolean; passcode?: string | null; attendeeEmails?: string[] }) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...template, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  deleteTemplate: async (id: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch(`/api/templates?accessToken=${encodeURIComponent(session.access_token)}&id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
   // Transfer the host role, server-verified (Fix Round 6 / Phase 6).
   // POST /api/meetings/transfer-host checks the caller is the current
   // host and the new host is a signed-in participant in the meeting.

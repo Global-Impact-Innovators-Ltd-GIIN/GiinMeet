@@ -3,6 +3,7 @@ import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, Alert
 import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, getSystemSettings, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
 import { CalendarSyncPanel } from './CalendarSyncPanel';
+import { TemplatesPanel, type MeetingTemplate } from './TemplatesPanel';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
 interface Meeting {
@@ -455,6 +456,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return { ...meeting, passcode: passcode ?? null };
   };
 
+  // Phase C1 (24) — templates: one tap starts the saved setup, or it
+  // opens pre-filled in the schedule form.
+  const handleStartTemplate = (t: MeetingTemplate) => {
+    onStartMeeting(t.title, undefined, true, undefined, t.require_waiting_room, t.passcode ?? null);
+  };
+  const handleScheduleTemplate = (t: MeetingTemplate) => {
+    setMeetingTitle(t.title);
+    const match = durationOptions.find((o) => parseDurationMinutes(o.value) === t.duration_minutes);
+    if (match) setTemplateDuration(match.value);
+    setRequireWaitingRoom(t.require_waiting_room);
+    setSchedulePasscodeEnabled(!!t.passcode);
+    setSchedulePasscode(t.passcode || '');
+    setShowScheduleModal(true);
+  };
+
   const handleScheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!meetingTitle || !meetingTime) return;
@@ -648,6 +664,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Phase C1 (23) — calendar sync: one grouped section, two provider rows. */}
       <CalendarSyncPanel meetings={meetingHistory} />
+
+      {/* Phase C1 (24) — meeting templates: one grouped section. */}
+      <TemplatesPanel
+        currentTitle={meetingTitle}
+        currentDurationMinutes={parseDurationMinutes(templateDuration) || 60}
+        currentRequireWaitingRoom={requireWaitingRoom}
+        currentPasscode={schedulePasscodeEnabled ? schedulePasscode : null}
+        onStartTemplate={handleStartTemplate}
+        onScheduleTemplate={handleScheduleTemplate}
+      />
 
       {/* Quick Action Grid */}
       <div style={{
