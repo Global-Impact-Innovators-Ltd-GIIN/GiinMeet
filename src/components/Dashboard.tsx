@@ -1106,17 +1106,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             {summary.decisions?.length > 0 && (
                               <div>
                                 <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>Decisions</span>
-                                <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.2rem', fontSize: '0.8rem' }}>
-                                  {summary.decisions.map((d: string, i: number) => (<li key={i}>{d}</li>))}
-                                </ul>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.25rem' }}>
+                                  {summary.decisions.map((d: string, i: number) => (
+                                    <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.8rem', lineHeight: 1.45 }}>
+                                      <span style={{ flexShrink: 0, width: '16px', height: '16px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', color: 'black', fontSize: '0.6rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '1px' }}>✓</span>
+                                      <span>{d}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             )}
                             {summary.actionItems?.length > 0 && (
                               <div>
                                 <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>Action items</span>
-                                <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.2rem', fontSize: '0.8rem' }}>
-                                  {summary.actionItems.map((a: any, i: number) => (<li key={i}>{a.text}{a.owner ? ` — ${a.owner}` : ''}</li>))}
-                                </ul>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.25rem' }}>
+                                  {summary.actionItems.map((a: any, i: number) => (
+                                    <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', justifyContent: 'space-between', fontSize: '0.8rem', lineHeight: 1.45 }}>
+                                      <span style={{ flex: '1 1 auto', minWidth: 0 }}>{a.text}</span>
+                                      {a.owner && a.owner !== 'Unassigned' && (
+                                        <span style={{ flexShrink: 0, backgroundColor: 'rgba(250,189,2,0.15)', border: '1px solid var(--color-accent)', color: 'var(--color-accent)', fontSize: '0.65rem', fontWeight: 700, padding: '1px 7px', borderRadius: '20px', whiteSpace: 'nowrap' }}>{a.owner}</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -1135,7 +1147,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         ) : (
                           <div className="scroll-refined" style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             {lines.map((l: any, i: number) => (
-                              <div key={i} style={{ fontSize: '0.8rem', lineHeight: 1.4 }}>
+                              <div key={i} style={{ fontSize: '0.8rem', lineHeight: 1.4, borderLeft: '2px solid var(--color-accent)', paddingLeft: '0.6rem' }}>
                                 <span style={{ fontWeight: 700, color: 'var(--color-accent)' }}>{l.name}</span>{' '}
                                 <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{l.time}</span>
                                 <div>{l.text}</div>

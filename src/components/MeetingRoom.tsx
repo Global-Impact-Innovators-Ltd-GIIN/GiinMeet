@@ -6896,9 +6896,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         }}>
           <span>Breakout Room {breakoutRoom}</span>
           {breakoutTimeRemaining !== null && (
-            <span style={{ fontFamily: 'monospace', backgroundColor: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: '4px' }}>
+            <span style={{ fontFamily: 'monospace', backgroundColor: breakoutTimeRemaining !== null && breakoutTimeRemaining <= 60 ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.2)', color: breakoutTimeRemaining !== null && breakoutTimeRemaining <= 60 ? '#FCA5A5' : 'white', padding: '2px 6px', borderRadius: '4px' }}>
               {Math.floor(breakoutTimeRemaining / 60)}:{(breakoutTimeRemaining % 60).toString().padStart(2, '0')}
             </span>
+          )}
+          {breakoutTimeRemaining !== null && breakoutTimeRemaining <= 60 && (
+            <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>Ending soon</span>
           )}
         </div>
       )}
@@ -7192,7 +7195,8 @@ Media encrypted in transit (DTLS-SRTP).`;
             backgroundColor: 'rgba(7, 9, 14, 0.85)',
             backdropFilter: 'blur(8px)',
             border: '1px solid var(--border-color)',
-            borderRadius: '8px',
+            borderTop: '2px solid var(--color-accent)',
+            borderRadius: '10px',
             padding: '0.6rem 1.25rem',
             zIndex: 100,
             maxWidth: '80%',
@@ -7772,6 +7776,13 @@ Media encrypted in transit (DTLS-SRTP).`;
                 >
                   <Pin size={13} />
                 </button>
+                    {/* Phase B design pass (14): a gold SPOTLIGHT chip so
+                        everyone sees at a glance who the host spotlighted. */}
+                    {computedSpotlightKey === 'local' && (layoutMode === 'speaker' || layoutMode === 'side') && (
+                      <span style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: 'var(--color-accent)', color: 'black', fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.05em', padding: '3px 9px', borderRadius: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
+                        <Star size={11} /> SPOTLIGHT
+                      </span>
+                    )}
                 {isVideoOn && stream && localCameraLive ? (
                   <>
                     <video 
@@ -7976,6 +7987,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                     >
                       <Pin size={13} />
                     </button>
+                    {/* Phase B design pass (14): gold SPOTLIGHT chip. */}
+                    {computedSpotlightKey === peerKey && (layoutMode === 'speaker' || layoutMode === 'side') && (
+                      <span style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: 'var(--color-accent)', color: 'black', fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.05em', padding: '3px 9px', borderRadius: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
+                        <Star size={11} /> SPOTLIGHT
+                      </span>
+                    )}
                     {/* Phase B (14): host spotlight — the host spotlights
                         one speaker for EVERYONE; a participant's own pin
                         (above) only changes what they watch. */}
@@ -8642,7 +8659,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                       <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                         <button
                           onClick={callOnNext}
-                          style={{ border: 'none', background: 'var(--color-accent)', color: 'black', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 700, padding: '3px 8px', borderRadius: '4px' }}
+                          style={{ border: 'none', background: 'var(--color-accent)', color: 'black', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 700, padding: '3px 8px', borderRadius: '4px', boxShadow: '0 2px 8px rgba(250,189,2,0.35)' }}
                         >
                           Call on next
                         </button>
@@ -8670,6 +8687,9 @@ Media encrypted in transit (DTLS-SRTP).`;
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
                             <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-accent)', minWidth: '16px' }}>
                               #{index + 1}
+                            </span>
+                            <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'rgba(250,189,2,0.15)', border: '1px solid var(--color-accent)', color: 'var(--color-accent)', fontSize: '0.6rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              {getParticipantInitials(hr.name)}
                             </span>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: '0.85rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -9236,9 +9256,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                     <span style={{ fontSize: '0.8rem', color: 'var(--color-accent)', fontWeight: 600 }}>
                       Breakout Rooms Active
                     </span>
-                    <span style={{ fontSize: '1.25rem', fontWeight: 700, color: 'white', fontFamily: 'monospace' }}>
+                    <span style={{ fontSize: '1.25rem', fontWeight: 700, color: breakoutTimeRemaining !== null && breakoutTimeRemaining <= 60 ? '#F87171' : 'white', fontFamily: 'monospace' }}>
                       {Math.floor(breakoutTimeRemaining / 60)}:{(breakoutTimeRemaining % 60).toString().padStart(2, '0')}
                     </span>
+                    {breakoutTimeRemaining !== null && breakoutTimeRemaining <= 60 && (
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#F87171' }}>Ending soon — wrap up</span>
+                    )}
                     
                     {/* Host Join Room Selector */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
@@ -9852,8 +9875,8 @@ Media encrypted in transit (DTLS-SRTP).`;
                         fontSize: '0.75rem',
                         height: '40px',
                         border: bgFxMode === f.id ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
-                        backgroundColor: bgFxMode === f.id ? 'rgba(250,189,2,0.1)' : 'rgba(255,255,255,0.02)',
-                        color: bgFxMode === f.id ? 'var(--color-accent)' : 'white'
+                        background: bgFxMode === f.id ? (f.id === 'giin' ? 'linear-gradient(135deg, #0B1E3A, #1D4ED8)' : 'rgba(250,189,2,0.1)') : 'rgba(255,255,255,0.02)',
+                        color: bgFxMode === f.id ? (f.id === 'giin' ? 'white' : 'var(--color-accent)') : 'white'
                       }}
                     >
                       {f.label}
@@ -10034,18 +10057,30 @@ Media encrypted in transit (DTLS-SRTP).`;
                         {summaryDecisions.length > 0 && (
                           <div style={{ marginTop: '0.5rem' }}>
                             <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>✅ Decisions</div>
-                            <ul style={{ paddingLeft: '1.2rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                              {summaryDecisions.map((d, i) => (<li key={i}>{d}</li>))}
-                            </ul>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                              {summaryDecisions.map((d, i) => (
+                                <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.75rem', color: 'white', lineHeight: 1.45 }}>
+                                  <span style={{ flexShrink: 0, width: '16px', height: '16px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', color: 'black', fontSize: '0.6rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '1px' }}>✓</span>
+                                  <span>{d}</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
 
                         {summaryActionItems.length > 0 && (
                           <div style={{ marginTop: '0.5rem' }}>
                             <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📌 Action items</div>
-                            <ul style={{ paddingLeft: '1.2rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                              {summaryActionItems.map((a, i) => (<li key={i}>{a.text}{a.owner ? ` — ${a.owner}` : ''}</li>))}
-                            </ul>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                              {summaryActionItems.map((a, i) => (
+                                <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', justifyContent: 'space-between', fontSize: '0.75rem', color: 'white', lineHeight: 1.45 }}>
+                                  <span style={{ flex: '1 1 auto', minWidth: 0 }}>{a.text}</span>
+                                  {a.owner && a.owner !== 'Unassigned' && (
+                                    <span style={{ flexShrink: 0, backgroundColor: 'rgba(250,189,2,0.15)', border: '1px solid var(--color-accent)', color: 'var(--color-accent)', fontSize: '0.65rem', fontWeight: 700, padding: '1px 7px', borderRadius: '20px', whiteSpace: 'nowrap' }}>{a.owner}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </div>
