@@ -79,11 +79,18 @@ steps below in order. The order matters — **never revoke the old key first**.
 
 ### 6. Check for any other copy of the old key
 
-The repo is clean (see above), and Vercel is the only place the app reads the
-key from. If you ever pasted the old key anywhere else — a local `.env.local`
-on your laptop, another dashboard, a script, a note — update that place to the
-new key or delete the copy. If you find a copy somewhere you cannot update,
-revoking the old key in step 5 already neutralises it.
+CORRECTION (security audit 2026-11-23): the repo was NOT fully clean.
+The file `giinmeet_pg_cron_reminders.sql` contained a live CRON_SECRET
+value, committed in git. That is a separate secret from the service-role
+key: it authorises the email-outbox endpoint, and anyone with the repo
+could trigger reminder sends with it. The audit replaced the value in
+the file with a placeholder, but the value is still in git history, so
+rotate the CRON_SECRET too (section below). Vercel is the only place
+the app reads the service-role key from. If you ever pasted the old key
+anywhere else — a local `.env.local` on your laptop, another dashboard,
+a script, a note — update that place to the new key or delete the copy.
+If you find a copy somewhere you cannot update, revoking the old key in
+step 5 already neutralises it.
 
 ## Rules for the future
 
@@ -92,3 +99,47 @@ revoking the old key in step 5 already neutralises it.
 - **Never commit a `.env` file.** They are gitignored for exactly this reason.
 - If the key is ever shared again, repeat these steps — create new, update
   Vercel, redeploy, verify, then revoke old.
+
+
+## CRON_SECRET rotation (also do this — audit 2026-11-23)
+
+Why: the old CRON_SECRET was printed in `giinmeet_pg_cron_reminders.sql`,
+which is committed in git. Anyone with the repo could call
+`GET /api/cron/due-emails` with it and trigger the email outbox. The
+damage is small (reminders are de-duplicated and only go to meeting
+hosts), but a committed secret is a committed secret: rotate it.
+
+Steps (do them in this order):
+
+1. Pick a NEW secret: a long random string, for example from
+   `openssl rand -hex 32` (or any password generator). Keep it in a
+   password manager. Never paste it in chat, email or a ticket.
+2. Vercel -> project giinmeet -> Settings -> Environment Variables ->
+   find `CRON_SECRET`, change its value to the new secret (Production),
+   save, then redeploy so the live site accepts it.
+3. Supabase dashboard -> project giinmeet -> SQL Editor -> run
+   `giinmeet_security_audit.sql` section 3 (it re-schedules the
+   `giinmeet-due-emails` pg_cron job with the new secret). Replace the
+   `PASTE_NEW_CRON_SECRET_HERE` placeholder with the new secret first.
+4. Verify: wait 5 minutes, then in the SQL Editor run
+   `select status_code, created from net._http_response order by created`
+   `desc limit 5;` — the newest rows should be 200. (401 means the job
+   still carries the old secret; re-check steps 2 and 3.)
+5. Only now is the old secret dead: it was never stored anywhere else
+   except the git history of `giinmeet_pg_cron_reminders.sql`, which
+   the audit already replaced with a placeholder. Rewriting git history
+   to purge it is NOT recommended (it would rewrite every commit after
+   it); rotation alone neutralises it.
+
+Rules for the future: never commit a real secret in a SQL file, a doc
+or a script. Placeholders only; the real value lives in Vercel env
+vars (and, for the pg_cron job, in the Supabase scheduled job itself).
+
+## GIINMEET_POLL_PEPPER (new env var — audit 2026-11-23)
+
+The anonymous-poll vote hash needs its own pepper, separate from every
+other key. Set `GIINMEET_POLL_PEPPER` in Vercel env vars (Production)
+to a long random string (for example `openssl rand -hex 32`), then
+redeploy. Until it is set, polls keep working on a temporary
+per-process pepper, but a voter could vote twice across a redeploy.
+This is the only new env var the audit needs.
