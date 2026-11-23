@@ -1989,3 +1989,142 @@ h1, h2, h3, h4, h5, h6 {
 @media (max-width: 640px) { .stg-grid-2 { grid-template-columns: 1fr; } }
 .stg-hub-btn:hover { background: rgba(0,32,91,0.07) !important; }
 .hc-faq:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+
+/* ---- Phone meeting room, spacious layout (2026-11-23) ----
+   A portrait phone room must feel like Zoom or Meet: video first,
+   controls in one slim row that always fits, no clipped buttons,
+   no app bottom nav stealing height. These rules sit last in the
+   file so they win over the older phone rules above. */
+@media (max-width: 768px) {
+  /* The app bottom nav is hidden while inside a live meeting (see
+     .bottom-nav-hidden-in-meeting, set in App.tsx), so the 85px
+     reserve for it in main must go too, or the room would sit 85px
+     short with a gap at the bottom. */
+  main.in-meeting {
+    padding: 0 !important;
+  }
+  .bottom-nav-hidden-in-meeting {
+    display: none !important;
+  }
+  /* Side panels run to the bottom of the screen now: the 65px that
+     used to clear the bottom nav is gone with it. */
+  .meeting-side-panel {
+    bottom: env(safe-area-inset-bottom) !important;
+  }
+}
+
+@media (max-width: 480px) and (orientation: portrait) {
+  /* 1. Top bar, two clean lines: LIVE + title get the full width on
+     line one and truncate with an ellipsis; timer, count, minimise
+     and invite sit on a slim second line, right aligned. Nothing
+     is clipped. */
+  .meeting-topbar {
+    flex-wrap: wrap !important;
+    row-gap: 0.35rem !important;
+    padding: 0.5rem max(0.75rem, env(safe-area-inset-left)) 0.45rem max(0.75rem, env(safe-area-inset-right)) !important;
+  }
+  .meeting-topbar-title-wrap {
+    flex: 1 1 100% !important;
+  }
+  .meeting-topbar-title {
+    font-size: 1rem !important;
+  }
+  .meeting-topbar .badge-premium {
+    font-size: 0.65rem !important;
+    padding: 0.15rem 0.4rem !important;
+  }
+  .meeting-topbar-actions {
+    margin-left: auto !important;
+    gap: 0.4rem !important;
+  }
+  .meeting-topbar-actions button {
+    min-height: 36px !important;
+    padding: 0.3rem 0.5rem !important;
+  }
+
+  /* 2. Video stage: tiles share the stage height instead of keeping
+     a fixed 16/9 height and scrolling under the control bar. Two
+     people get half the stage each, one person gets it all, the
+     video fills its tile (object-fit cover on the video element).
+     A 120px floor keeps tiles usable, and the tiles column scrolls
+     only when many people overflow the stage. Speaker mode keeps
+     its own spotlight + filmstrip layout. */
+  .meeting-grid {
+    padding: 0.75rem !important;
+    overflow: hidden !important;
+  }
+  .meeting-grid .meeting-tiles {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    margin: 0 !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    align-items: stretch !important;
+    align-content: stretch !important;
+    justify-content: flex-start !important;
+    overflow-y: auto !important;
+  }
+  .meeting-grid:not(.speaker-mode) .meeting-card {
+    flex: 1 1 0 !important;
+    min-height: 120px !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    aspect-ratio: auto !important;
+  }
+
+  /* 3. Control bar: slimmer 36px buttons and chevrons, tighter gaps
+     and side padding with safe-area insets, so Mic, Camera, Share,
+     More, Participants, Chat and End all fit inside a 360px phone
+     with room to spare. Nothing wraps, nothing clips. */
+  .meeting-toolbar {
+    gap: 0.4rem !important;
+    padding: 0.5rem max(0.5rem, env(safe-area-inset-left)) calc(0.5rem + env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-right)) !important;
+  }
+  .meeting-toolbar-center {
+    gap: 0.35rem !important;
+    min-width: 0 !important;
+  }
+  .meeting-toolbar-center > button.toolbar-control-btn,
+  .meeting-toolbar-center > div > button.toolbar-control-btn {
+    width: 36px !important;
+    height: 36px !important;
+  }
+  .meeting-toolbar-center .device-chevron {
+    width: 14px !important;
+    height: 36px !important;
+    margin-left: -6px !important;
+  }
+  .meeting-toolbar-right {
+    gap: 0.35rem !important;
+  }
+  .meeting-toolbar-right button {
+    height: 36px !important;
+    padding: 0 0.6rem !important;
+  }
+
+  /* Direct-call floating pill: same squeeze, so it never runs off
+     a narrow phone either. */
+  .direct-call-pill {
+    max-width: calc(100vw - 16px) !important;
+    gap: 0.5rem !important;
+  }
+}
+
+@media (max-width: 360px) and (orientation: portrait) {
+  /* Very narrow phones (320px): one more squeeze so the same seven
+     controls still fit without clipping the End button. */
+  .meeting-toolbar-center > button.toolbar-control-btn,
+  .meeting-toolbar-center > div > button.toolbar-control-btn {
+    width: 34px !important;
+    height: 34px !important;
+  }
+  .meeting-toolbar-center .device-chevron {
+    width: 12px !important;
+    height: 34px !important;
+  }
+  .meeting-toolbar-right button {
+    height: 34px !important;
+    padding: 0 0.5rem !important;
+  }
+}

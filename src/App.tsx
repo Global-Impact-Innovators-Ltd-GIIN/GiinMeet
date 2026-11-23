@@ -2207,6 +2207,13 @@ function App() {
     return <Auth brandName={brandName} brandSlogan={brandSlogan} logoUrl={logoUrl} onAuthSuccess={handleAuthSuccess} />;
   }
 
+  // Phone meeting room: while a live meeting fills the screen, the
+  // app bottom nav is hidden (it would steal 65px and sit under the
+  // meeting controls) and main drops its 85px bottom-nav reserve
+  // (see main.in-meeting in index.css). Minimised meetings keep the
+  // nav: the user is back on the dashboard then.
+  const isInLiveMeeting = currentView === 'meeting' && activeMeetingId !== null;
+
   return (
     <div style={{
       display: 'flex',
@@ -3035,7 +3042,7 @@ function App() {
         )}
 
         {/* Dynamic Inner Panel viewport */}
-        <main className="scroll-refined" style={{
+        <main className={isInLiveMeeting ? 'scroll-refined in-meeting' : 'scroll-refined'} style={{
           flex: 1,
           padding: (currentView === 'meeting' || currentView === 'dashboard') && activeMeetingId ? '0' : '2.5rem',
           overflowY: currentView === 'meeting' ? 'hidden' : 'auto',
@@ -3201,8 +3208,10 @@ function App() {
         </main>
       </div>
 
-      {/* Mobile Bottom Navigation Bar */}
-      <div className="bottom-nav-mobile" style={{
+      {/* Mobile Bottom Navigation Bar: hidden while inside a live
+          meeting on a phone, so the meeting gets the full screen
+          height (see isInLiveMeeting above). */}
+      <div className={isInLiveMeeting ? 'bottom-nav-mobile bottom-nav-hidden-in-meeting' : 'bottom-nav-mobile'} style={{
         position: 'fixed',
         bottom: 0,
         left: 0,

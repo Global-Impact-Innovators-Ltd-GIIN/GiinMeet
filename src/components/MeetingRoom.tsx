@@ -13150,7 +13150,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 />
                 <div className="scroll-refined" style={{
                   position: window.innerWidth < 768 ? 'fixed' : 'absolute',
-                  bottom: window.innerWidth < 768 ? 'calc(77px + env(safe-area-inset-bottom))' : '55px',
+                  // 65px is the phone toolbar (~53px) plus a 12px gap:
+                  // the 65px app bottom nav it used to clear is hidden
+                  // while inside a live meeting.
+                  bottom: window.innerWidth < 768 ? 'calc(65px + env(safe-area-inset-bottom))' : '55px',
                   left: window.innerWidth < 768 ? '16px' : '50%',
                   right: window.innerWidth < 768 ? '16px' : 'auto',
                   transform: window.innerWidth < 768 ? 'none' : 'translateX(-50%)',

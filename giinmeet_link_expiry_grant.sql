@@ -1,0 +1,61 @@
+-- GiinMeet - link expiry read grant (2026-11-23).
+--
+-- RUN BY SUKU in the Supabase SQL Editor (GIIN org project, the
+-- giinmeet project). Safe to run once; re-running is harmless
+-- (GRANT is idempotent).
+--
+-- THE 403, PROVEN IN CODE: the browser read
+--   GET /rest/v1/meetings?select=link_expires_at,link_expiry_mode&id=eq.<meeting>
+-- returns 403, twice per join (Waitroom check, then the Dashboard
+-- lazy expiry read, both through giinApi.getMeetingLinkExpiry in
+-- src/supabaseClient.ts). The cause is NOT the RLS policy: the
+-- meetings SELECT policy is USING (true), a public read, so RLS
+-- would return rows, never a 403. The cause is the column grant:
+-- giinmeet_passcode_lockdown.sql revoked table-level SELECT on
+-- meetings from anon/authenticated and re-granted SELECT on an
+-- explicit column list only (everything except passcode). The two
+-- link-expiry columns were added AFTER that file by
+-- giinmeet_link_expiry.sql, which grants nothing, so the new
+-- columns were never in the grant list. PostgREST answers a select
+-- on an ungranted column with 403 "permission denied for column".
+-- (A missing column would be 42703 instead, so the 403 also proves
+-- the columns exist in the live database.)
+--
+-- EFFECT UNTIL THIS RUNS: the expiry read fails safe, both callers
+-- swallow the error and treat the link as live, so meetings still
+-- work. The expiry feature itself is dormant in the browser: an
+-- expired link is never blocked in the Waitroom, and the Dashboard
+-- never shows the stored expiry. The server-side token route
+-- (POST /api/livekit/token) is the final gate and is unaffected.
+--
+-- WHAT: grant SELECT on the two link-expiry columns to the same two
+-- roles the lockdown file grants the other public columns to. The
+-- columns are not sensitive (mode and expiry date are already shown
+-- in the Dashboard UI); passcode stays ungranted, this file does
+-- not touch it.
+
+grant select (link_expires_at, link_expiry_mode)
+  on public.meetings to anon, authenticated;
+
+-- VERIFY (run after the statement above, as the anon role if your
+-- SQL Editor offers "Run as anon", or through the API):
+--
+--   select link_expires_at, link_expiry_mode
+--   from public.meetings limit 1;
+--
+-- That must now return a row (or an empty result when no meetings
+-- exist), NOT a 403 / permission denied error. And the passcode
+-- column must still fail:
+--
+--   select passcode from public.meetings limit 1;
+--
+-- If the passcode select returns rows, the lockdown is broken, do
+-- not rely on the passcode being secret until it fails again.
+--
+-- NOTE: the sibling single-column probes in src/supabaseClient.ts
+-- (reminder_sent_at, e2ee_enabled, organisation_id) select columns
+-- that are likewise absent from the lockdown grant list. They fail
+-- safe by design (any error means "feature not supported"), so they
+-- cause no console 403 that blocks a meeting, but if those features
+-- are ever found dormant, check their grants the same way before
+-- assuming the columns are missing.

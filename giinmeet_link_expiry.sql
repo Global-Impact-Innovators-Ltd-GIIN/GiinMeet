@@ -23,3 +23,12 @@
 ALTER TABLE public.meetings
   ADD COLUMN IF NOT EXISTS link_expires_at timestamptz,
   ADD COLUMN IF NOT EXISTS link_expiry_mode text;
+
+-- Added 2026-11-23: the browser read of these two columns 403d
+-- until this grant ran. giinmeet_passcode_lockdown.sql revoked
+-- table-level SELECT on meetings and re-granted an explicit column
+-- list, so columns added after it are unreadable until granted
+-- here. Safe to re-run (GRANT is idempotent). See
+-- giinmeet_link_expiry_grant.sql for the full diagnosis.
+grant select (link_expires_at, link_expiry_mode)
+  on public.meetings to anon, authenticated;
