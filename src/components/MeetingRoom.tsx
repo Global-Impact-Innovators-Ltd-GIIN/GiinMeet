@@ -4668,6 +4668,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const roomMountedRef = useRef(true);
   useEffect(() => () => { roomMountedRef.current = false; }, []);
 
+  // Phase A (2): release the camera and mic when the page unloads.
+  // A reload used to leave the old page holding the devices, so the
+  // new page's getUserMedia failed or hung ("camera in use by another
+  // app") and media init stalled — LiveKit and signalling never
+  // started, and the controls did nothing until something else shook
+  // the state loose. Stopping the tracks here hands the devices back
+  // before the new page asks for them.
+  useEffect(() => {
+    const releaseDevices = () => {
+      [localMicRawTrackRef.current, localAudioTrackRef.current, localVideoTrackRef.current].forEach(t => {
+        try { if (t && t.readyState === 'live') t.stop(); } catch (e) { /* already stopped */ }
+      });
+      try { screenStreamRef.current?.getTracks().forEach(t => t.stop()); } catch (e) { /* already stopped */ }
+    };
+    window.addEventListener('beforeunload', releaseDevices);
+    return () => window.removeEventListener('beforeunload', releaseDevices);
+  }, []);
+
   // One mic acquisition funnel for join + unmute (see toggleMute): the
   // same constraints, the same plain-language errors, one automatic
   // retry for transient failures, and a retry without the saved device
@@ -4699,7 +4717,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         e.name = 'NotSupportedError';
         throw e;
       }
-      const s = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints(withSaved && savedMic ? savedMic : undefined) });
+      // Phase A (2): getUserMedia can hang indefinitely after a reload
+      // (the device is still held by the page being replaced), which
+      // used to stall the whole join with no error. Fail fast after
+      // 15 s instead — the caller retries once, and the mic toggle can
+      // acquire lazily afterwards.
+      const s = await Promise.race([
+        navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints(withSaved && savedMic ? savedMic : undefined) }),
+        new Promise<never>((_, reject) =>
+          window.setTimeout(() => reject(Object.assign(new Error('Microphone timed out'), { name: 'TimeoutError' })), 15000)),
+      ]);
       const t = s.getAudioTracks()[0];
       if (!t) throw new Error('No audio track acquired');
       return t;
@@ -4790,16 +4817,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               throw e;
             }
             const savedCam = withSaved ? localStorage.getItem('giin_selected_camera') : null;
-            const videoStream = await navigator.mediaDevices.getUserMedia({
-              video: savedCam ? {
-                deviceId: { exact: savedCam },
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-              } : {
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-              }
-            });
+            // Phase A (2): same hang guard as the mic — a camera held
+            // by the pre-reload page can make getUserMedia hang with no
+            // error. Fail fast after 15 s so the retry (and the
+            // isMediaInitialized fallback below) can run.
+            const videoStream = await Promise.race([
+              navigator.mediaDevices.getUserMedia({
+                video: savedCam ? {
+                  deviceId: { exact: savedCam },
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 }
+                } : {
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 }
+                }
+              }),
+              new Promise<never>((_, reject) =>
+                window.setTimeout(() => reject(Object.assign(new Error('Camera timed out'), { name: 'TimeoutError' })), 15000)),
+            ]);
             if (!active) {
               videoStream.getTracks().forEach(t => t.stop());
               throw new Error('Component unmounted');
@@ -4893,11 +4928,27 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
       setIsMediaInitialized(true);
     }
-    syncVideo();
+    // Phase A (2): init must complete even if acquisition throws —
+    // otherwise isMediaInitialized stays false, the LiveKit connect
+    // and signalling effects never start, and the room never joins.
+    // (A hang is covered by the 10 s fallback below.)
+    syncVideo().catch(() => {}).finally(() => setIsMediaInitialized(true));
     return () => {
       active = false;
     };
   }, [isVideoOn]);
+
+  // Phase A (2): media init must never gate the room forever. If
+  // device acquisition hangs despite the timeouts above, the LiveKit
+  // connect and signalling effects wait on isMediaInitialized and
+  // never start — the room looks joined but nothing works, and the
+  // controls do nothing. After 10 s, declare init done anyway:
+  // devices are acquired lazily by the toggles, and a late camera
+  // still attaches through the video effect above.
+  useEffect(() => {
+    const t = setTimeout(() => setIsMediaInitialized(true), 10000);
+    return () => clearTimeout(t);
+  }, []);
 
   // Speech Recognition Live Captions Effect
   useEffect(() => {
