@@ -785,6 +785,16 @@ h1, h2, h3, h4, h5, h6 {
   border-color: rgba(255, 255, 255, 0.55);
 }
 
+/* Device picker menus: always fully opaque. They use var(--bg-card),
+   but glassy UI styles make that translucent, so the video showed
+   through the rows. A solid card in both themes, whatever the style. */
+.device-menu {
+  background-color: #FFFFFF !important;
+}
+[data-theme="dark"] .device-menu {
+  background-color: #121826 !important;
+}
+
 .premium-btn-danger {
   background-color: #EF4444;
   color: white;
@@ -1686,6 +1696,15 @@ h1, h2, h3, h4, h5, h6 {
   flex: 1 1 280px;
   max-width: 560px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* One person in the room: the single tile fills the stage, like Zoom
+   and Meet, instead of a small centred card with empty space on both
+   sides. The width is capped by the visible height (top bar + toolbar
+   + grid padding) so the tile never overflows the room. */
+.meeting-tiles.solo-tiles .meeting-card {
+  flex: 1 1 100%;
+  max-width: min(100%, calc((100dvh - 230px) * 16 / 9));
 }
 
 .meeting-card.speaking {

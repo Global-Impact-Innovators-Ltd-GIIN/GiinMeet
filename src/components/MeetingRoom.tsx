@@ -1217,6 +1217,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [bgFxStatus, setBgFxStatus] = useState<string | null>(null);
   const bgFxSessionRef = useRef<{ track: MediaStreamTrack; stop: () => void } | null>(null);
   const bgFxRawTrackRef = useRef<MediaStreamTrack | null>(null);
+  // Every enable / disable of the background effect bumps this, so an
+  // effect that finishes loading after the user already turned it off
+  // (or switched it) is stopped instead of published.
+  const bgFxEnableTokenRef = useRef(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   // A ref mirror of activePanel so realtime handlers (which close over the
   // first render) can tell whether the chat panel is open right now.
@@ -1512,7 +1516,39 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Device pickers on the mute / video buttons (Zoom / Meet pattern):
   // which picker is open, and the live device list behind it.
   const [deviceMenu, setDeviceMenu] = useState<'audio' | 'video' | null>(null);
+  // Where the open picker is anchored: the chevron button that opened
+  // it, so the menu sits above its own button instead of floating in
+  // the middle of the video. Cleared with the menu.
+  const [deviceMenuAnchor, setDeviceMenuAnchor] = useState<{ left: number; top: number } | null>(null);
   const [deviceList, setDeviceList] = useState<MediaDeviceInfo[]>([]);
+
+  // A resize (rotation, keyboard, window change) would leave an open
+  // picker floating over the wrong place, so close it and let the user
+  // reopen it on the button it belongs to.
+  useEffect(() => {
+    if (!deviceMenu) return;
+    const close = () => { setDeviceMenu(null); setDeviceMenuAnchor(null); };
+    window.addEventListener('resize', close);
+    window.addEventListener('orientationchange', close);
+    return () => {
+      window.removeEventListener('resize', close);
+      window.removeEventListener('orientationchange', close);
+    };
+  }, [deviceMenu]);
+
+  // Open the mic / camera picker anchored to the chevron that was
+  // tapped, or close it when it is already open.
+  const toggleDeviceMenu = (which: 'audio' | 'video', e: { currentTarget: HTMLButtonElement }) => {
+    if (deviceMenu === which) {
+      setDeviceMenu(null);
+      setDeviceMenuAnchor(null);
+      return;
+    }
+    void refreshDevices();
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDeviceMenuAnchor({ left: rect.left, top: rect.top });
+    setDeviceMenu(which);
+  };
   const refreshDevices = useCallback(async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -2792,6 +2828,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
     if (isVideoOn) {
       try {
+        // A background effect reads the OLD camera track: switching
+        // cameras without restarting it leaves the effect feeding a
+        // stopped track, so the picture freezes for everyone else, and
+        // turning the effect off later restores that stale track. Tear
+        // the effect down first, switch, then start it again on the new
+        // camera. If the restart fails, the new raw camera is already
+        // published below, so the video stays normal and only the
+        // effect is off.
+        const fxMode: 'blur' | 'giin' | null = bgFxSessionRef.current && bgFxMode !== 'none' ? bgFxMode : null;
+        if (fxMode) {
+          await disableBackgroundFx(true);
+          // The effect is off until the restart below succeeds, so the
+          // old "Background blur is on" line must not linger.
+          setBgFxStatus(null);
+        }
         // Acquire the new camera FIRST. Stopping the old track before the
         // new one is acquired leaves the camera dead if getUserMedia fails.
         const videoStream = await navigator.mediaDevices.getUserMedia({
@@ -2826,6 +2877,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // Publish the new camera to LiveKit as well, otherwise LiveKit
         // viewers keep receiving the old (now stopped) track.
         await publishLiveKitTrack(videoTrack, Track.Source.Camera);
+        if (fxMode) await enableBackgroundFx(fxMode);
       } catch (err) {
         console.error('Failed to change camera:', err);
         triggerToast(t('room.could_not_switch_camera_keeping'));
@@ -6892,14 +6944,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       triggerToast(t('room.turn_your_camera_on_first'));
       return;
     }
+    let token = 0;
     setBgFxStatus('Loading background effect…');
     try {
       await disableBackgroundFx(true);
+      // If the user turns the effect off (or switches it) while the
+      // model is still loading, the late session must be stopped, not
+      // published: the first-frame gate can take seconds, and without
+      // this the room would end up with an effect the user cancelled.
+      token = ++bgFxEnableTokenRef.current;
       const session = await startBackgroundFx(raw, mode, () => {
         // The model failed mid-call: fall back to the normal camera.
         void disableBackgroundFx();
         triggerToast(t('room.the_background_effect_stopped_your'));
       });
+      if (token !== bgFxEnableTokenRef.current) {
+        try { session.stop(); } catch (e) { /* ignore */ }
+        return;
+      }
       bgFxSessionRef.current = session;
       bgFxRawTrackRef.current = raw;
       setBgFxMode(mode);
@@ -6908,11 +6970,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (e: any) {
       setBgFxStatus(null);
       setBgFxMode('none');
-      triggerToast(e?.message || 'Background effects are not available right now, your video stays normal.');
+      // A load cancelled by the user (token moved on) is not an error
+      // worth a toast: the video is already normal.
+      if (token === bgFxEnableTokenRef.current) {
+        triggerToast(e?.message || 'Background effects are not available right now, your video stays normal.');
+      }
     }
   };
 
   const disableBackgroundFx = async (silent = false) => {
+    // Any effect still loading is cancelled by this (see the token
+    // check in enableBackgroundFx).
+    bgFxEnableTokenRef.current += 1;
     const session = bgFxSessionRef.current;
     const raw = bgFxRawTrackRef.current;
     bgFxSessionRef.current = null;
@@ -8148,27 +8217,31 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         </div>
       )}
       {/* Upper Status Bar */}
+      {/* The room header is always dark, in both themes: the header
+          buttons use light text (see .meeting-topbar in index.css), so
+          a theme-coloured header turned them white on white in light
+          mode. */}
       <div className="meeting-topbar" style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0.6rem 1rem',
-        borderBottom: '1px solid var(--border-color)',
-        backgroundColor: 'var(--bg-card)',
+        borderBottom: '1px solid #1E293B',
+        backgroundColor: '#0B1220',
         zIndex: 10
       }}>
         <div className="meeting-topbar-title-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
           <span className="badge badge-premium" style={{ color: '#000', backgroundColor: 'var(--color-accent)', border: 'none' }}>
             LIVE
           </span>
-          <h3 className="meeting-topbar-title" style={{ fontSize: '1.1rem', color: 'var(--text-main)', fontFamily: 'var(--font-heading)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+          <h3 className="meeting-topbar-title" style={{ fontSize: '1.1rem', color: '#F1F5F9', fontFamily: 'var(--font-heading)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
             {meetingTitle}
           </h3>
         </div>
         <div className="meeting-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem' }}>
           {/* Phone only: connection dot and meeting timer live here, in
               the slim top strip, so the bottom bar stays one compact row. */}
-          <span className="mobile-room-meta" style={{ display: 'none', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)' }}>
+          <span className="mobile-room-meta" style={{ display: 'none', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, color: '#E2E8F0' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: connectionQuality === 'excellent' || connectionQuality === 'good' ? '#10B981' : connectionQuality === 'poor' ? '#F59E0B' : connectionQuality === 'lost' ? '#EF4444' : '#64748B' }} />
             <Clock size={12} color="var(--color-accent)" />
             {formatElapsedTime(elapsedSeconds)}
@@ -8176,7 +8249,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </span>
           {/* Participant count */}
           <span
-            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-main)', fontWeight: 600 }}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#F1F5F9', fontWeight: 600 }}
             title={t('room.people_in_this_meeting_including', { v1: participants.length + 1 })}
           >
             <Users size={14} color="var(--color-accent)" />
@@ -8244,7 +8317,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             boxShadow: 'var(--shadow-premium)'
           }}>
             <div className="flex-between">
-              <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'white' }}>{t('room.boardroom_invite_info')}</h4>
+              <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)' }}>{t('room.boardroom_invite_info')}</h4>
               <button 
                 onClick={() => setShowMeetingInfo(false)}
                 className="panel-close-btn" aria-label={t('room.close_invite_info')}
@@ -8285,13 +8358,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
               <div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>{t('room.meeting_id')}</span>
-                <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>
+                <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
                   {meetingId}
                 </div>
               </div>
               <div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>{t('room.passcode')}</span>
-                <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>
+                <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
                   {passcode || ','}
                 </div>
               </div>
@@ -9639,7 +9712,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                     video cards, so the room shows video only. */}
                 {/* Phase C2a (8): Focus mode banner, one tap back to everyone. */}
                 {layoutMode === 'focus' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.75rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(250,189,2,0.08)', fontSize: '0.8rem', color: 'white', position: 'relative', zIndex: 5 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.75rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(250,189,2,0.08)', fontSize: '0.8rem', color: 'var(--text-main)', position: 'relative', zIndex: 5 }}>
                     <span style={{ flex: '1 1 auto', minWidth: 0 }}>{t('room.focusOn')}</span>
                     <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }} onClick={() => setLayoutMode('grid')}>{t('room.show_everyone')}</button>
                   </div>
@@ -9650,8 +9723,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                     first tiles) when 3+ tiles overflow the viewport height
                    , plain align/justify centering on a scrollable flex
                     container hides the top rows above the scroll origin. */}
-                <div className="meeting-tiles" style={{
-                  margin: '0 auto',
+                {/* One person in the room: the single tile fills the
+                    stage (see .solo-tiles in index.css) instead of a
+                    small centred card with empty space on both sides. */}
+                <div className={`meeting-tiles${participants.length === 0 && layoutMode === 'grid' ? ' solo-tiles' : ''}`} style={{
+                  margin: participants.length === 0 && layoutMode === 'grid' ? 'auto' : '0 auto',
                   flexShrink: 0,
                   width: '100%',
                   display: layoutMode === 'side' && window.innerWidth >= 768 ? 'grid' : 'flex',
@@ -11333,7 +11409,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               {/* Camera Filters Section */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{t('room.camera_filter')}</span>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.5rem', minWidth: 0 }}>
                   {[
                     { id: 'none', label: 'Normal' },
                     { id: 'blur', label: t('room.soft_blur') },
@@ -11349,7 +11425,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                       style={{
                         justifyContent: 'center',
                         fontSize: '0.75rem',
-                        height: '40px',
+                        height: 'auto',
+                        minHeight: '40px',
+                        padding: '0.4rem 0.5rem',
+                        whiteSpace: 'normal',
+                        lineHeight: 1.25,
+                        minWidth: 0,
                         border: videoFilter === f.id ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
                         backgroundColor: videoFilter === f.id ? 'rgba(250,189,2,0.1)' : 'rgba(255,255,255,0.02)',
                         color: videoFilter === f.id ? 'var(--color-accent)' : 'white'
@@ -11370,7 +11451,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                   background, via on-device segmentation. */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>BACKGROUND</span>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.5rem', minWidth: 0 }}>
                   {[
                     { id: 'none', label: 'Off' },
                     { id: 'blur', label: t('room.blur_background') },
@@ -11383,7 +11464,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                       style={{
                         justifyContent: 'center',
                         fontSize: '0.75rem',
-                        height: '40px',
+                        height: 'auto',
+                        minHeight: '40px',
+                        padding: '0.4rem 0.5rem',
+                        whiteSpace: 'normal',
+                        lineHeight: 1.25,
+                        minWidth: 0,
                         border: bgFxMode === f.id ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
                         background: bgFxMode === f.id ? (f.id === 'giin' ? 'linear-gradient(135deg, #0B1E3A, #1D4ED8)' : 'rgba(250,189,2,0.1)') : 'rgba(255,255,255,0.02)',
                         color: bgFxMode === f.id ? (f.id === 'giin' ? 'white' : 'var(--color-accent)') : 'white'
@@ -12015,13 +12101,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           tap outside to close, pick a device to switch it live. */}
       {deviceMenu && (
         <>
-          <div aria-hidden="true" onClick={() => setDeviceMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 14000 }} />
-          <div className="scroll-refined" style={{
+          <div aria-hidden="true" onClick={() => { setDeviceMenu(null); setDeviceMenuAnchor(null); }} style={{ position: 'fixed', inset: 0, zIndex: 14000 }} />
+          {/* Anchored to the chevron that opened it, fully opaque, and
+              kept inside the viewport: the old centred menu floated over
+              the middle of the video and, on glassy UI styles, the video
+              showed through its translucent rows. */}
+          <div className="scroll-refined device-menu" style={{
             position: 'fixed',
-            bottom: 'calc(77px + env(safe-area-inset-bottom))',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 'min(320px, calc(100vw - 32px))',
+            bottom: deviceMenuAnchor ? window.innerHeight - deviceMenuAnchor.top + 8 : 77,
+            left: deviceMenuAnchor ? Math.min(Math.max(8, deviceMenuAnchor.left), Math.max(8, window.innerWidth - Math.min(300, window.innerWidth - 16) - 8)) : '50%',
+            transform: deviceMenuAnchor ? 'none' : 'translateX(-50%)',
+            width: 'min(300px, calc(100vw - 16px))',
             backgroundColor: 'var(--bg-card)',
             border: '1px solid var(--border-color)',
             borderRadius: '12px',
@@ -12030,7 +12120,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             flexDirection: 'column',
             gap: '0.35rem',
             zIndex: 15000,
-            maxHeight: 'calc(100dvh - 170px)',
+            maxHeight: deviceMenuAnchor ? Math.min(340, Math.max(180, deviceMenuAnchor.top - 16)) : 'calc(100dvh - 170px)',
             overflowY: 'auto',
             overscrollBehavior: 'contain',
             boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)'
@@ -12130,7 +12220,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <button
               type="button"
               className="device-chevron"
-              onClick={() => { void refreshDevices(); setDeviceMenu(deviceMenu === 'audio' ? null : 'audio'); }}
+              onClick={(e) => toggleDeviceMenu('audio', e)}
               aria-label="Choose microphone and speaker"
               title="Choose microphone and speaker"
               style={{
@@ -12206,7 +12296,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <button
               type="button"
               className="device-chevron"
-              onClick={() => { void refreshDevices(); setDeviceMenu(deviceMenu === 'video' ? null : 'video'); }}
+              onClick={(e) => toggleDeviceMenu('video', e)}
               aria-label="Choose camera"
               title="Choose camera"
               style={{
@@ -12598,7 +12688,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <button
                 type="button"
                 className="device-chevron"
-                onClick={() => { void refreshDevices(); setDeviceMenu(deviceMenu === 'audio' ? null : 'audio'); }}
+                onClick={(e) => toggleDeviceMenu('audio', e)}
                 aria-label="Choose microphone and speaker"
                 title="Choose microphone and speaker"
                 style={{
@@ -12650,7 +12740,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <button
                 type="button"
                 className="device-chevron"
-                onClick={() => { void refreshDevices(); setDeviceMenu(deviceMenu === 'video' ? null : 'video'); }}
+                onClick={(e) => toggleDeviceMenu('video', e)}
                 aria-label="Choose camera"
                 title="Choose camera"
                 style={{
@@ -13449,7 +13539,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                   border: '1px solid #1E293B',
                   padding: '0.45rem 0.75rem',
                   borderRadius: 'var(--radius-sm)',
-                  color: agendaNoteVisible ? 'var(--color-accent)' : 'white',
+                  color: agendaNoteVisible ? 'var(--color-accent)' : 'var(--text-main)',
                   fontSize: '0.8rem',
                   cursor: 'pointer',
                   height: '36px'
@@ -13470,7 +13560,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 border: '1px solid #1E293B',
                 padding: '0.45rem 0.75rem',
                 borderRadius: 'var(--radius-sm)',
-                color: activePanel === 'participants' ? 'var(--color-accent)' : 'white',
+                color: activePanel === 'participants' ? 'var(--color-accent)' : 'var(--text-main)',
                 fontSize: '0.8rem',
                 cursor: 'pointer',
                 height: '36px'
@@ -13490,7 +13580,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 border: '1px solid #1E293B',
                 padding: '0.45rem 0.75rem',
                 borderRadius: 'var(--radius-sm)',
-                color: activePanel === 'chat' ? 'var(--color-accent)' : 'white',
+                color: activePanel === 'chat' ? 'var(--color-accent)' : 'var(--text-main)',
                 fontSize: '0.8rem',
                 cursor: 'pointer',
                 height: '36px'
