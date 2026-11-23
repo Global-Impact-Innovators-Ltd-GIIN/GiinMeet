@@ -2318,21 +2318,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
         }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowInstantModal(false); }}>
           <div className="glass-panel" style={{
-            maxWidth: '450px',
-            width: '100%',
-            padding: '2.5rem',
+            maxWidth: '560px',
+            width: 'calc(100% - 2rem)',
+            padding: 0,
             maxHeight: '90dvh',
-            overflowY: 'auto',
+            overflow: 'hidden',
             animation: 'pop-in 0.3s ease',
             display: 'flex',
             flexDirection: 'column',
-            gap: '1.5rem',
             border: '1px solid var(--border-color)'
           }}>
-            <h3 style={{ fontSize: '1.5rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)', color: 'white' }}>{t('dash.start_a_new_meeting')}</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('dash.configure_your_instant_meeting_preferenc')}</p>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ flexShrink: 0, padding: '1.25rem 1.5rem 0' }}>
+              <h3 style={{ fontSize: '1.5rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)', color: 'white' }}>{t('dash.start_a_new_meeting')}</h3>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t('dash.configure_your_instant_meeting_preferenc')}</p>
+            </div>
+
+            <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>{t('dash.meeting_title')}</label>
                 <input 
@@ -2376,15 +2377,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button 
-                  type="button" 
-                  className="premium-btn premium-btn-secondary" 
-                  onClick={() => setShowInstantModal(false)}
-                >
-                  {t('common.cancel')}
-                </button>
-              <div>
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              <div style={{ flex: '1 1 240px', minWidth: 0 }}>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>{t('dash.meeting_passcode')}</label>
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: 'pointer', color: 'white' }}>
                   <input
@@ -2425,7 +2419,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
 
                 {/* Round 9 (9D): one-click templates (instant meetings always expire when they end). */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ flex: '1 1 200px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>{t('dash.start_from_a_template')}</span>
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyInstantTemplate('standup')}>{t('dash.team_standup')}</button>
@@ -2434,18 +2428,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                 </div>
 
-                <button 
-                  onClick={() => {
-                    onStartMeeting(instantTitle, undefined, true, undefined, instantRequireWaitingRoom, instantPasscodeEnabled ? instantPasscode : null);
-                    setInstantPasscode('');
-                    setInstantPasscodeEnabled(true);
-                    setShowInstantModal(false);
-                  }}
-                  className="premium-btn premium-btn-primary"
-                >
-                  {t('dash.start_meeting')}
-                </button>
               </div>
+            </div>
+            <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', padding: '1rem 1.5rem', borderTop: '1px solid var(--border-color)' }}>
+              <button
+                type="button"
+                className="premium-btn premium-btn-secondary"
+                onClick={() => setShowInstantModal(false)}
+                style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={() => {
+                  onStartMeeting(instantTitle, undefined, true, undefined, instantRequireWaitingRoom, instantPasscodeEnabled ? instantPasscode : null);
+                  setInstantPasscode('');
+                  setInstantPasscodeEnabled(true);
+                  setShowInstantModal(false);
+                }}
+                className="premium-btn premium-btn-primary"
+                style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+              >
+                {t('dash.start_meeting')}
+              </button>
             </div>
           </div>
         </div>
