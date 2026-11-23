@@ -62,8 +62,8 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
     }}
       onClick={onClose}>
       <div style={{
-        backgroundColor: '#0F172A',
-        border: '1px solid #1E293B',
+        backgroundColor: 'var(--bg-card)',
+        border: '1px solid var(--border-color)',
         borderRadius: '12px',
         padding: '2rem',
         width: '100%',
@@ -77,7 +77,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
       }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'white', margin: 0, fontFamily: 'var(--font-heading)' }}>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-main)', margin: 0, fontFamily: 'var(--font-heading)' }}>
             {t('device.audio_video_devices')}
           </h3>
           <button
@@ -85,7 +85,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
             style={{
               background: 'none',
               border: 'none',
-              color: '#64748B',
+              color: 'var(--text-muted)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -97,14 +97,14 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
           </button>
         </div>
 
-        <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
           {t('device.select_and_test_your_input')}
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           {/* Camera Selection */}
           <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'white', marginBottom: '0.5rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
               <Camera size={16} color="var(--color-primary)" />
               <span>{t('device.camera_video_input')}</span>
             </label>
@@ -125,7 +125,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
           {/* Microphone Selection */}
           <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'white', marginBottom: '0.5rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
               <Mic size={16} color="var(--color-primary)" />
               <span>{t('device.microphone_audio_input')}</span>
             </label>
@@ -146,7 +146,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
           {/* Speaker Selection */}
           <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'white', marginBottom: '0.5rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
               <Volume2 size={16} color="var(--color-primary)" />
               <span>{t('device.speaker_audio_output')}</span>
             </label>
@@ -163,7 +163,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
               ))}
               {speakers.length === 0 && <option value="">{t('device.no_speakers_detected_using_default')}</option>}
             </select>
-            <span style={{ fontSize: '0.65rem', color: '#64748B', marginTop: '0.25rem', display: 'block' }}>
+            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
               {t('device.note_speaker_routing_setsinkid_is')}
             </span>
           </div>

@@ -21,7 +21,12 @@
   --text-main: #1E293B;
   --text-muted: #64748B;
   --text-inverse: #FFFFFF;
-  
+
+  /* Meeting-room stage: light grey in light mode, near-black in dark
+     mode. Video tiles themselves stay dark in both modes, the way Zoom
+     and Meet keep the video stage dark. */
+  --room-stage: #E9EDF3;
+
   /* Shared tokens */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-heading: 'Outfit', system-ui, -apple-system, sans-serif;
@@ -62,6 +67,9 @@
   --text-main: #F1F5F9;
   --text-muted: #94A3B8;
   --text-inverse: #FFFFFF;       /* White text for contrast on bright blue buttons */
+
+  /* Meeting-room stage, dark mode: the previous fixed dark gradient. */
+  --room-stage: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E;
   
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
@@ -962,9 +970,9 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Responsive Call Control Toolbar */
 .meeting-toolbar {
-  padding: 1.25rem 2rem;
-  border-top: 1px solid #1E293B;
-  background-color: #090D16;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid var(--border-color);
+  background-color: var(--bg-card);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -995,25 +1003,34 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 @media (max-width: 768px) {
+  /* One compact row: the video owns the screen. The left row (meeting
+     ID, connection words, timer) collapses to nothing but the REC pill
+     when recording; the timer and connection dot live in the slim top
+     strip instead. Centre holds mute, video, share and More; right
+     holds participants, chat and leave. */
   .meeting-toolbar {
-    flex-wrap: wrap !important;
-    justify-content: center !important;
-    gap: 1rem !important;
-    padding: 1rem !important;
+    flex-wrap: nowrap !important;
+    justify-content: space-between !important;
+    gap: 0.5rem !important;
+    padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom)) !important;
   }
 
   .meeting-toolbar-left {
-    width: 100% !important;
-    justify-content: center !important;
-    order: 3;
+    width: auto !important;
+    justify-content: flex-start !important;
+    order: 0;
     font-size: 0.75rem !important;
+  }
+  .meeting-toolbar-left > *:not(.rec-indicator) {
+    display: none !important;
   }
 
   .meeting-toolbar-center {
-    width: 100% !important;
+    width: auto !important;
+    flex: 1 1 auto;
     justify-content: center !important;
-    flex-wrap: wrap !important;
-    gap: 0.5rem !important;
+    flex-wrap: nowrap !important;
+    gap: 0.4rem !important;
     order: 1;
   }
 
@@ -1027,22 +1044,44 @@ h1, h2, h3, h4, h5, h6 {
      no pop-up content inside this container can ever be caught again. */
   .meeting-toolbar-center > button.toolbar-control-btn,
   .meeting-toolbar-center > div > button.toolbar-control-btn {
-    width: 44px !important;
-    height: 44px !important;
+    width: 40px !important;
+    height: 40px !important;
     flex-shrink: 0 !important;
   }
 
   /* Right-side toolbar buttons (Participants / Chat / Leave) also get a
-     proper 44px touch target on phones. */
+     proper touch target on phones. */
   .meeting-toolbar-right button {
-    height: 44px !important;
+    height: 40px !important;
   }
 
   .meeting-toolbar-right {
-    width: 100% !important;
-    justify-content: center !important;
+    width: auto !important;
+    justify-content: flex-end !important;
     gap: 0.4rem !important;
     order: 2;
+  }
+
+  /* Direct-call floating pill: one compact row on phones. */
+  .direct-call-pill {
+    bottom: 12px !important;
+    gap: 0.5rem !important;
+    padding: 0.5rem 0.75rem !important;
+  }
+  .direct-call-pill button:not(.device-chevron) {
+    width: 44px !important;
+    height: 44px !important;
+  }
+  .direct-call-pill button:not(.device-chevron) span {
+    display: none !important;
+  }
+  .device-chevron {
+    height: 44px !important;
+  }
+
+  /* Phone-only room meta in the top strip (connection dot + timer). */
+  .mobile-room-meta {
+    display: inline-flex !important;
   }
 }
 
@@ -1067,8 +1106,9 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Fix Round 8 (#11): the room toolbar must wrap below 1280px instead
-   of pushing its right end (End for All) off the viewport. */
-@media (max-width: 1280px) {
+   of pushing its right end (End for All) off the viewport. Phones have
+   their own single-row rules above, so this starts at 769px. */
+@media (min-width: 769px) and (max-width: 1280px) {
   .meeting-toolbar {
     flex-wrap: wrap !important;
     row-gap: 0.75rem;
@@ -1105,6 +1145,12 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Mobile meeting UI fixes (2026-11-14): 44px panel close targets, and a
    room header that truncates instead of clipping off-screen. */
+
+/* Phone-only room meta (connection dot + timer in the slim top strip).
+   Hidden on desktop, shown by the phone media query below. */
+.mobile-room-meta {
+  display: none;
+}
 .panel-close-btn {
   width: 44px !important;
   height: 44px !important;
@@ -1133,9 +1179,9 @@ h1, h2, h3, h4, h5, h6 {
      ellipsis instead of wrapping and pushing Minimize / Invite off the
      right edge of the phone screen. */
   .meeting-topbar {
-    flex-wrap: wrap !important;
+    flex-wrap: nowrap !important;
     row-gap: 0.5rem;
-    padding: 0.75rem 1rem !important;
+    padding: 0.5rem 0.75rem !important;
   }
   .meeting-topbar-title-wrap {
     min-width: 0 !important;
@@ -1794,14 +1840,14 @@ h1, h2, h3, h4, h5, h6 {
   animation: typingDotsSlow 1.8s infinite steps(4);
 }
 
-/* Enforce dark theme dropdown select inputs for hardware device modals */
+/* Device selects follow the app theme, like the rest of the modal. */
 .device-select {
   width: 100%;
   padding: 0.75rem 1rem;
   border-radius: var(--radius-md);
-  border: 1px solid #1E293B !important;
-  background-color: #020617 !important;
-  color: #FFFFFF !important;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-card);
+  color: var(--text-main);
   font-family: var(--font-sans);
   font-size: 0.95rem;
   transition: all var(--transition-fast);

@@ -6,7 +6,8 @@ import {
   Clock, Pin, LayoutGrid, LayoutList, Star, Wifi, WifiOff,
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
   MoreHorizontal, BarChart3, Volume2, VolumeX, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
-  LogOut, UserCheck, User, Keyboard, X, Hand, Paperclip, ListChecks, Plus, Trash2, GripVertical
+  LogOut, UserCheck, User, Keyboard, X, Hand, Paperclip, ListChecks, Plus, Trash2, GripVertical,
+  ChevronUp
 } from 'lucide-react';
 import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -651,31 +652,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [agendaEndPopup, setAgendaEndPopup] = useState<{ id: string; text: string; endLabel: string } | null>(null);
   const agendaAlertsFiredRef = useRef<Set<string>>(new Set());
   const roomJoinedAtRef = useRef<number>(Date.now());
-  // Video-feed watermark (Branding & Layout), reads the saved mode /
-  // opacity / scale and re-renders live when Settings changes them.
-  type WatermarkMode = 'branded' | 'watermark' | 'none';
-  const [watermarkMode, setWatermarkMode] = useState<WatermarkMode>(() =>
-    (localStorage.getItem('giin_watermark') as WatermarkMode) || 'branded'
-  );
-  const [watermarkOpacity, setWatermarkOpacity] = useState<number>(() =>
-    parseInt(localStorage.getItem('giin_watermark_opacity') || '80', 10)
-  );
-  const [watermarkScale, setWatermarkScale] = useState<number>(() =>
-    parseInt(localStorage.getItem('giin_watermark_scale') || '100', 10)
-  );
-  const [watermarkLogo, setWatermarkLogo] = useState<string>(() =>
-    localStorage.getItem('giin_custom_logo') || '/logo.png'
-  );
-  useEffect(() => {
-    const handleWatermarkChange = () => {
-      setWatermarkMode((localStorage.getItem('giin_watermark') as WatermarkMode) || 'branded');
-      setWatermarkOpacity(parseInt(localStorage.getItem('giin_watermark_opacity') || '80', 10));
-      setWatermarkScale(parseInt(localStorage.getItem('giin_watermark_scale') || '100', 10));
-      setWatermarkLogo(localStorage.getItem('giin_custom_logo') || '/logo.png');
-    };
-    window.addEventListener('giin_watermark_changed', handleWatermarkChange);
-    return () => window.removeEventListener('giin_watermark_changed', handleWatermarkChange);
-  }, []);
+  // The video-room watermark was removed: no logo or text may cover
+  // the video cards or the shared screen. The saved watermark settings
+  // in Settings are kept, but nothing in the room reads them any more.
   const publishAgenda = (items: { id: string; text: string; startTime?: string; endTime?: string; durationMinutes?: number }[]) => {
     setAgendaItems(items);
     // Phase C2a (4): persist the agenda for the prep brief and for
@@ -1041,7 +1020,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           : { source };
       await room.localParticipant.publishTrack(track, publishOptions);
     } catch (e) {
-      console.warn('[LiveKit] Could not publish track:', e);
+      // A publish that throws on a connected room (transport hiccup,
+      // reconnect race) used to be dropped after one try, and the share
+      // verify below then blamed the user. Retry quietly a few times
+      // instead, never surfacing it as an error.
+      console.warn('[LiveKit] Could not publish track, retrying quietly:', e);
+      if (attempt < 3 && track.readyState === 'live') {
+        setTimeout(() => {
+          const retryRoom = livekitRoomRef.current;
+          if (retryRoom && track.readyState === 'live') {
+            void publishLiveKitTrack(track, source, attempt + 1);
+          }
+        }, 2000);
+      }
     }
   };
 
@@ -1361,6 +1352,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Fix Round 8 (#3): screen-share feedback state, a click that opens
   // nothing must never look dead again.
   const [screenShareStarting, setScreenShareStarting] = useState(false);
+  // Ref mirror of screenShareStarting: a second tap before the next
+  // render must not start a second screen capture.
+  const screenShareStartingRef = useRef(false);
   const [screenShareError, setScreenShareError] = useState<string | null>(null);
   // A share can end without the user stopping it: on iPhones the OS ends
   // the capture track when the broadcast is interrupted (app switch,
@@ -1516,6 +1510,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [selectedCamera, setSelectedCamera] = useState(() => localStorage.getItem('giin_selected_camera') || '');
   const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('giin_selected_mic') || '');
   const [selectedSpeaker, setSelectedSpeaker] = useState(() => localStorage.getItem('giin_selected_speaker') || '');
+  // Device pickers on the mute / video buttons (Zoom / Meet pattern):
+  // which picker is open, and the live device list behind it.
+  const [deviceMenu, setDeviceMenu] = useState<'audio' | 'video' | null>(null);
+  const [deviceList, setDeviceList] = useState<MediaDeviceInfo[]>([]);
+  const refreshDevices = useCallback(async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setDeviceList(devices);
+    } catch (e) { /* the device list stays as it was */ }
+  }, []);
+  useEffect(() => {
+    if (!navigator.mediaDevices?.addEventListener) return;
+    navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
+    return () => navigator.mediaDevices.removeEventListener('devicechange', refreshDevices);
+  }, [refreshDevices]);
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -2695,12 +2704,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!isAdmin) return;
     if (peerKey === null) {
       setSpotlightKey(null);
+      // Back to the normal layout: clearing the spotlight must not
+      // leave the room stuck in speaker view with someone still
+      // spotlighted by the fallback.
+      setLayoutMode('grid');
       broadcastEvent('spotlight-clear', {});
       return;
     }
     setSpotlightKey(peerKey);
     setLayoutMode('speaker');
     broadcastEvent('spotlight-set', { peerKey });
+  };
+
+  // One-tap un-spotlight for the gold SPOTLIGHT chip on a tile: clear
+  // the host spotlight (host only) or the viewer's own pin, and return
+  // the room to the normal grid layout.
+  const clearSpotlight = () => {
+    if (spotlightKey) {
+      if (isAdmin) {
+        setHostSpotlight(null);
+        return;
+      }
+      triggerToast('Only the host can remove the spotlight.');
+      return;
+    }
+    if (pinnedKey) {
+      setPinnedKey(null);
+      setLayoutMode('grid');
+    }
   };
 
   // Phase B (12): call on the next person in the hand-raise queue ,
@@ -5091,6 +5122,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
     setScreenShareError(null);
     setScreenShareStarting(true);
+    screenShareStartingRef.current = true;
     try {
       const constraints = getWebRTCScreenshareConstraints();
       // audio: true asks the browser for system audio with the share
@@ -5113,6 +5145,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           window.setTimeout(() => reject(Object.assign(new Error('Screen picker timed out'), { name: 'PickerTimeoutError' })), 25000)),
       ]);
       setScreenShareStarting(false);
+      screenShareStartingRef.current = false;
 
       const screenTrack = displayStream.getVideoTracks()[0];
       if (!screenTrack) {
@@ -5161,21 +5194,25 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // the LiveKit engine see it -- not just the peer-to-peer ones.
       await publishLiveKitTrack(screenTrack, Track.Source.ScreenShare);
       // Phase A (1): verify the share actually reached the video
-      // server. A publish that silently fails (room reconnecting,
-      // stale track) used to leave the sharer believing everyone could
-      // see the screen while nobody could. Retry briefly, then say so
-      // honestly instead of showing a share nobody receives. (When
-      // there is no LiveKit room, the P2P fallback, there is nothing
-      // to verify here; the P2P senders above carry the share.)
-      if (livekitRoomRef.current) {
+      // server, but ONLY while the room is on the video server. When
+      // the room fell back to a direct connection, or is still
+      // reconnecting, there is no publication to verify and the direct
+      // senders above already carry the share. The old check ran
+      // whenever the room object existed, so on a direct connection it
+      // always failed and showed "Your screen could not be shared"
+      // for a share that was working. A failed verify is never shown
+      // to the user any more: the publish is retried quietly in the
+      // background and the share stays up.
+      const livekitRoom = livekitRoomRef.current;
+      if (livekitRoom && livekitRoom.state === 'connected') {
         let screenPublished = false;
-        for (let attempt = 0; attempt < 4 && !screenPublished; attempt++) {
+        for (let attempt = 0; attempt < 8 && !screenPublished; attempt++) {
           try {
-            const pub = livekitRoomRef.current.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+            const pub = livekitRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
             screenPublished = !!pub?.track && pub.track.readyState === 'live';
           } catch (e) { /* publication unreadable: retry below */ }
           if (screenPublished) break;
-          if (attempt < 3) {
+          if (attempt < 7) {
             await new Promise(r => setTimeout(r, 1500));
             if (livekitScreenTrackRef.current?.readyState === 'live') {
               await publishLiveKitTrack(livekitScreenTrackRef.current, Track.Source.ScreenShare);
@@ -5183,9 +5220,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           }
         }
         if (!screenPublished) {
-          const msg = 'Your screen could not be shared, others cannot see it yet. Stop the share and start it again.';
-          setScreenShareError(msg);
-          triggerToast(msg);
+          // Quiet background retry only: the share stays up (the direct
+          // path may still carry it) and no error is shown to anyone.
+          console.warn('[Screen Share] Screen track is not confirmed on the video server yet, retrying quietly in the background.');
+          void (async () => {
+            for (let attempt = 0; attempt < 5; attempt++) {
+              await new Promise(r => setTimeout(r, 4000));
+              const track = livekitScreenTrackRef.current;
+              const room = livekitRoomRef.current;
+              if (!track || track.readyState !== 'live' || !room || room.state !== 'connected') return;
+              try {
+                const pub = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+                if (pub?.track && pub.track.readyState === 'live') return;
+              } catch (e) { /* retry below */ }
+              await publishLiveKitTrack(track, Track.Source.ScreenShare);
+            }
+          })();
         }
       }
       // System audio, when the browser provided it: published as the
@@ -5241,6 +5291,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
       screenVideoRef.current = null;
       setScreenShareStarting(false);
+      screenShareStartingRef.current = false;
       setIsScreenSharing(false);
       // Every failure path tells the user why -- a silent no-op here is
       // what made sharing look broken when the picker was cancelled or
@@ -5265,6 +5316,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleToggleScreenShare = async () => {
+    // A second tap while the picker is still opening must not start a
+    // second capture: the first tap already owns the picker.
+    if (screenShareStarting || screenShareStartingRef.current) return;
     if (isScreenShareBlockedForGuests && !isAdmin) {
       alert(t('room.screen_sharing_is_blocked_by'));
       return;
@@ -6877,6 +6931,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  // Pre-join background choice: apply the choice saved in PreJoinCheck
+  // once the camera is live. One shot per mount, with a few short
+  // retries while the camera is still starting, then it gives up
+  // quietly and the room keeps the normal camera.
+  const bgFxPrejoinAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!isMediaInitialized || bgFxPrejoinAppliedRef.current) return;
+    let saved: string | null = null;
+    try { saved = localStorage.getItem('giin_background_fx'); } catch (e) { /* no saved choice */ }
+    if (saved !== 'blur' && saved !== 'giin') return;
+    const mode = saved as 'blur' | 'giin';
+    let tries = 0;
+    let cancelled = false;
+    const attempt = () => {
+      if (cancelled || bgFxPrejoinAppliedRef.current) return;
+      tries += 1;
+      if (isVideoOnRef.current && localVideoTrackRef.current?.readyState === 'live') {
+        bgFxPrejoinAppliedRef.current = true;
+        void enableBackgroundFx(mode);
+        return;
+      }
+      if (tries < 4) window.setTimeout(attempt, 1000);
+    };
+    attempt();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMediaInitialized]);
+
   const broadcastVideoFilter = (filter: string, studioLight: boolean) => {
     if (sigChannelRef.current) {
       sigChannelRef.current.send({
@@ -7926,12 +8008,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       flexDirection: 'column',
       height: isFullscreen ? '100dvh' : '100%',
       minHeight: 0,
-      backgroundColor: '#07090E', // Dark screen for immersive meeting
-      color: 'white',
+      backgroundColor: 'var(--bg-app)',
+      color: 'var(--text-main)',
       borderRadius: isFullscreen ? '0' : 'var(--radius-lg)',
       overflow: 'hidden',
       position: 'relative',
-      border: isFullscreen ? 'none' : '1px solid #1E293B',
+      border: isFullscreen ? 'none' : '1px solid var(--border-color)',
       animation: 'pop-in var(--transition-normal)'
     }}>
       {/* Breakout Room Status Banner */}
@@ -8071,23 +8153,31 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '1rem 1.5rem',
-        borderBottom: '1px solid #1E293B',
-        backgroundColor: 'rgba(11, 15, 25, 0.9)',
+        padding: '0.6rem 1rem',
+        borderBottom: '1px solid var(--border-color)',
+        backgroundColor: 'var(--bg-card)',
         zIndex: 10
       }}>
         <div className="meeting-topbar-title-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
           <span className="badge badge-premium" style={{ color: '#000', backgroundColor: 'var(--color-accent)', border: 'none' }}>
             LIVE
           </span>
-          <h3 className="meeting-topbar-title" style={{ fontSize: '1.1rem', color: 'white', fontFamily: 'var(--font-heading)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+          <h3 className="meeting-topbar-title" style={{ fontSize: '1.1rem', color: 'var(--text-main)', fontFamily: 'var(--font-heading)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
             {meetingTitle}
           </h3>
         </div>
         <div className="meeting-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem' }}>
+          {/* Phone only: connection dot and meeting timer live here, in
+              the slim top strip, so the bottom bar stays one compact row. */}
+          <span className="mobile-room-meta" style={{ display: 'none', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: connectionQuality === 'excellent' || connectionQuality === 'good' ? '#10B981' : connectionQuality === 'poor' ? '#F59E0B' : connectionQuality === 'lost' ? '#EF4444' : '#64748B' }} />
+            <Clock size={12} color="var(--color-accent)" />
+            {formatElapsedTime(elapsedSeconds)}
+            {isRecording && <span style={{ color: '#EF4444' }}>REC</span>}
+          </span>
           {/* Participant count */}
           <span
-            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'white', fontWeight: 600 }}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-main)', fontWeight: 600 }}
             title={t('room.people_in_this_meeting_including', { v1: participants.length + 1 })}
           >
             <Users size={14} color="var(--color-accent)" />
@@ -8845,6 +8935,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                     e.stopPropagation();
                     if (pinnedKey === 'local') {
                       setPinnedKey(null);
+                      if (!spotlightKey) setLayoutMode('grid');
                     } else {
                       setPinnedKey('local');
                       setLayoutMode('speaker');
@@ -8873,9 +8964,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                     {/* Phase B design pass (14): a gold SPOTLIGHT chip so
                         everyone sees at a glance who the host spotlighted. */}
                     {computedSpotlightKey === 'local' && (layoutMode === 'speaker' || layoutMode === 'side') && (
-                      <span style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: 'var(--color-accent)', color: 'black', fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.05em', padding: '3px 9px', borderRadius: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); clearSpotlight(); }} title="Tap to remove the spotlight" aria-label="Remove spotlight" style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: 'var(--color-accent)', color: 'black', fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.05em', padding: '3px 9px', borderRadius: '20px', border: 'none', cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
                         <Star size={11} /> SPOTLIGHT
-                      </span>
+                      </button>
                     )}
                 {isVideoOn && stream && localCameraLive ? (
                   <>
@@ -9056,6 +9147,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                         e.stopPropagation();
                         if (pinnedKey === peerKey) {
                           setPinnedKey(null);
+                          if (!spotlightKey) setLayoutMode('grid');
                         } else {
                           setPinnedKey(peerKey);
                           setLayoutMode('speaker');
@@ -9083,9 +9175,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                     </button>
                     {/* Phase B design pass (14): gold SPOTLIGHT chip. */}
                     {computedSpotlightKey === peerKey && (layoutMode === 'speaker' || layoutMode === 'side') && (
-                      <span style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: 'var(--color-accent)', color: 'black', fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.05em', padding: '3px 9px', borderRadius: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); clearSpotlight(); }} title="Tap to remove the spotlight" aria-label="Remove spotlight" style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: 'var(--color-accent)', color: 'black', fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.05em', padding: '3px 9px', borderRadius: '20px', border: 'none', cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
                         <Star size={11} /> SPOTLIGHT
-                      </span>
+                      </button>
                     )}
                     {/* Phase B (14): host spotlight, the host spotlights
                         one speaker for EVERYONE; a participant's own pin
@@ -9396,7 +9488,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                       (() => {
                         const screenPeerKey = screenSharePeerKey;
                         const screenStreamObj = screenPeerKey ? remoteScreenStreams[screenPeerKey] : null;
-                        const screenPeerName = screenPeerKey ? peerStates[screenPeerKey].name : 'Remote Peer';
+                        const screenPeerName = screenPeerKey ? (peerStates[screenPeerKey]?.name || 'Participant') : 'Remote Peer';
                         return screenStreamObj ? (
                           <video
                             key={screenStreamObj?.id || 'remote-screen'}
@@ -9448,40 +9540,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                         />
                       </div>
                     )}
-                    {/* Secure Fintech Watermark Overlay, wired to the
-                        Branding & Layout watermark settings: hidden when
-                        the mode is 'none'; size and opacity follow the
-                        watermark scale / opacity sliders. */}
-                    {watermarkMode !== 'none' && (
-                    <div style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      pointerEvents: 'none',
-                      zIndex: 20,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                      opacity: 0.02 + (watermarkOpacity / 100) * 0.28,
-                      userSelect: 'none'
-                    }}>
-                      <div style={{
-                        transform: 'rotate(-25deg)',
-                        fontSize: `${(1.8 * watermarkScale) / 100}rem`,
-                        fontWeight: 800,
-                        color: 'white',
-                        textAlign: 'center',
-                        whiteSpace: 'nowrap',
-                        fontFamily: 'monospace',
-                        letterSpacing: '3px'
-                      }}>
-                        {t('room.confidential_giin_secure_system', { v1: currentUser?.email || 'GUEST', v2: new Date().toLocaleDateString() })}
-                      </div>
-                    </div>
-                    )}
+                    {/* No watermark over the shared screen: it covered the
+                        shared content, so the room shows the share only. */}
                     
                     {isAnnotating && isScreenSharing && (
                       <ScreenAnnotation 
@@ -9575,31 +9635,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 display: 'flex',
                 flexDirection: 'column',
                 position: 'relative',
-                padding: window.innerWidth < 768 ? '0.75rem' : '1.5rem',
+                padding: window.innerWidth < 768 ? '0.5rem' : '1.5rem',
                 overflowY: 'auto',
-                background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(250, 189, 2, 0.06), transparent 60%), radial-gradient(ellipse 70% 55% at 50% 110%, rgba(37, 99, 235, 0.10), transparent 65%), #07090E'
+                background: 'var(--room-stage)'
               }}>
-                {/* Video-feed watermark (Branding & Layout): the GIIN logo
-                    over the video grid. Mode 'branded' = top-left,
-                    'watermark' = top-right, 'none' = hidden. Size and
-                    opacity follow the watermark sliders live. */}
-                {watermarkMode !== 'none' && (
-                  <img
-                    src={watermarkLogo}
-                    alt=""
-                    aria-hidden="true"
-                    style={{
-                      position: 'absolute',
-                      top: 12,
-                      ...(watermarkMode === 'branded' ? { left: 12 } : { right: 12 }),
-                      width: `${Math.round(120 * (watermarkScale / 100))}px`,
-                      height: 'auto',
-                      opacity: watermarkOpacity / 100,
-                      zIndex: 60,
-                      pointerEvents: 'none',
-                    }}
-                  />
-                )}
+                {/* No logo over the video grid: it covered part of the
+                    video cards, so the room shows video only. */}
                 {/* Phase C2a (8): Focus mode banner, one tap back to everyone. */}
                 {layoutMode === 'focus' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.75rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(250,189,2,0.08)', fontSize: '0.8rem', color: 'white', position: 'relative', zIndex: 5 }}>
@@ -11973,9 +12014,78 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         </div>
       )}
 
+      {/* Device picker menus (mic + speaker, camera), opened from the
+          chevron beside the mute / video buttons. One menu at a time,
+          tap outside to close, pick a device to switch it live. */}
+      {deviceMenu && (
+        <>
+          <div aria-hidden="true" onClick={() => setDeviceMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 14000 }} />
+          <div className="scroll-refined" style={{
+            position: 'fixed',
+            bottom: 'calc(77px + env(safe-area-inset-bottom))',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 'min(320px, calc(100vw - 32px))',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '12px',
+            padding: '0.75rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.35rem',
+            zIndex: 15000,
+            maxHeight: 'calc(100dvh - 170px)',
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)'
+          }}>
+            {deviceMenu === 'audio' ? (
+              <>
+                <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem' }}>MICROPHONE</div>
+                {deviceList.filter(d => d.kind === 'audioinput').map(d => (
+                  <button key={d.deviceId} type="button" onClick={() => { void changeMicrophone(d.deviceId); setDeviceMenu(null); }} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'none', border: 'none', padding: '0.6rem 0.85rem', width: '100%', minHeight: '44px', borderRadius: '6px', color: 'var(--text-main)', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left' }}>
+                    <Mic size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.label || 'Microphone'}</span>
+                    {selectedMic === d.deviceId && <Check size={16} style={{ flexShrink: 0, color: 'var(--color-accent)' }} />}
+                  </button>
+                ))}
+                {deviceList.filter(d => d.kind === 'audioinput').length === 0 && (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.35rem 0.85rem', margin: 0 }}>No microphones found.</p>
+                )}
+                <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem', borderTop: '1px solid var(--border-color)', marginTop: '0.35rem', paddingTop: '0.6rem' }}>SPEAKER</div>
+                {deviceList.filter(d => d.kind === 'audiooutput').map(d => (
+                  <button key={d.deviceId} type="button" onClick={() => { changeSpeaker(d.deviceId); setDeviceMenu(null); }} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'none', border: 'none', padding: '0.6rem 0.85rem', width: '100%', minHeight: '44px', borderRadius: '6px', color: 'var(--text-main)', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left' }}>
+                    <Volume2 size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.label || 'Speaker'}</span>
+                    {selectedSpeaker === d.deviceId && <Check size={16} style={{ flexShrink: 0, color: 'var(--color-accent)' }} />}
+                  </button>
+                ))}
+                {deviceList.filter(d => d.kind === 'audiooutput').length === 0 && (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.35rem 0.85rem', margin: 0 }}>No speakers found, using the default speaker.</p>
+                )}
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem' }}>CAMERA</div>
+                {deviceList.filter(d => d.kind === 'videoinput').map(d => (
+                  <button key={d.deviceId} type="button" onClick={() => { void changeCamera(d.deviceId); setDeviceMenu(null); }} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'none', border: 'none', padding: '0.6rem 0.85rem', width: '100%', minHeight: '44px', borderRadius: '6px', color: 'var(--text-main)', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left' }}>
+                    <VideoIcon size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.label || 'Camera'}</span>
+                    {selectedCamera === d.deviceId && <Check size={16} style={{ flexShrink: 0, color: 'var(--color-accent)' }} />}
+                  </button>
+                ))}
+                {deviceList.filter(d => d.kind === 'videoinput').length === 0 && (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.35rem 0.85rem', margin: 0 }}>No cameras found.</p>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Toolbar / Controls */}
       {isDirectCall ? (
-        <div style={{
+        <div className="direct-call-pill" style={{
           position: 'absolute',
           bottom: '24px',
           left: '50%',
@@ -11996,33 +12106,59 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
           transition: 'all 0.3s ease'
         }}>
-          {/* Mute Audio */}
-          <button 
-            onClick={toggleMute}
-            style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '14px',
-              backgroundColor: isMuted ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
-              border: 'none',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '2px',
-              color: 'white',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              backdropFilter: 'blur(4px)'
-            }}
-            title={isMuted ? "Unmute Mic (M)" : "Mute Mic (M)"}
-          >
-            {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
-            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isMuted ? t('room.unmute') : t('room.mute')}</span>
-          </button>
+          {/* Mute Audio, with a device picker chevron (mic + speaker). */}
+          <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexShrink: 0 }}>
+            <button
+              onClick={toggleMute}
+              style={{
+                width: '48px',
+                height: '56px',
+                borderRadius: '14px 0 0 14px',
+                backgroundColor: isMuted ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
+                border: 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '2px',
+                color: 'white',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                backdropFilter: 'blur(4px)'
+              }}
+              title={isMuted ? "Unmute Mic (M)" : "Mute Mic (M)"}
+            >
+              {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+              <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isMuted ? t('room.unmute') : t('room.mute')}</span>
+            </button>
+            <button
+              type="button"
+              className="device-chevron"
+              onClick={() => { void refreshDevices(); setDeviceMenu(deviceMenu === 'audio' ? null : 'audio'); }}
+              aria-label="Choose microphone and speaker"
+              title="Choose microphone and speaker"
+              style={{
+                width: '20px',
+                height: '56px',
+                borderRadius: '0 14px 14px 0',
+                backgroundColor: isMuted ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
+                border: 'none',
+                borderLeft: '1px solid rgba(255,255,255,0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                cursor: 'pointer',
+                flexShrink: 0
+              }}
+            >
+              <ChevronUp size={12} />
+            </button>
+          </div>
 
           {/* Feature 17: AI noise cleaning toggle, on by default. */}
           <button
+            className="mobile-hidden"
             onClick={() => void toggleNoiseSuppression()}
             style={{
               width: '56px',
@@ -12046,33 +12182,59 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isNoiseSuppressionOn ? 'Clean' : 'Noise'}</span>
           </button>
 
-          {/* Toggle Video */}
-          <button 
-            onClick={toggleVideo}
-            style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '14px',
-              backgroundColor: !isVideoOn ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
-              border: 'none',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '2px',
-              color: 'white',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              backdropFilter: 'blur(4px)'
-            }}
-            title={isVideoOn ? "Turn Camera Off (V)" : "Turn Camera On (V)"}
-          >
-            {isVideoOn ? <VideoIcon size={18} /> : <VideoOff size={18} />}
-            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isVideoOn ? 'Cam Off' : 'Cam On'}</span>
-          </button>
+          {/* Toggle Video, with a device picker chevron (camera). */}
+          <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexShrink: 0 }}>
+            <button
+              onClick={toggleVideo}
+              style={{
+                width: '48px',
+                height: '56px',
+                borderRadius: '14px 0 0 14px',
+                backgroundColor: !isVideoOn ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
+                border: 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '2px',
+                color: 'white',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                backdropFilter: 'blur(4px)'
+              }}
+              title={isVideoOn ? "Turn Camera Off (V)" : "Turn Camera On (V)"}
+            >
+              {isVideoOn ? <VideoIcon size={18} /> : <VideoOff size={18} />}
+              <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isVideoOn ? 'Cam Off' : 'Cam On'}</span>
+            </button>
+            <button
+              type="button"
+              className="device-chevron"
+              onClick={() => { void refreshDevices(); setDeviceMenu(deviceMenu === 'video' ? null : 'video'); }}
+              aria-label="Choose camera"
+              title="Choose camera"
+              style={{
+                width: '20px',
+                height: '56px',
+                borderRadius: '0 14px 14px 0',
+                backgroundColor: !isVideoOn ? '#EF4444' : 'rgba(255, 255, 255, 0.1)',
+                border: 'none',
+                borderLeft: '1px solid rgba(255,255,255,0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                cursor: 'pointer',
+                flexShrink: 0
+              }}
+            >
+              <ChevronUp size={12} />
+            </button>
+          </div>
 
           {/* Toggle Screen Share */}
-          <button 
+          <button
+            disabled={screenShareStarting}
             onClick={handleToggleScreenShare}
             style={{
               width: '56px',
@@ -12098,6 +12260,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           {/* Phase C2b (5), screen share sound, one clear toggle.
               Sound shares only while the sharer has it on. */}
           <button
+            className="mobile-hidden"
             onClick={() => setShareSound(!shareSoundOn)}
             style={{
               width: '56px',
@@ -12122,6 +12285,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
           {/* Speakers, one-tap feedback breaker (Fix Round 8 #4) */}
           <button
+            className="mobile-hidden"
             onClick={() => setIsSpeakersMuted(!isSpeakersMuted)}
             style={{
               width: '56px',
@@ -12146,6 +12310,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
           {/* Record (local, on this device) */}
           <button
+            className="mobile-hidden"
             onClick={() => { if (isRecording) stopRecording(); else startRecording(); }}
             style={{
               width: '56px',
@@ -12173,6 +12338,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
           {/* Picture-in-Picture Popout Button */}
           <button 
+            className="mobile-hidden"
             onClick={handleTogglePictureInPicture}
             style={{
               width: '52px',
@@ -12248,6 +12414,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
           {/* Toggle Workspace notes Panel */}
           <button 
+            className="mobile-hidden"
             onClick={() => setActivePanel(activePanel === 'workspace' ? 'none' : 'workspace')}
             style={{
               width: '52px',
@@ -12318,7 +12485,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           {/* Left Side details */}
           <div className="meeting-toolbar-left" style={{ gap: '0.5rem' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: </span>
-            <span style={{ color: 'white', fontWeight: 600, fontSize: '0.85rem' }}>{meetingId.slice(0, 8)}</span>
+            <span style={{ color: 'var(--text-main)', fontWeight: 600, fontSize: '0.85rem' }}>{meetingId.slice(0, 8)}</span>
             {/* Phase A (5): small non-technical connection indicator ,
                 a dot plus plain words. The millisecond number lives
                 only in the tooltip, never on the toolbar. When video
@@ -12386,7 +12553,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 alignItems: 'center',
                 gap: '0.35rem',
                 marginLeft: '0.5rem',
-                color: 'white',
+                color: 'var(--text-main)',
                 fontSize: '0.85rem',
                 fontWeight: 600,
                 fontFamily: 'monospace'
@@ -12397,7 +12564,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               {formatElapsedTime(elapsedSeconds)}
             </span>
             {isRecording && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '999px', backgroundColor: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.5)', color: '#FCA5A5', fontSize: '0.8rem', fontWeight: 700 }}>
+              <span className="rec-indicator" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '999px', backgroundColor: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.5)', color: '#FCA5A5', fontSize: '0.8rem', fontWeight: 700 }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#EF4444' }} />
                 REC {formatElapsedTime(recordingSeconds)} - on this device
               </span>
@@ -12408,75 +12575,112 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
           {/* Center Controls */}
           <div className="meeting-toolbar-center" style={{ gap: '0.75rem', position: 'relative' }}>
-            {/* Mute Audio */}
-            <button 
-              className="toolbar-control-btn"
-              onClick={toggleMute}
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                backgroundColor: isMuted ? '#EF4444' : '#1E293B',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
-              }}
-              title={isMuted ? "Unmute Mic" : "Mute Mic"}
-            >
-              {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
-            </button>
+            {/* Mute Audio, with a device picker chevron (mic + speaker).
+                The round button still mutes with one tap, the chevron
+                only opens the device choice. */}
+            <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexShrink: 0 }}>
+              <button
+                className="toolbar-control-btn"
+                onClick={toggleMute}
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: isMuted ? '#EF4444' : '#1E293B',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)'
+                }}
+                title={isMuted ? "Unmute Mic" : "Mute Mic"}
+              >
+                {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+              </button>
+              <button
+                type="button"
+                className="device-chevron"
+                onClick={() => { void refreshDevices(); setDeviceMenu(deviceMenu === 'audio' ? null : 'audio'); }}
+                aria-label="Choose microphone and speaker"
+                title="Choose microphone and speaker"
+                style={{
+                  width: '18px',
+                  height: '40px',
+                  marginLeft: '-7px',
+                  borderRadius: '0 20px 20px 0',
+                  backgroundColor: isMuted ? '#EF4444' : '#1E293B',
+                  border: 'none',
+                  borderLeft: '1px solid rgba(255,255,255,0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                <ChevronUp size={12} />
+              </button>
+            </div>
 
-            {/* Feature 17: AI noise cleaning toggle, on by default. */}
-            <button
-              className="toolbar-control-btn"
-              onClick={() => void toggleNoiseSuppression()}
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                backgroundColor: isNoiseSuppressionOn && noiseSuppressionStatus !== 'unavailable' ? 'var(--color-accent)' : '#1E293B',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: isNoiseSuppressionOn && noiseSuppressionStatus !== 'unavailable' ? 'black' : 'white',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
-              }}
-              title={noiseSuppressionStatus === 'unavailable' ? 'Noise cleaning could not start on this device, your normal microphone is still on' : isNoiseSuppressionOn ? 'Noise cleaning: on, background noise is removed before others hear it' : 'Noise cleaning: off, turn on to remove background noise'}
-            >
-              <AudioLines size={18} />
-            </button>
+            {/* Noise cleaning lives in the More menu now. */}
 
-            {/* Stop Video */}
-            <button 
-              className="toolbar-control-btn"
-              onClick={toggleVideo}
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                backgroundColor: !isVideoOn ? '#EF4444' : '#1E293B',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
-              }}
-              title={isVideoOn ? "Turn Camera Off" : "Turn Camera On"}
-            >
-              {isVideoOn ? <VideoIcon size={18} /> : <VideoOff size={18} />}
-            </button>
+            {/* Stop Video, with a device picker chevron (camera).
+                The round button still turns video on and off with one
+                tap, the chevron only opens the camera choice. */}
+            <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexShrink: 0 }}>
+              <button
+                className="toolbar-control-btn"
+                onClick={toggleVideo}
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: !isVideoOn ? '#EF4444' : '#1E293B',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)'
+                }}
+                title={isVideoOn ? "Turn Camera Off" : "Turn Camera On"}
+              >
+                {isVideoOn ? <VideoIcon size={18} /> : <VideoOff size={18} />}
+              </button>
+              <button
+                type="button"
+                className="device-chevron"
+                onClick={() => { void refreshDevices(); setDeviceMenu(deviceMenu === 'video' ? null : 'video'); }}
+                aria-label="Choose camera"
+                title="Choose camera"
+                style={{
+                  width: '18px',
+                  height: '40px',
+                  marginLeft: '-7px',
+                  borderRadius: '0 20px 20px 0',
+                  backgroundColor: !isVideoOn ? '#EF4444' : '#1E293B',
+                  border: 'none',
+                  borderLeft: '1px solid rgba(255,255,255,0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                <ChevronUp size={12} />
+              </button>
+            </div>
 
             {/* Screen Share */}
-            <button 
+            <button
               className="toolbar-control-btn"
+              disabled={screenShareStarting}
               onClick={handleToggleScreenShare}
               style={{
                 width: '40px',
@@ -12497,74 +12701,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <Monitor size={18} />
             </button>
 
-            {/* Speakers, one-tap feedback breaker (Fix Round 8 #4) */}
-            <button
-              className="toolbar-control-btn"
-              onClick={() => setIsSpeakersMuted(!isSpeakersMuted)}
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                backgroundColor: isSpeakersMuted ? '#EF4444' : '#1E293B',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
-              }}
-              title={isSpeakersMuted ? 'Unmute speakers' : 'Mute speakers (stops echo / feedback)'}
-            >
-              {isSpeakersMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-            </button>
+            {/* Speakers mute lives in the More menu now. */}
 
-            {/* Device Settings Toggle */}
-            <button 
-              className="toolbar-control-btn"
-              onClick={() => setIsDeviceModalOpen(true)}
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                backgroundColor: isDeviceModalOpen ? 'var(--color-primary)' : '#1E293B',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
-              }}
-              title={t('room.device_settings')}
-            >
-              <Settings size={18} />
-            </button>
+            {/* Device settings live in the More menu now, and as the
+                chevron pickers on the mute and video buttons. */}
 
-            {/* Full Screen Toggle */}
-            <button 
-              className="toolbar-control-btn"
-              onClick={toggleFullscreen}
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                backgroundColor: isFullscreen ? 'var(--color-primary)' : '#1E293B',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
-              }}
-              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
-            >
-              {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-            </button>
+            {/* Fullscreen lives in the More menu now. */}
 
-            {/* Hand Raise / Lower */}
-            <div ref={handRaiseRef} style={{ position: 'relative' }}>
+            {/* Hand Raise / Lower. Hidden on phones: the button lives in
+                the More menu there, so the bottom bar stays one row. */}
+            <div ref={handRaiseRef} className="mobile-hidden" style={{ position: 'relative' }}>
               <button 
                 className="toolbar-control-btn"
                 onClick={() => {
@@ -12767,29 +12913,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <MoreHorizontal size={18} />
             </button>
 
-            {/* Emoji Reactions Trigger */}
+            {/* Emoji Reactions popover. The trigger lives in the More
+                menu now (Reactions), this wrapper only holds the popover. */}
             <div ref={emojiMenuRef} style={{ position: 'relative' }}>
-              <button 
-                className="toolbar-control-btn"
-                onClick={() => setShowEmojiReactions(!showEmojiReactions)}
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  backgroundColor: showEmojiReactions ? 'rgba(255, 255, 255, 0.15)' : '#1E293B',
-                  border: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'white',
-                  cursor: 'pointer',
-                  transition: 'all var(--transition-fast)'
-                }}
-                title={t('room.send_reaction')}
-              >
-                <Smile size={18} />
-              </button>
-
               {showEmojiReactions && (
                 <div style={{
                   position: 'fixed',
@@ -12972,6 +13098,61 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.live_captions')}</span>
                   </button>
 
+                  {/* Reactions */}
+                  <button
+                    onClick={() => {
+                      setShowEmojiReactions(true);
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Smile size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.send_reaction')}</span>
+                  </button>
+
+                  {/* Raise hand */}
+                  <button
+                    onClick={() => {
+                      if (localHandRaised) toggleHandRaise();
+                      else setShowHandRaiseMenu(true);
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: localHandRaised ? 'rgba(250,189,2,0.15)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Hand size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.raise_hand')}</span>
+                  </button>
+
                   <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem', borderTop: '1px solid #1E293B', marginTop: '0.35rem', paddingTop: '0.6rem' }}>MEDIA</div>
                   {/* Phase B (21): low-bandwidth mode toggle. */}
                   <button
@@ -12998,6 +13179,143 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                   >
                     {lowBandwidth ? <WifiOff size={16} style={{ flexShrink: 0 }} /> : <Wifi size={16} style={{ flexShrink: 0 }} />}
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{lowBandwidth ? 'Low-bandwidth mode: On' : 'Low-bandwidth mode'}</span>
+                  </button>
+
+                  {/* Background blur / virtual background, opens the same
+                      panel as camera filters, straight from here so it is
+                      easy to find. */}
+                  <button
+                    onClick={() => {
+                      setActivePanel('filters');
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: activePanel === 'filters' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <VideoIcon size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>Background</span>
+                  </button>
+
+                  {/* Noise cleaning */}
+                  <button
+                    onClick={() => {
+                      void toggleNoiseSuppression();
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: isNoiseSuppressionOn ? 'rgba(250,189,2,0.15)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <AudioLines size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{isNoiseSuppressionOn ? 'Noise cleaning: On' : 'Noise cleaning'}</span>
+                  </button>
+
+                  {/* Speakers */}
+                  <button
+                    onClick={() => {
+                      setIsSpeakersMuted(!isSpeakersMuted);
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: isSpeakersMuted ? 'rgba(239,68,68,0.15)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {isSpeakersMuted ? <VolumeX size={16} style={{ flexShrink: 0 }} /> : <Volume2 size={16} style={{ flexShrink: 0 }} />}
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{isSpeakersMuted ? 'Speakers: Muted' : 'Speakers'}</span>
+                  </button>
+
+                  {/* Devices */}
+                  <button
+                    onClick={() => {
+                      setIsDeviceModalOpen(true);
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Settings size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{t('room.device_settings')}</span>
+                  </button>
+
+                  {/* Fullscreen */}
+                  <button
+                    onClick={() => {
+                      toggleFullscreen();
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {isFullscreen ? <Minimize2 size={16} style={{ flexShrink: 0 }} /> : <Maximize2 size={16} style={{ flexShrink: 0 }} />}
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}</span>
                   </button>
 
                   {/* Camera Filters */}

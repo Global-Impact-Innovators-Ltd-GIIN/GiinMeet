@@ -117,6 +117,26 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
   useUiLanguage();
   const [proceedDespiteNetwork, setProceedDespiteNetwork] = useState(false);
   const [runId, setRunId] = useState(0);
+  // One tap is enough: when the only thing blocking Continue is checks
+  // still running, the tap waits and the room proceeds the moment the
+  // checks settle, instead of asking for a second tap.
+  const [pendingContinue, setPendingContinue] = useState(false);
+  // Background for the meeting, picked here and applied on join. The
+  // choice is 'none', 'blur' or 'giin', saved for the room to pick up.
+  const [bgFxChoice, setBgFxChoice] = useState<'none' | 'blur' | 'giin'>(() => {
+    try {
+      const saved = localStorage.getItem('giin_background_fx');
+      return saved === 'blur' || saved === 'giin' ? saved : 'none';
+    } catch (e) {
+      return 'none';
+    }
+  });
+  const pickBackground = (choice: 'none' | 'blur' | 'giin') => {
+    setBgFxChoice(choice);
+    try {
+      localStorage.setItem('giin_background_fx', choice);
+    } catch (e) { /* the room just starts with no effect */ }
+  };
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -455,6 +475,20 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       proceed();
       return;
     }
+    // The checks are still running and nothing has failed yet: one tap
+    // waits for them instead of doing nothing. The effect below proceeds
+    // the moment they settle.
+    const stillChecking =
+      displayName.trim().length > 0 &&
+      (networkStatus === 'checking' || cameraStatus === 'checking' || micStatus === 'checking') &&
+      !(networkStatus === 'fail' && !proceedDespiteNetwork) &&
+      !(cameraStatus === 'fail' && !joinWithoutDevices) &&
+      !(micStatus === 'fail' && !joinWithoutDevices);
+    if (stillChecking) {
+      setPendingContinue(true);
+      setBlockerMessage('Waiting for the checks to finish, you will continue automatically.');
+      return;
+    }
     const blocker = firstBlocker();
     if (!blocker) {
       setBlockerMessage('Something is still being checked, give it a moment, then tap Continue again.');
@@ -480,6 +514,31 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
       joinWithoutDevices ? false : audioOn && micStatus === 'pass',
     );
   };
+
+  // A tap that waited on the checks: proceed the moment they settle,
+  // or explain the real blocker if one of them failed instead.
+  useEffect(() => {
+    if (!pendingContinue) return;
+    if (canProceed) {
+      setPendingContinue(false);
+      setBlockerMessage(null);
+      proceed();
+      return;
+    }
+    const stillChecking = networkStatus === 'checking' || cameraStatus === 'checking' || micStatus === 'checking';
+    if (!stillChecking) {
+      setPendingContinue(false);
+      const blocker = firstBlocker();
+      if (blocker) {
+        setBlockerMessage(blocker.text);
+        setHighlightKey(blocker.key);
+        window.setTimeout(() => setHighlightKey(null), 4000);
+      } else {
+        setBlockerMessage('Something is still being checked, give it a moment, then tap Continue again.');
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingContinue, canProceed, networkStatus, cameraStatus, micStatus]);
 
   const Row = ({
     icon,
@@ -666,6 +725,40 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
           />
         </div>
 
+        {/* Background: blur or a virtual backdrop, picked here and applied
+            when you join. The same choices live in the room under More,
+            then Background. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>Background</span>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+            {([
+              { id: 'none', label: 'Off' },
+              { id: 'blur', label: 'Blur' },
+              { id: 'giin', label: 'GIIN backdrop' },
+            ] as const).map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => pickBackground(f.id)}
+                className="premium-btn"
+                style={{
+                  justifyContent: 'center',
+                  fontSize: '0.8rem',
+                  height: '44px',
+                  border: bgFxChoice === f.id ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
+                  backgroundColor: bgFxChoice === f.id ? 'rgba(250,189,2,0.1)' : 'rgba(255,255,255,0.02)',
+                  color: bgFxChoice === f.id ? 'var(--color-accent)' : 'var(--text-main)',
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.45 }}>
+            {bgFxChoice === 'none' ? 'Your normal camera background. Pick Blur or GIIN backdrop to change it when you join.' : 'Applies when you join. It loads once from the internet, and if it cannot load your video stays normal.'}
+          </p>
+        </div>
+
         {/* Always offered, not only after a camera/mic failure: on a phone
             the checks can fail, time out, or the user may simply want to
             join audio-only, the escape must exist whatever state the
@@ -707,7 +800,7 @@ export const PreJoinCheck: React.FC<PreJoinCheckProps> = ({
             onClick={handleContinueClick}
             title={canProceed ? 'Continue to the meeting' : 'Tap to see what is still blocking you'}
           >
-            <span>{t('common.continue')}</span>
+            <span>{pendingContinue ? 'Waiting for checks…' : t('common.continue')}</span>
             <ArrowRight size={18} />
           </button>
         </div>

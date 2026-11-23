@@ -748,21 +748,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {/* Quick Action Grid */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-        gap: '1.5rem',
-        marginBottom: '2.5rem'
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '0.75rem',
+        marginBottom: '1.25rem'
       }}>
         {/* New Meeting */}
         <div 
           onClick={() => { if (!instantPasscode) setInstantPasscode(generateMeetingPasscode()); setShowInstantModal(true); }}
           className="glass-panel" 
           style={{
-            padding: '2rem',
+            padding: '0.9rem 1rem',
             cursor: 'pointer',
             transition: 'all var(--transition-fast)',
             display: 'flex',
-            flexDirection: 'column',
-            gap: '1rem',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: '0.75rem',
             background: 'linear-gradient(135deg, var(--color-primary) 0%, #001A4C 100%)',
             color: 'white',
             border: 'none'
@@ -779,20 +780,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div 
             className="dashboard-card-icon"
             style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '12px',
+              width: '40px',
+              height: '40px',
+              borderRadius: '10px',
+              flexShrink: 0,
               backgroundColor: 'rgba(255,255,255,0.15)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center'
             }}
           >
-            <Video size={24} color="var(--color-accent)" />
+            <Video size={20} color="var(--color-accent)" />
           </div>
           <div>
-            <h3 style={{ color: 'white', fontSize: '1.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>{t('dash.newMeeting')}</h3>
-            <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem' }}>{t('dash.start_now')}</p>
+            <h3 style={{ color: 'white', fontSize: '1rem', margin: 0, fontFamily: 'var(--font-heading)' }}>{t('dash.newMeeting')}</h3>
+            <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.78rem', margin: 0 }}>{t('dash.start_now')}</p>
           </div>
         </div>
 
@@ -801,12 +803,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           onClick={() => setShowJoinModal(true)}
           className="glass-panel" 
           style={{
-            padding: '2rem',
+            padding: '0.9rem 1rem',
             cursor: 'pointer',
             transition: 'all var(--transition-fast)',
             display: 'flex',
-            flexDirection: 'column',
-            gap: '1rem'
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: '0.75rem'
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.transform = 'translateY(-4px)';
@@ -818,20 +821,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div 
             className="dashboard-card-icon"
             style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '12px',
+              width: '40px',
+              height: '40px',
+              borderRadius: '10px',
+              flexShrink: 0,
               backgroundColor: 'rgba(112, 130, 190, 0.15)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center'
             }}
           >
-            <UserPlus size={24} color="var(--color-primary)" />
+            <UserPlus size={20} color="var(--color-primary)" />
           </div>
           <div>
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>{t('dash.joinMeeting')}</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t('dash.enter_a_code_or_link')}</p>
+            <h3 style={{ fontSize: '1rem', margin: 0, fontFamily: 'var(--font-heading)' }}>{t('dash.joinMeeting')}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: 0 }}>{t('dash.enter_a_code_or_link')}</p>
           </div>
         </div>
 
@@ -840,12 +844,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           onClick={() => { if (!schedulePasscode) setSchedulePasscode(generateMeetingPasscode()); setShowScheduleModal(true); }}
           className="glass-panel" 
           style={{
-            padding: '2rem',
+            padding: '0.9rem 1rem',
             cursor: 'pointer',
             transition: 'all var(--transition-fast)',
             display: 'flex',
-            flexDirection: 'column',
-            gap: '1rem'
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: '0.75rem'
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.transform = 'translateY(-4px)';
@@ -857,20 +862,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div 
             className="dashboard-card-icon"
             style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '12px',
+              width: '40px',
+              height: '40px',
+              borderRadius: '10px',
+              flexShrink: 0,
               backgroundColor: 'rgba(250, 189, 2, 0.15)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center'
             }}
           >
-            <Calendar size={24} color="var(--color-accent)" />
+            <Calendar size={20} color="var(--color-accent)" />
           </div>
           <div>
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', fontFamily: 'var(--font-heading)' }}>{t('schedule.title')}</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t('dash.pick_a_time')}</p>
+            <h3 style={{ fontSize: '1rem', margin: 0, fontFamily: 'var(--font-heading)' }}>{t('schedule.title')}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: 0 }}>{t('dash.pick_a_time')}</p>
           </div>
         </div>
       </div>
