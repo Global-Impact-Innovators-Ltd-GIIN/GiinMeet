@@ -15,7 +15,8 @@ import { createClient } from '@supabase/supabase-js';
 // Receivers ignore breakout events without the marker.
 //
 // Powers: host, co-host and moderator alike may start breakouts, end
-// them, move participants between rooms, and broadcast to all rooms.
+// them, move participants between rooms, and broadcast to all rooms,
+// and answer a rejoiner's state request (Phase A (6): 'breakout-state').
 // (Admit stays host + co-host only — see the admit route. Ending the
 // meeting, locking it, and changing room settings stay host-only.)
 //
@@ -55,7 +56,7 @@ async function broadcastToMeetingEvents(admin: any, meetingId: string, event: st
   }
 }
 
-const BREAKOUT_EVENTS = ['start-breakout', 'end-breakout', 'move-breakout', 'breakout-broadcast'];
+const BREAKOUT_EVENTS = ['start-breakout', 'end-breakout', 'move-breakout', 'breakout-broadcast', 'breakout-state'];
 
 function isValidAssignments(v: any): boolean {
   // An empty object is valid: the host may start breakouts before
@@ -104,6 +105,21 @@ export async function POST(req: NextRequest) {
     if (event === 'breakout-broadcast') {
       if (!message || typeof message !== 'string' || !message.trim() || message.trim().length > 500) {
         return NextResponse.json({ error: 'BAD_REQUEST', message: 'Write a message of up to 500 characters to broadcast.' }, { status: 400 });
+      }
+    }
+    // Phase A (6): the live state, answering a rejoiner's
+    // breakout-state-request. Same roster shape as start-breakout,
+    // but the duration is the REMAINING seconds — it can be under a
+    // minute near the end of a session.
+    if (event === 'breakout-state') {
+      if (!isValidAssignments(assignments)) {
+        return NextResponse.json({ error: 'BAD_REQUEST', message: 'Breakout assignments are invalid (rooms 1-5).' }, { status: 400 });
+      }
+      if (!Number.isInteger(durationSeconds) || durationSeconds < 0 || durationSeconds > 3600) {
+        return NextResponse.json({ error: 'BAD_REQUEST', message: 'Breakout duration is invalid.' }, { status: 400 });
+      }
+      if (roomsCount !== undefined && (!Number.isInteger(roomsCount) || roomsCount < 1 || roomsCount > 5)) {
+        return NextResponse.json({ error: 'BAD_REQUEST', message: 'Breakout room count must be between 1 and 5.' }, { status: 400 });
       }
     }
     const admin = getAdminClient();
@@ -196,6 +212,14 @@ export async function POST(req: NextRequest) {
     } else if (event === 'breakout-broadcast') {
       payload.message = message.trim();
       payload.from = callerName || (isHost ? 'Host' : 'Moderator');
+    } else if (event === 'breakout-state') {
+      // Phase A (6): the live state, answering a rejoiner's
+      // breakout-state-request. Same shape as start-breakout, but the
+      // duration is the REMAINING seconds and receivers apply it
+      // without moving anyone who is already in place.
+      payload.assignments = assignments;
+      payload.durationSeconds = durationSeconds;
+      payload.roomsCount = Number.isInteger(roomsCount) ? roomsCount : Math.max(1, ...(Object.values(assignments) as number[]));
     }
     try {
       await broadcastToMeetingEvents(admin, meetingId, event, payload);

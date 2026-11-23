@@ -173,6 +173,46 @@ export const getWebRTCScreenshareConstraints = () => {
   };
 };
 
+// Phase A (6): breakout assignment persistence across reloads.
+// sessionStorage (per tab) holds one snapshot per meeting: our room,
+// when the session ends, how many rooms exist, and the full roster.
+// It is the only thing that survives a refresh — the assignments
+// otherwise live only in client state and in broadcasts a rejoiner
+// has already missed. A snapshot whose time is up is dead and reads
+// as "no breakouts", so an old tab never rejoins a finished session.
+export interface StoredBreakout {
+  room: number | null;
+  endsAt: number;
+  roomsCount: number;
+  assignments: { [peerKey: string]: number };
+}
+const breakoutStorageKey = (meetingId: string) => `giin_breakout_${meetingId}`;
+export const readStoredBreakout = (meetingId: string): StoredBreakout | null => {
+  try {
+    const raw = sessionStorage.getItem(breakoutStorageKey(meetingId));
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return null;
+    if (data.room !== null && (!Number.isInteger(data.room) || data.room < 1 || data.room > 5)) return null;
+    if (!Number.isFinite(data.endsAt) || data.endsAt <= Date.now()) return null;
+    if (!Number.isInteger(data.roomsCount) || data.roomsCount < 1 || data.roomsCount > 5) return null;
+    if (!data.assignments || typeof data.assignments !== 'object') return null;
+    const assignments: { [peerKey: string]: number } = {};
+    Object.entries(data.assignments).forEach(([k, v]) => {
+      if (typeof k === 'string' && Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 5) assignments[k] = v as number;
+    });
+    return { room: data.room, endsAt: data.endsAt, roomsCount: data.roomsCount, assignments };
+  } catch (e) {
+    return null;
+  }
+};
+export const writeStoredBreakout = (meetingId: string, snap: StoredBreakout) => {
+  try { sessionStorage.setItem(breakoutStorageKey(meetingId), JSON.stringify(snap)); } catch (e) { /* storage unavailable: restore just won't happen */ }
+};
+export const clearStoredBreakout = (meetingId: string) => {
+  try { sessionStorage.removeItem(breakoutStorageKey(meetingId)); } catch (e) { /* ignore */ }
+};
+
 import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink, buildWhatsAppInviteUrl, isMeetingHostForUser, getSystemSettings } from '../supabaseClient';
 
 // Helper functions defined outside the component to satisfy purity rules
@@ -956,14 +996,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const meetingRoomRef = useRef<HTMLDivElement | null>(null);
 
-  const [breakoutRoom, setBreakoutRoom] = useState<number | null>(null);
+  // Phase A (6): restore our breakout room from the per-tab snapshot
+  // taken when breakouts started / we were moved. Without this, a
+  // refresh always landed the user back in the main room. A snapshot
+  // whose time is up reads as null, so nobody rejoins a finished
+  // session. `storedBreakout` is read once at mount and drives the
+  // initial values below.
+  const [storedBreakout] = useState<StoredBreakout | null>(() => readStoredBreakout(meetingId));
+  const [breakoutRoom, setBreakoutRoom] = useState<number | null>(() => storedBreakout?.room ?? null);
   // Ref mirror: the WebRTC signalling closures (presence handler) were
   // created before the last room change, so the P2P-mesh guard must read
   // the live value from here, not the frozen state.
   const breakoutRoomRef = useRef<number | null>(null);
   useEffect(() => { breakoutRoomRef.current = breakoutRoom; }, [breakoutRoom]);
-  const [breakoutTimeRemaining, setBreakoutTimeRemaining] = useState<number | null>(null);
-  const [breakoutRoomsCount, setBreakoutRoomsCount] = useState(2);
+  const [breakoutTimeRemaining, setBreakoutTimeRemaining] = useState<number | null>(() =>
+    storedBreakout ? Math.max(0, Math.ceil((storedBreakout.endsAt - Date.now()) / 1000)) : null);
+  const [breakoutRoomsCount, setBreakoutRoomsCount] = useState(storedBreakout?.roomsCount ?? 2);
   const [breakoutDurationMinutes, setBreakoutDurationMinutes] = useState(5);
 
   // Phase 3 (Feature 1) — host room management. Assignments are the
@@ -975,7 +1023,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // change. The roster itself is the admitted-participants list
   // (Supabase, polled) plus these assignments — never LiveKit
   // presence, which only ever sees the room you are in.
-  const [breakoutAssignments, setBreakoutAssignments] = useState<{ [peerKey: string]: number }>({});
+  // Phase A (6): the assignments ARE persisted now — in the per-tab
+  // snapshot above (readStoredBreakout) — so a refresh restores them
+  // alongside our own room. Still no database change.
+  const [breakoutAssignments, setBreakoutAssignments] = useState<{ [peerKey: string]: number }>(() => storedBreakout?.assignments ?? {});
   // Host broadcast draft + the last broadcast banner every client shows.
   const [breakoutBroadcastDraft, setBreakoutBroadcastDraft] = useState('');
   const [breakoutBroadcast, setBreakoutBroadcast] = useState<{ message: string; from: string } | null>(null);
@@ -983,7 +1034,23 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // The end-breakout receiver uses it to ignore duplicate end broadcasts
   // (every moderator's countdown timer fires the end at 0:00, so several
   // identical end events can arrive within a second).
-  const breakoutActiveRef = useRef(false);
+  // Phase A (6): true when we restored an active session from storage,
+  // so a rejoiner still hears the end-breakout broadcast that brings
+  // everyone back to the main room.
+  const breakoutActiveRef = useRef(storedBreakout !== null);
+  // Phase A (6): ref mirrors of the breakout roster / countdown / room
+  // count, so the meeting-events receivers (which close over the mount
+  // render) can answer a rejoiner's state request with live values.
+  const breakoutAssignmentsRef = useRef(breakoutAssignments);
+  useEffect(() => { breakoutAssignmentsRef.current = breakoutAssignments; }, [breakoutAssignments]);
+  const breakoutTimeRemainingRef = useRef(breakoutTimeRemaining);
+  useEffect(() => { breakoutTimeRemainingRef.current = breakoutTimeRemaining; }, [breakoutTimeRemaining]);
+  const breakoutRoomsCountRef = useRef(breakoutRoomsCount);
+  useEffect(() => { breakoutRoomsCountRef.current = breakoutRoomsCount; }, [breakoutRoomsCount]);
+  // Phase A (6): last time this client answered a breakout-state
+  // request — one answer per 10 s, so a roomful of reloads cannot
+  // storm the breakout route.
+  const lastBreakoutStateAnswerRef = useRef(0);
 
   // Meeting timer, layout and pinning, unread chat badge.
   const [meetingJoinedAt] = useState(() => Date.now());
@@ -2839,6 +2906,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setBreakoutRoomsCount(roomsCount);
     setBreakoutBroadcast(null);
     setBreakoutTimeRemaining(durationMinutes * 60);
+    // Phase A (6): snapshot the session — the host stays in the main
+    // room (room null) but still needs the roster + timer after their
+    // own reload. Every other client snapshots on the start receiver.
+    writeStoredBreakout(meetingId, {
+      room: null,
+      endsAt: Date.now() + durationMinutes * 60 * 1000,
+      roomsCount,
+      assignments,
+    });
     alert(`Started ${roomsCount} breakout rooms for ${durationMinutes} minutes. Breakout rooms work just like the main room.`);
   };
 
@@ -2850,6 +2926,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       return;
     }
     breakoutActiveRef.current = false;
+    // Phase A (6): breakouts are over — drop the snapshot so a later
+    // refresh does not rejoin a finished session.
+    clearStoredBreakout(meetingId);
     setBreakoutAssignments({});
     setBreakoutBroadcast(null);
     enterBreakoutRoom(null);
@@ -2881,6 +2960,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       else next[peerKey] = targetRoom;
       return next;
     });
+    // Phase A (6): keep the stored roster in step with the move.
+    const prevSnap = readStoredBreakout(meetingId);
+    if (prevSnap) {
+      const nextAssignments = { ...prevSnap.assignments };
+      if (targetRoom === null) delete nextAssignments[peerKey];
+      else nextAssignments[peerKey] = targetRoom;
+      writeStoredBreakout(meetingId, { ...prevSnap, assignments: nextAssignments });
+    }
   };
 
   // Phase 3 (Feature 1) — one message the host sends to every room at
@@ -3068,6 +3155,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           setBreakoutRoomsCount(data.roomsCount);
         }
         const myAssignment = data.assignments[myKey];
+        // Phase A (6): snapshot the session (our room, end time, room
+        // count, full roster) so a refresh lands us back in this room
+        // instead of the main room. The host stays in the main room
+        // (room null) but still snapshots the roster + timer, so a
+        // host reload keeps the breakout controls live.
+        writeStoredBreakout(meetingId, {
+          room: typeof myAssignment === 'number' ? myAssignment : null,
+          endsAt: Date.now() + data.durationSeconds * 1000,
+          roomsCount: typeof data.roomsCount === 'number' ? data.roomsCount : Math.max(1, ...(Object.values(data.assignments) as number[])),
+          assignments: data.assignments,
+        });
         if (myAssignment) {
           enterBreakoutRoom(myAssignment);
           setBreakoutTimeRemaining(data.durationSeconds);
@@ -3081,6 +3179,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (!payload?.payload || payload.payload.server !== true) return;
         if (!breakoutActiveRef.current) return;
         breakoutActiveRef.current = false;
+        // Phase A (6): breakouts are over — drop the snapshot so a
+        // later refresh does not rejoin a finished session.
+        clearStoredBreakout(meetingId);
         enterBreakoutRoom(null);
         setBreakoutTimeRemaining(null);
         setBreakoutAssignments({});
@@ -3099,6 +3200,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           else next[data.peerKey] = movedTarget;
           return next;
         });
+        // Phase A (6): keep the stored snapshot in step with the move,
+        // so a refresh after a move restores the NEW room, not the old
+        // one. Everyone's snapshot updates the roster; only the moved
+        // participant's own room changes.
+        const prevSnap = readStoredBreakout(meetingId);
+        if (prevSnap) {
+          const nextAssignments = { ...prevSnap.assignments };
+          if (movedTarget === null) delete nextAssignments[data.peerKey];
+          else nextAssignments[data.peerKey] = movedTarget;
+          const nextSnap: StoredBreakout = { ...prevSnap, assignments: nextAssignments };
+          if (data.peerKey === myKey) {
+            nextSnap.room = movedTarget;
+            if (typeof data.durationSeconds === 'number') nextSnap.endsAt = Date.now() + data.durationSeconds * 1000;
+          }
+          writeStoredBreakout(meetingId, nextSnap);
+        }
         if (data.peerKey !== myKey) return;
         const target = movedTarget;
         // Breakouts are still running globally even when this move sends us
@@ -3121,7 +3238,71 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setBreakoutBroadcast({ message: data.message.trim(), from: data.from || 'Host' });
         triggerToast(`${data.from || 'Host'}: ${data.message.trim()}`);
       })
-      .subscribe();
+      // Phase A (6): a rejoiner who restored a breakout room from
+      // storage asks for the live state — the host (or any moderator
+      // holding the live roster) answers through the server route, so
+      // the answer carries the server marker. Rate-limited to one
+      // answer per 10 s, so a roomful of reloads cannot storm it.
+      .on('broadcast', { event: 'breakout-state-request' }, (payload: any) => {
+        if (!breakoutActiveRef.current) return;
+        if (Date.now() - (lastBreakoutStateAnswerRef.current || 0) < 10000) return;
+        const remaining = breakoutTimeRemainingRef.current;
+        if (remaining === null) return;
+        lastBreakoutStateAnswerRef.current = Date.now();
+        void sendBreakoutControl('breakout-state', {
+          assignments: breakoutAssignmentsRef.current,
+          durationSeconds: Math.max(0, remaining),
+          roomsCount: breakoutRoomsCountRef.current,
+        }).catch(() => { /* best-effort: the requester keeps its stored state */ });
+      })
+      // Phase A (6): the live state, answering a rejoiner's request.
+      // Sync the roster / countdown WITHOUT moving anyone who is
+      // already where they belong and WITHOUT the start alert — only
+      // a rejoiner whose room actually changed moves, with one toast.
+      // (A requester whose assignment is gone stays put: the host may
+      // have moved them while they were away, and the move broadcast
+      // will reach them — bouncing them to the main room on a missing
+      // key would be worse.)
+      .on('broadcast', { event: 'breakout-state' }, (payload: any) => {
+        const data = payload.payload;
+        if (!data || data.server !== true || !data.assignments) return;
+        breakoutActiveRef.current = true;
+        setBreakoutAssignments(data.assignments);
+        if (typeof data.roomsCount === 'number' && data.roomsCount >= 1 && data.roomsCount <= 5) {
+          setBreakoutRoomsCount(data.roomsCount);
+        }
+        const remaining = typeof data.durationSeconds === 'number' ? Math.max(0, data.durationSeconds) : null;
+        if (remaining !== null) setBreakoutTimeRemaining(remaining);
+        const myAssignment = typeof data.assignments[myKey] === 'number'
+          ? data.assignments[myKey]
+          : (myParticipantRowId && typeof data.assignments[myParticipantRowId] === 'number' ? data.assignments[myParticipantRowId] : null);
+        if (remaining !== null) {
+          writeStoredBreakout(meetingId, {
+            room: myAssignment,
+            endsAt: Date.now() + remaining * 1000,
+            roomsCount: typeof data.roomsCount === 'number' ? data.roomsCount : breakoutRoomsCountRef.current,
+            assignments: data.assignments,
+          });
+        }
+        if (myAssignment !== null && myAssignment !== breakoutRoomRef.current) {
+          enterBreakoutRoom(myAssignment);
+          triggerToast(`You are in Breakout Room ${myAssignment}.`);
+        }
+      })
+      .subscribe((status: string) => {
+        // Phase A (6): if we restored a breakout room from storage,
+        // ask the room for the live state once subscribed — the host
+        // may have moved us or changed the timer while we were away.
+        // No answer is fine: the stored snapshot stands until the
+        // timer ends (see the countdown backstop below).
+        if (status === 'SUBSCRIBED' && storedBreakout) {
+          ch.send({
+            type: 'broadcast',
+            event: 'breakout-state-request',
+            payload: { senderKey: myKey },
+          });
+        }
+      });
     return () => {
       supabase.removeChannel(ch);
       if (eventsChannelRef.current === ch) eventsChannelRef.current = null;
@@ -4240,6 +4421,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (breakoutTimeRemaining <= 0) {
       if (canModerate) {
         handleEndBreakouts();
+      } else {
+        // Phase A (6) backstop: the host's end-breakout broadcast is
+        // the normal way back, but a rejoiner who missed it must not
+        // sit alone in a dead breakout room once the time is up.
+        clearStoredBreakout(meetingId);
+        breakoutActiveRef.current = false;
+        enterBreakoutRoom(null);
+        setBreakoutTimeRemaining(null);
       }
       return;
     }
