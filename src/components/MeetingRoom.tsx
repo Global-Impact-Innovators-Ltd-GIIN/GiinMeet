@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Room as LiveKitRoom, RoomEvent, Track } from 'livekit-client';
 import { 
-  Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff,
+  Mic, MicOff, AudioLines, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff,
   Clock, Pin, LayoutGrid, LayoutList, Star, Wifi, WifiOff,
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
   MoreHorizontal, BarChart3, Volume2, VolumeX, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
@@ -14,6 +14,7 @@ import { getParticipantInitials } from '../utils/getParticipantInitials';
 import { sortHandRaiseQueue, nextLayoutMode, layoutModeLabel, layoutModeHint } from '../utils/phaseB';
 import { startBackgroundFx, type BackgroundFxMode } from '../utils/backgroundFx';
 import { getLocalBrandName } from '../utils/brand';
+import { isNoiseSuppressionSupported, loadRnnoiseBinary, readNoiseSuppressionPreference, saveNoiseSuppressionPreference, NOISE_SUPPRESSION_WORKLET_URL, type NoiseSuppressionStatus } from '../utils/noiseSuppression';
 
 // Web Audio API Synthesized sound effects
 let audioCtx: AudioContext | null = null;
@@ -113,6 +114,12 @@ export const handRaiseSoundKey = (reason?: string | null): string => {
 // automatic gain control, mono voice capture — or a device switch
 // silently changes what the other side hears. `ideal` (never `exact`)
 // for channelCount, so a mono-only request can never fail a device.
+// Feature 17: the browser's noiseSuppression above is the baseline
+// and stays requested on every capture. When the RNNoise chain is
+// running it takes over the job, so the chain switches the browser
+// suppressor off on the live track (applyConstraints) — exactly one
+// suppressor in the path at a time — and switches it back on when
+// the chain stops or cannot start.
 export const micAudioConstraints = (deviceId?: string): MediaTrackConstraints => {
   const c: MediaTrackConstraints = {
     echoCancellation: true,
@@ -308,6 +315,31 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     nodes: { source: MediaStreamAudioSourceNode; highpass: BiquadFilterNode; bandpass: BiquadFilterNode; compressor: DynamicsCompressorNode; dest: MediaStreamAudioDestinationNode };
   } | null>(null);
   const isAudioEnhancedRef = useRef(false);
+  // Feature 17: the RNNoise chain. The raw capture feeds the worklet;
+  // the worklet's destination track is what gets published (or feeds
+  // Studio Voice when that is on too). The chain owns its own 48 kHz
+  // AudioContext — RNNoise assumes 48 kHz — and its own worklet
+  // module + model bytes, both loaded once and cached.
+  const noiseSuppressionChainRef = useRef<{
+    rawTrack: MediaStreamTrack;
+    destTrack: MediaStreamTrack;
+    source: MediaStreamAudioSourceNode;
+    node: AudioWorkletNode;
+    dest: MediaStreamAudioDestinationNode;
+  } | null>(null);
+  const noiseSuppressionCtxRef = useRef<AudioContext | null>(null);
+  const noiseSuppressionWorkletLoadedRef = useRef(false);
+  // Set once the model fails to start, so a mic switch does not retry
+  // (and re-toast) every time. A manual off/on toggle clears it.
+  const noiseSuppressionFailedRef = useRef(false);
+  const noiseSuppressionWarnedRef = useRef(false);
+  // Builds are async (the model loads once); a newer build makes an
+  // older one stale, so it must not publish or touch the chain.
+  const noiseSuppressionBuildIdRef = useRef(0);
+  // Generation guard for rebuildPublishedMicTrack (see below): a mic
+  // switch or toggle that starts a newer rebuild makes an older,
+  // still-loading one drop its result instead of publishing over it.
+  const micProcessingGenerationRef = useRef(0);
   // Speaking-indicator analysers, one per peer (plus the local mic).
   // A new analyser per ontrack / re-subscribe used to pile up rAF loops
   // that never stopped; the registry dedupes by stream and can stop them.
@@ -1124,6 +1156,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Ref mirror of the Studio Voice flag: mic swaps close over the flag
   // and must re-apply the chain, not silently drop it.
   useEffect(() => { isAudioEnhancedRef.current = isAudioEnhanced; }, [isAudioEnhanced]);
+  // Feature 17: AI noise cleaning (RNNoise) — on by default, per
+  // participant: each person controls their own mic cleaning, and the
+  // choice is remembered in this browser (localStorage, 'on'/'off').
+  const [isNoiseSuppressionOn, setIsNoiseSuppressionOn] = useState<boolean>(() => readNoiseSuppressionPreference());
+  // Ref mirror of the noise-cleaning flag: mic swaps and the join
+  // funnel close over the flag and must re-apply the chain, not
+  // silently drop it (same pattern as Studio Voice above).
+  const isNoiseSuppressionOnRef = useRef(isNoiseSuppressionOn);
+  useEffect(() => { isNoiseSuppressionOnRef.current = isNoiseSuppressionOn; }, [isNoiseSuppressionOn]);
+  // idle: off, or on but no mic yet. loading: the model is starting.
+  // active: the denoised track is what others hear. unavailable: the
+  // model could not start on this device — the normal mic (with the
+  // browser's own noise reduction) carries on, and the panel says so.
+  const [noiseSuppressionStatus, setNoiseSuppressionStatus] = useState<NoiseSuppressionStatus>('idle');
   const [isStudioLightEnabled, setIsStudioLightEnabled] = useState(false);
   
   const [isMeetingLocked, setIsMeetingLocked] = useState(false);
@@ -2243,6 +2289,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // chain down (stops the destination track) and stop the raw
       // capture too. Also end every speaking-indicator loop.
       teardownEnhancer();
+      teardownNoiseSuppression();
       if (localMicRawTrackRef.current) {
         localMicRawTrackRef.current.stop();
         localMicRawTrackRef.current = null;
@@ -2448,6 +2495,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // raw track while the chain is live would silence the new chain,
       // and leaving the old chain up leaks a second live mic.
       teardownEnhancer();
+      // Feature 17: same for the noise-cleaning chain — its
+      // destination track is the published one when it is running.
+      // The old raw track is dying, so no need to hand the browser
+      // suppressor back for it (the rebuild below owns the new
+      // track's processing).
+      teardownNoiseSuppression(false);
       if (oldPublished && oldPublished !== audioTrack) {
         try { oldPublished.stop(); } catch (e) {}
       }
@@ -2456,11 +2509,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
       localMicRawTrackRef.current = audioTrack;
       verifyMicProcessing(audioTrack);
-      // Studio Voice stays as the user set it: a mic switch must not
-      // silently drop the enhancement (the old code published the raw
-      // track while the toggle still showed ON).
-      const trackToUse = isAudioEnhancedRef.current ? buildEnhancedTrack(audioTrack) : audioTrack;
-      await publishMicTrack(trackToUse);
+      // Studio Voice and Noise Cleaning stay as the user set them: a
+      // mic switch must not silently drop either (the old code
+      // published the raw track while the toggle still showed ON).
+      // One rebuild applies both, in order — RNNoise first, then the
+      // Studio Voice filters on the denoised audio.
+      await rebuildPublishedMicTrack();
     } catch (err) {
       console.error('Failed to change microphone:', err);
       triggerToast('Could not switch microphone — keeping the current one.');
@@ -5136,6 +5190,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // One funnel (see publishMicTrack): local stream, P2P senders,
       // LiveKit publication and speaking detector all get this track.
       await publishMicTrack(audioTrack);
+      // Feature 17: the user is audible at once on the plain capture;
+      // the denoised track replaces it in the background once the
+      // (small, cached) RNNoise model loads — no join delay, and a
+      // model that cannot load changes nothing here (the plain mic
+      // carries on with the browser's own noise reduction).
+      void rebuildPublishedMicTrack();
       micAcquiringRef.current = false;
       return true;
     };
@@ -5180,6 +5240,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // Fix Round 6: stop the raw capture too, not just the published
       // track (when Studio Voice is on they are different objects).
       teardownEnhancer();
+      teardownNoiseSuppression();
       if (localMicRawTrackRef.current) {
         localMicRawTrackRef.current.stop();
       }
@@ -5819,6 +5880,189 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try { chain.destTrack.stop(); } catch (e) {}
   };
 
+  // Feature 17: AI noise cleaning (RNNoise) — free, on-device, no
+  // server. The chain is raw mic -> RNNoise AudioWorklet (48 kHz) ->
+  // MediaStreamDestination, and the destination track is what gets
+  // published (or feeds Studio Voice when that is on too, so the
+  // order is always: clean the noise first, then shape the voice).
+  // It composes with the existing pipeline by design:
+  //  - Phase A (5) quality step-down only republishes VIDEO tracks;
+  //    audio is never touched, so cleaning survives a step-down.
+  //  - Phase B (21) low-bandwidth mode is audio-first (camera off,
+  //    video encoding down); the cleaning chain is audio-only and
+  //    stays live — that is exactly when people are on weak
+  //    connections in noisy places.
+  //  - Exactly one suppressor at a time: while this chain runs, the
+  //    browser's own noiseSuppression is switched off on the live
+  //    capture; when the chain stops or cannot start, it is switched
+  //    back on. A browser that refuses applyConstraints just keeps
+  //    both on — slightly heavier processing, never a broken call.
+  const getNoiseSuppressionCtx = (): AudioContext | null => {
+    try {
+      if (noiseSuppressionCtxRef.current) {
+        if (noiseSuppressionCtxRef.current.state === 'suspended') {
+          void noiseSuppressionCtxRef.current.resume();
+        }
+        return noiseSuppressionCtxRef.current;
+      }
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) return null;
+      const ctx: AudioContext = new Ctx({ sampleRate: 48000 });
+      // RNNoise assumes 48 kHz. If this device cannot run a 48 kHz
+      // context (some Bluetooth headsets force another rate), the
+      // model would hear the wrong pitch — treat it as unavailable
+      // instead of shipping garbled audio.
+      if (ctx.sampleRate !== 48000) {
+        try { void ctx.close(); } catch (e) {}
+        return null;
+      }
+      noiseSuppressionCtxRef.current = ctx;
+      return ctx;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // Build the cleaning chain for the CURRENT capture and return the
+  // track to publish. On ANY failure returns the raw track (and
+  // hands the browser suppressor back), marks the feature
+  // unavailable for this session, and says so once in plain words —
+  // the call itself never breaks.
+  const buildNoiseSuppressionTrack = async (rawTrack: MediaStreamTrack): Promise<MediaStreamTrack> => {
+    const buildId = ++noiseSuppressionBuildIdRef.current;
+    const giveBrowserSuppressorBack = async () => {
+      if (rawTrack.readyState !== 'live') return;
+      try { await rawTrack.applyConstraints({ noiseSuppression: true }); } catch (e) { /* best effort */ }
+    };
+    try {
+      if (!isNoiseSuppressionSupported()) throw new Error('unsupported');
+      if (noiseSuppressionFailedRef.current) {
+        await giveBrowserSuppressorBack();
+        return rawTrack;
+      }
+      const ctx = getNoiseSuppressionCtx();
+      if (!ctx) throw new Error('no-48khz-context');
+      if (ctx.state === 'suspended') {
+        try { await ctx.resume(); } catch (e) { /* resume is best effort */ }
+      }
+      if (!noiseSuppressionWorkletLoadedRef.current) {
+        await ctx.audioWorklet.addModule(NOISE_SUPPRESSION_WORKLET_URL);
+        noiseSuppressionWorkletLoadedRef.current = true;
+      }
+      const wasmBinary = await loadRnnoiseBinary();
+      // A newer build (mic switch, toggle) took over while the model
+      // loaded: this build must not create or publish anything.
+      if (buildId !== noiseSuppressionBuildIdRef.current) throw new Error('superseded');
+      const { RnnoiseWorkletNode } = await import('@sapphi-red/web-noise-suppressor');
+      const source = ctx.createMediaStreamSource(new MediaStream([rawTrack]));
+      const node = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary });
+      const dest = ctx.createMediaStreamDestination();
+      source.connect(node);
+      node.connect(dest);
+      const destTrack = dest.stream.getAudioTracks()[0];
+      if (!destTrack) throw new Error('no-dest-track');
+      // One suppressor at a time: RNNoise owns the job now, so the
+      // browser's own suppressor steps aside on this capture.
+      try { await rawTrack.applyConstraints({ noiseSuppression: false }); } catch (e) {
+        console.warn('[Noise] Could not switch off the browser suppressor — both stay on:', e);
+      }
+      noiseSuppressionChainRef.current = { rawTrack, destTrack, source, node, dest };
+      setNoiseSuppressionStatus('active');
+      return destTrack;
+    } catch (e: any) {
+      if (e?.message === 'superseded') return rawTrack;
+      console.warn('[Noise] Noise cleaning could not start:', e);
+      noiseSuppressionFailedRef.current = true;
+      setNoiseSuppressionStatus('unavailable');
+      await giveBrowserSuppressorBack();
+      if (!noiseSuppressionWarnedRef.current) {
+        noiseSuppressionWarnedRef.current = true;
+        triggerToast('Noise cleaning could not start on this device — your normal microphone is still on, with the browser’s own noise reduction.');
+      }
+      return rawTrack;
+    }
+  };
+
+  // Tear the cleaning chain down. restoreBrowserSuppressor=false is
+  // for rebuilds, where a new chain is about to take over the same
+  // capture (handing the browser suppressor back first would flap
+  // it off-on-off). Stopping the destination track is safe even when
+  // it is the published one — the caller republishes right after.
+  const teardownNoiseSuppression = (restoreBrowserSuppressor = true) => {
+    // Invalidate any build still loading the model.
+    noiseSuppressionBuildIdRef.current++;
+    const chain = noiseSuppressionChainRef.current;
+    noiseSuppressionChainRef.current = null;
+    if (!chain) return;
+    try { chain.source.disconnect(); } catch (e) {}
+    try { chain.node.disconnect(); } catch (e) {}
+    try { (chain.node as any).destroy?.(); } catch (e) {}
+    try { chain.dest.disconnect(); } catch (e) {}
+    try { chain.destTrack.stop(); } catch (e) {}
+    if (restoreBrowserSuppressor && chain.rawTrack.readyState === 'live') {
+      try { void chain.rawTrack.applyConstraints({ noiseSuppression: true }); } catch (e) {}
+    }
+  };
+
+  // One rebuild for every mic change: tear both processors down and
+  // rebuild from the CURRENT raw capture — RNNoise first, then Studio
+  // Voice on the denoised audio — then publish through the one funnel
+  // (publishMicTrack: LiveKit + P2P senders + speaking detector).
+  // Generation-guarded: a mic switch or toggle that starts a newer
+  // rebuild makes this one drop its result instead of publishing
+  // over the top of it. Never throws — a failed step falls back to
+  // the raw capture, so the mic stays live.
+  const rebuildPublishedMicTrack = async (): Promise<void> => {
+    const generation = ++micProcessingGenerationRef.current;
+    const rawTrack = localMicRawTrackRef.current;
+    if (!rawTrack || rawTrack.readyState !== 'live') return;
+    if (!roomMountedRef.current) return;
+    teardownEnhancer();
+    // Hand the browser suppressor back when cleaning is OFF — the
+    // rebuild below will not build a chain to take its place. When
+    // cleaning is ON the new chain takes over (or, if it fails,
+    // hands the suppressor back itself), so no flap off-on-off.
+    teardownNoiseSuppression(!isNoiseSuppressionOnRef.current);
+    let trackToPublish: MediaStreamTrack = rawTrack;
+    if (isNoiseSuppressionOnRef.current) {
+      trackToPublish = await buildNoiseSuppressionTrack(rawTrack);
+      if (generation !== micProcessingGenerationRef.current) return;
+      if (!roomMountedRef.current) return;
+    }
+    if (isAudioEnhancedRef.current) {
+      trackToPublish = buildEnhancedTrack(trackToPublish);
+    }
+    if (generation !== micProcessingGenerationRef.current) return;
+    await publishMicTrack(trackToPublish);
+  };
+
+  // Feature 17 toggle. The preference is remembered in this browser
+  // (on by default); with no live mic yet it just saves, and the
+  // chain applies when the mic is acquired. Turning it back on after
+  // a failure retries the model once.
+  const toggleNoiseSuppression = async () => {
+    const nextVal = !isNoiseSuppressionOn;
+    setIsNoiseSuppressionOn(nextVal);
+    isNoiseSuppressionOnRef.current = nextVal;
+    saveNoiseSuppressionPreference(nextVal);
+    const rawTrack = localMicRawTrackRef.current;
+    if (!rawTrack || rawTrack.readyState !== 'live') {
+      if (nextVal) noiseSuppressionFailedRef.current = false;
+      return;
+    }
+    if (nextVal) {
+      noiseSuppressionFailedRef.current = false;
+      noiseSuppressionWarnedRef.current = false;
+      setNoiseSuppressionStatus('loading');
+    }
+    await rebuildPublishedMicTrack();
+    if (!nextVal) {
+      setNoiseSuppressionStatus('idle');
+    } else if (noiseSuppressionChainRef.current) {
+      triggerToast('Noise cleaning is on — background noise is removed before anyone hears it.');
+    }
+  };
+
   const toggleAudioEnhancement = async () => {
     const nextVal = !isAudioEnhanced;
     setIsAudioEnhanced(nextVal);
@@ -5831,19 +6075,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       return;
     }
     // No re-acquisition: the toggle re-routes the CURRENT capture, so it
-    // can never silently switch microphones. Echo cancellation, noise
-    // suppression and gain control are already on for the capture (see
-    // micAudioConstraints); the toggle only adds or removes the Studio
-    // Voice filter chain — and the result is published to LiveKit AND
-    // the P2P mesh alike through the one funnel (publishMicTrack).
+    // can never silently switch microphones. Echo cancellation and gain
+    // control are already on for the capture (see micAudioConstraints);
+    // noise is handled by Noise Cleaning (Feature 17). One rebuild
+    // applies both — RNNoise first, then the Studio Voice filter chain
+    // on the denoised audio — and the result is published to LiveKit
+    // AND the P2P mesh alike through the one funnel (publishMicTrack).
     try {
-      if (nextVal) {
-        const enhanced = buildEnhancedTrack(rawTrack);
-        await publishMicTrack(enhanced);
-      } else {
-        teardownEnhancer();
-        await publishMicTrack(rawTrack);
-      }
+      await rebuildPublishedMicTrack();
     } catch (err) {
       console.error('Failed to toggle audio enhancement:', err);
       triggerToast('Could not change Studio Voice — keeping the current microphone.');
@@ -9750,6 +9989,47 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             <div className="scroll-refined" style={{ flex: 1, minHeight: 0, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               
+              {/* Feature 17: AI noise cleaning (RNNoise, free, on-device). */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <AudioLines size={14} color={isNoiseSuppressionOn && noiseSuppressionStatus !== 'unavailable' ? 'var(--color-accent)' : '#64748B'} />
+                    NOISE CLEANING
+                  </span>
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                    <input
+                      type="checkbox"
+                      checked={isNoiseSuppressionOn}
+                      onChange={() => void toggleNoiseSuppression()}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: isNoiseSuppressionOn && noiseSuppressionStatus !== 'unavailable' ? 'var(--color-accent)' : '#1E293B',
+                      transition: '0.3s', borderRadius: '20px'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                        backgroundColor: isNoiseSuppressionOn ? '#07090E' : 'white',
+                        transition: '0.3s', borderRadius: '50%',
+                        transform: isNoiseSuppressionOn ? 'translateX(14px)' : 'none'
+                      }} />
+                    </span>
+                  </label>
+                </div>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
+                  {noiseSuppressionStatus === 'unavailable'
+                    ? 'Noise cleaning could not start on this device — your normal microphone is still on, with the browser’s own noise reduction.'
+                    : noiseSuppressionStatus === 'loading'
+                    ? 'Starting noise cleaning…'
+                    : isNoiseSuppressionOn
+                    ? 'AI noise cleaning is on: street noise, generators, keyboards and fans are removed on this device before anyone hears them. It keeps working in low-bandwidth mode, and your audio never leaves this device.'
+                    : 'Noise cleaning is off — only the browser’s own noise reduction is on. Turn it on to strip out street noise, generators, keyboards and fans before anyone hears them.'}
+                </p>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
               {/* AI Studio Voice Section */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div className="flex-between">
@@ -9779,7 +10059,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </label>
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
-                  Studio Voice focuses your voice with a gentle high-pass filter, presence band and soft compression. Echo cancellation, noise suppression and gain control are already on for every microphone.
+                  Studio Voice focuses your voice with a gentle high-pass filter, presence band and soft compression. Echo cancellation and gain control are already on for every microphone — noise is handled by Noise Cleaning above.
                 </p>
               </div>
 
@@ -10458,6 +10738,31 @@ Media encrypted in transit (DTLS-SRTP).`;
             <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isMuted ? 'Unmute' : 'Mute'}</span>
           </button>
 
+          {/* Feature 17: AI noise cleaning toggle — on by default. */}
+          <button
+            onClick={() => void toggleNoiseSuppression()}
+            style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '14px',
+              backgroundColor: isNoiseSuppressionOn && noiseSuppressionStatus !== 'unavailable' ? 'var(--color-accent)' : 'rgba(255, 255, 255, 0.1)',
+              border: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              color: isNoiseSuppressionOn && noiseSuppressionStatus !== 'unavailable' ? 'black' : 'white',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              backdropFilter: 'blur(4px)'
+            }}
+            title={noiseSuppressionStatus === 'unavailable' ? 'Noise cleaning could not start on this device — your normal microphone is still on' : isNoiseSuppressionOn ? 'Noise cleaning: on — background noise is removed before others hear it' : 'Noise cleaning: off — turn on to remove background noise'}
+          >
+            <AudioLines size={18} />
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{isNoiseSuppressionOn ? 'Clean' : 'Noise'}</span>
+          </button>
+
           {/* Toggle Video */}
           <button 
             onClick={toggleVideo}
@@ -10800,6 +11105,28 @@ Media encrypted in transit (DTLS-SRTP).`;
               title={isMuted ? "Unmute Mic" : "Mute Mic"}
             >
               {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+            </button>
+
+            {/* Feature 17: AI noise cleaning toggle — on by default. */}
+            <button
+              className="toolbar-control-btn"
+              onClick={() => void toggleNoiseSuppression()}
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: isNoiseSuppressionOn && noiseSuppressionStatus !== 'unavailable' ? 'var(--color-accent)' : '#1E293B',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: isNoiseSuppressionOn && noiseSuppressionStatus !== 'unavailable' ? 'black' : 'white',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)'
+              }}
+              title={noiseSuppressionStatus === 'unavailable' ? 'Noise cleaning could not start on this device — your normal microphone is still on' : isNoiseSuppressionOn ? 'Noise cleaning: on — background noise is removed before others hear it' : 'Noise cleaning: off — turn on to remove background noise'}
+            >
+              <AudioLines size={18} />
             </button>
 
             {/* Stop Video */}
