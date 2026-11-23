@@ -88,6 +88,13 @@ export const buildPersonalRoomLink = (slug: string): string => {
   return `${origin}/#/room/${slug}`;
 };
 
+// Phase C1 (25) — the short, memorable link: giinmeet.../<handle>.
+// It redirects to the room link above, so the same join rules apply.
+export const buildShortPersonalRoomLink = (slug: string): string => {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}/${slug}`;
+};
+
 export interface PersonalRoom {
   id: string;
   user_id: string;
@@ -1722,6 +1729,25 @@ export const giinApi = {
       return null;
     } catch (e) {
       return null;
+    }
+  },
+
+  // Phase C1 (25) — set or rename the caller's personal-room handle
+  // (server-verified, collision-safe). Returns the room row, or an
+  // object with `message` when the handle is taken or invalid.
+  updatePersonalRoomSlug: async (slug: string): Promise<any> => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/personal-room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
     }
   },
 

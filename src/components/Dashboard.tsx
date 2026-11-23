@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2 } from 'lucide-react';
-import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, getSystemSettings, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
+import { buildJoinLink, buildShortPersonalRoomLink, generateMeetingPasscode, getSystemSettings, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
 import { CalendarSyncPanel } from './CalendarSyncPanel';
 import { TemplatesPanel, type MeetingTemplate } from './TemplatesPanel';
@@ -406,12 +406,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [personalRoomCreating, setPersonalRoomCreating] = useState(false);
   const [personalRoomUnavailable, setPersonalRoomUnavailable] = useState(false);
   const [copiedPersonalLink, setCopiedPersonalLink] = useState(false);
+  // Phase C1 (25) — the memorable handle (the part after giinmeet.../).
+  const [handleInput, setHandleInput] = useState('');
+  const [handleSaving, setHandleSaving] = useState(false);
+  const [handleNote, setHandleNote] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     giinApi.getMyPersonalRoom().then((room) => {
       if (cancelled) return;
       setPersonalRoom(room ? { slug: room.slug, title: room.title } : null);
+      if (room) setHandleInput(room.slug);
       setPersonalRoomLoading(false);
     }).catch(() => {
       if (!cancelled) setPersonalRoomLoading(false);
@@ -424,18 +429,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setPersonalRoomUnavailable(false);
     const room = await giinApi.createPersonalRoom();
     setPersonalRoomCreating(false);
-    if (room) setPersonalRoom({ slug: room.slug, title: room.title });
-    else setPersonalRoomUnavailable(true);
+    if (room) {
+      setPersonalRoom({ slug: room.slug, title: room.title });
+      setHandleInput(room.slug);
+    } else setPersonalRoomUnavailable(true);
   };
 
   const handleCopyPersonalLink = async () => {
     if (!personalRoom) return;
     try {
-      await navigator.clipboard.writeText(buildPersonalRoomLink(personalRoom.slug));
+      await navigator.clipboard.writeText(buildShortPersonalRoomLink(personalRoom.slug));
       setCopiedPersonalLink(true);
       setTimeout(() => setCopiedPersonalLink(false), 2000);
     } catch (e) {
-      window.alert(buildPersonalRoomLink(personalRoom.slug));
+      window.alert(buildShortPersonalRoomLink(personalRoom.slug));
+    }
+  };
+
+  // Phase C1 (25) — rename the handle. The server checks the format and
+  // that nobody else already has it; the old link stops working, the new
+  // one works at once. Passcode and waiting-room rules are untouched.
+  const handleSaveHandle = async () => {
+    const slug = handleInput.trim().toLowerCase();
+    if (!slug) {
+      setHandleNote('Type a handle first.');
+      return;
+    }
+    setHandleSaving(true);
+    setHandleNote(null);
+    const result: any = await giinApi.updatePersonalRoomSlug(slug);
+    setHandleSaving(false);
+    if (result?.ok && result.room) {
+      setPersonalRoom({ slug: result.room.slug, title: result.room.title });
+      setHandleInput(result.room.slug);
+      setHandleNote('Saved. Your new link works now.');
+    } else {
+      setHandleNote(result?.message || 'That handle could not be saved.');
     }
   };
 
@@ -644,10 +673,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>One link, always the same. Share it once — anyone with it can join your room.</p>
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <code style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>{buildPersonalRoomLink(personalRoom.slug)}</code>
+              <code style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>{buildShortPersonalRoomLink(personalRoom.slug)}</code>
               <button className="premium-btn premium-btn-secondary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleCopyPersonalLink}>{copiedPersonalLink ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy link</>}</button>
               <button className="premium-btn premium-btn-primary" style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }} onClick={handleStartPersonalRoom}><Video size={14} /> Start my room</button>
             </div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Your handle:</span>
+              <input
+                type="text"
+                value={handleInput}
+                onChange={(e) => setHandleInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                maxLength={30}
+                aria-label="Your personal room handle"
+                style={{ flex: '0 1 180px', minWidth: 0, padding: '0.45rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem' }}
+              />
+              <button className="premium-btn premium-btn-secondary" style={{ padding: '0.45rem 0.8rem', fontSize: '0.8rem' }} disabled={handleSaving || handleInput.trim().toLowerCase() === personalRoom.slug} onClick={() => void handleSaveHandle()}>
+                {handleSaving ? 'Saving…' : 'Save handle'}
+              </button>
+              {handleNote && <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{handleNote}</span>}
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+              Letters, numbers and hyphens, 3 to 30 characters. Your passcode and waiting-room settings still apply to everyone except you.
+            </p>
           </>
         ) : (
           <>
