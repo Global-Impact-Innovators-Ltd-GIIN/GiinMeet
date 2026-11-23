@@ -5,6 +5,8 @@ import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../util
 import { CalendarSyncPanel } from './CalendarSyncPanel';
 import { TemplatesPanel, type MeetingTemplate } from './TemplatesPanel';
 import { RecentMeetings } from './RecentMeetings';
+import { LibraryPanel } from './LibraryPanel';
+import { MeetingRecordExtras } from './MeetingRecordExtras';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
 interface Meeting {
@@ -726,6 +728,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {/* Phase C1 (26) — recent meetings, one-tap rejoin. */}
       <RecentMeetings meetings={meetingHistory} />
 
+      {/* Phase C1 (28) — recordings and notes library, search. */}
+      <LibraryPanel
+        onOpenRecord={(id) => {
+          setRecordMeetingId(id);
+          void loadMeetingRecord(id);
+          try {
+            document.getElementById('meeting-history')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } catch (e) { /* scrolling is best effort */ }
+        }}
+      />
+
       {/* Quick Action Grid */}
       <div style={{
         display: 'grid',
@@ -863,7 +876,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         gap: '2rem'
       }} className="grid-2">
         {/* Left Side: Meeting History */}
-        <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div id="meeting-history" className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div className="flex-between">
             <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)' }}>Meeting Logs & History</h2>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{historyTopLevelCount === meetingHistory.length ? `${meetingHistory.length} total meetings` : `${historyTopLevelCount} entries · ${meetingHistory.length} total meetings`}</span>
@@ -1242,6 +1255,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             ))}
                           </div>
                         )}
+                        {/* Phase C1 (28) — notes and recordings/files for this meeting. */}
+                        <MeetingRecordExtras meetingId={meeting.id} />
                       </div>
                     );
                   })()}
