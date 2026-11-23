@@ -2478,7 +2478,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Clean up a single peer connection
+  // Phase A (4): total — this runs from broadcast handlers and the
+  // kick button, and a throw there used to be able to wedge the room
+  // (the 2026-11-13 host-tab crash on kick is unconfirmed, but a
+  // peer-cleanup throw is the one place in that path with no guard).
+  // Cleaning up a peer must never be able to fail the tab.
   const cleanupPeer = (peerKey: string) => {
+    try {
     if (pcsRef.current[peerKey]) {
       pcsRef.current[peerKey].close();
       delete pcsRef.current[peerKey];
@@ -2513,6 +2519,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       return copy;
     });
     setParticipants(prev => prev.filter(p => p.id !== peerKey && p.userId !== peerKey));
+    } catch (e) { /* peer cleanup is best-effort: never throw into a caller */ }
   };
 
   // Fix Round 6: close ONE P2P link without touching the tile. Unlike
@@ -3841,12 +3848,29 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (data.server !== true) return;
         // Match by signalling key OR by our own meeting_participants row id
         // (guests have user_id NULL, so their myKey never matches a user id).
-        if (data.targetUserId === myKey || (data.targetRowId && myParticipantRowId && data.targetRowId === myParticipantRowId)) {
+        const isMe = data.targetUserId === myKey || (data.targetRowId && myParticipantRowId && data.targetRowId === myParticipantRowId);
+        if (isMe) {
+          // Phase A (4): a host can never be removed — the server
+          // refuses it — so a matching target on the host's own client
+          // is a stale or wrong key, not an ejection. Without this
+          // guard the host's tab could end its own meeting on a kick
+          // meant for someone else (the unconfirmed 2026-11-13 crash:
+          // the host tab died on a kick; this self-eject path is the
+          // one place a kick could take the host down with it).
+          if (isAdminRef.current) return;
           // Round 9 (9A): the server kept our row as 'Removed' (the
           // rejoin block) — do NOT delete it, and do not alert: the
           // removed screen IS the message.
           enterEndedState('removed');
+          return;
         }
+        // Phase A (4): someone else was kicked — clean them up locally
+        // now instead of waiting for the next participants poll, so
+        // their tile and peer connection go away at once. Never throws:
+        // a broadcast handler must not be able to wedge the room.
+        try {
+          cleanupPeer(data.targetRowId || data.targetUserId);
+        } catch (e) { /* local cleanup is best-effort */ }
       })
       .on('broadcast', { event: 'disable-video-all' }, (payload: any) => {
         // Fix Round 7 (#3): only the server may disable everyone's video.

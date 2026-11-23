@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { RoomServiceClient } from 'livekit-server-sdk';
 
 // Room controls, host-verified server-side. (Fix Round 7, findings
 // #1 + #3: every participant used to broadcast mute/kick/settings to
@@ -206,6 +207,35 @@ export async function POST(req: NextRequest) {
       } else {
         rowDeleted = (removed || []).length > 0;
       }
+    }
+
+    // Phase A (4): also remove the kicked participant from the LiveKit
+    // room itself, so their media stops at the server even if their
+    // client is dead or misses the broadcast — a kicked guest used to
+    // linger in the room until their own client reacted. Best-effort
+    // only: the row removal above + the broadcast are what eject them,
+    // and a LiveKit failure here never fails the kick. They may be in
+    // a breakout room, so try the main room and each breakout room,
+    // and both identity forms (user id for signed-in users, row id
+    // for guests — the LiveKit identity is one or the other).
+    if (action === 'remove-participant' && rowDeleted) {
+      try {
+        const lkUrl = process.env.LIVEKIT_URL;
+        const lkKey = process.env.LIVEKIT_API_KEY;
+        const lkSecret = process.env.LIVEKIT_API_SECRET;
+        if (lkUrl && lkKey && lkSecret) {
+          const { data: roomRow } = await admin.from('rooms').select('slug').eq('slug', 'meet-' + meetingId).eq('is_active', true).maybeSingle();
+          const mainSlug = (roomRow as any)?.slug || ('meet-' + meetingId);
+          const roomService = new RoomServiceClient(lkUrl, lkKey, lkSecret);
+          const identities = Array.from(new Set([targetUserId, targetRowId].filter(Boolean))) as string[];
+          const roomSlugs = [mainSlug, 1, 2, 3, 4, 5].map(n => typeof n === 'number' ? `${mainSlug}-breakout-${n}` : n);
+          for (const slug of roomSlugs) {
+            for (const identity of identities) {
+              try { await roomService.removeParticipant(slug, identity); } catch (e) { /* not in this room: try the next */ }
+            }
+          }
+        }
+      } catch (e) { /* LiveKit removal is best-effort: the kick already stands */ }
     }
 
     // Broadcast the control event with the server marker. Receivers
