@@ -8,6 +8,7 @@ import { RecentMeetings } from './RecentMeetings';
 import { LibraryPanel } from './LibraryPanel';
 import SchedulingAssistant from './SchedulingAssistant';
 import MeetingInsights from './MeetingInsights';
+import ActionItemsPanel from './ActionItemsPanel';
 import { MeetingRecordExtras } from './MeetingRecordExtras';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
@@ -456,6 +457,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  // Phase C1 (35), carry open action items into the next meeting.
+  // Loaded when the Schedule modal opens; the host ticks the ones to
+  // bring along, and they are copied to the new meeting on save.
+  const [openActionItems, setOpenActionItems] = useState<any[]>([]);
+  const [carrySelected, setCarrySelected] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (!showScheduleModal) return;
+    (async () => {
+      const res: any = await giinApi.getOpenActionItems();
+      if (res?.ok && Array.isArray(res.items)) {
+        setOpenActionItems(res.items.slice(0, 5));
+        setCarrySelected({});
+      }
+    })();
+  }, [showScheduleModal]);
+  const toggleCarryItem = (id: string) => {
+    setCarrySelected((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
   // Phase C1 (33), smart scheduling assistant, opened from the
   // Schedule modal. Fills the schedule form when a slot is picked.
   const [showSchedulingAssistant, setShowSchedulingAssistant] = useState(false);
@@ -628,6 +648,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
       // calendars. Fire-and-forget: a calendar failure must never look
       // like a scheduling failure, and the meeting is already saved.
       savedIds.forEach((id) => { void giinApi.syncMeetingToCalendar(id); });
+      // Phase C1 (35), carry the ticked open action items into the new
+      // meeting, so they appear in its prep, its record and its follow-up.
+      if (firstSaved) {
+        openActionItems
+          .filter((item: any) => carrySelected[item.id])
+          .forEach((item: any) => {
+            void giinApi.createActionItem({
+              meetingId: firstSaved.id,
+              text: item.text,
+              owner: item.owner,
+              carriedFromMeetingId: item.meeting_id,
+            });
+          });
+      }
     }
   };
 
@@ -1299,21 +1333,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 </div>
                               </div>
                             )}
-                            {summary.actionItems?.length > 0 && (
-                              <div>
-                                <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>Action items</span>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.25rem' }}>
-                                  {summary.actionItems.map((a: any, i: number) => (
-                                    <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', justifyContent: 'space-between', fontSize: '0.8rem', lineHeight: 1.45 }}>
-                                      <span style={{ flex: '1 1 auto', minWidth: 0 }}>{a.text}</span>
-                                      {a.owner && a.owner !== 'Unassigned' && (
-                                        <span style={{ flexShrink: 0, backgroundColor: 'rgba(250,189,2,0.15)', border: '1px solid var(--color-accent)', color: 'var(--color-accent)', fontSize: '0.65rem', fontWeight: 700, padding: '1px 7px', borderRadius: '20px', whiteSpace: 'nowrap' }}>{a.owner}</span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                            {/* Phase C1 (35), tracked action items: open until marked done. */}
+                            <ActionItemsPanel meetingId={meeting.id} fallbackItems={summary.actionItems} />
                           </div>
                         ) : (
                           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
@@ -1521,6 +1542,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <button type="button" className="premium-btn premium-btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => applyScheduleTemplate('interview')}>Interview</button>
                 </div>
               </div>
+              {/* Phase C1 (35), carry open action items from earlier
+                  meetings into this one. Only the host's own open items. */}
+              {openActionItems.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>Bring open action items into this meeting</span>
+                  {openActionItems.map((item: any) => (
+                    <label key={item.id} style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start', fontSize: '0.82rem', lineHeight: 1.45, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!!carrySelected[item.id]} onChange={() => toggleCarryItem(item.id)} style={{ marginTop: '3px', flexShrink: 0 }} />
+                      <span style={{ minWidth: 0 }}>
+                        {item.text}
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}> ({item.meetingTitle})</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
               {/* Round 9 (9C): link expiry — a duration counts from the meeting date. */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Meeting link expires</label>

@@ -152,6 +152,25 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({ ok: false, reason: 'SUMMARY_UNAVAILABLE', message: 'The summary was generated but could not be stored yet — ask your workspace admin to run giinmeet_phaseB_transcripts.sql.' }, { status: 200 });
     }
+    // Phase C1 (35), action item tracker: copy the summary's action
+    // items into the tracked table, so they stay open until marked done
+    // and can carry into the next meeting. Best-effort and idempotent:
+    // the summary's own rows are replaced on every regeneration, and a
+    // missing Phase C1 table (SQL not run yet) never fails the summary.
+    try {
+      await admin.from('action_items').delete().eq('meeting_id', meetingId).eq('source', 'summary');
+      const rows = (parsed.actionItems || [])
+        .map((item: any) => ({
+          meeting_id: meetingId,
+          text: String(item?.text || '').trim().slice(0, 500),
+          owner: String(item?.owner || 'Unassigned').trim().slice(0, 120) || 'Unassigned',
+          status: 'open',
+          source: 'summary',
+        }))
+        .filter((r: any) => r.text.length > 0)
+        .slice(0, 50);
+      if (rows.length > 0) await admin.from('action_items').insert(rows);
+    } catch (e) { /* action tracking is best-effort; the summary stands */ }
     return NextResponse.json({ ok: true, summary: parsed.summary, decisions: parsed.decisions, actionItems: parsed.actionItems });
   } catch (e: any) {
     return NextResponse.json({ error: 'SERVER_ERROR', message: String(e?.message || e) }, { status: 500 });
