@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { resolveC2bCaller } from '../../_lib/c2b';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // Breakout-room control, host-verified server-side. (Phase 3,
 // Feature 1 built the rooms; Feature 2 enforces who may run them.)
@@ -53,7 +54,10 @@ async function broadcastToMeetingEvents(admin: any, meetingId: string, event: st
     const result = await ch.send({ type: 'broadcast', event, payload });
     if (result && result !== 'ok') throw new Error('The room did not accept the broadcast.');
   } finally {
-    try { await admin.removeChannel(ch); } catch (e) { /* already gone */ }
+    try { await admin.removeChannel(ch); } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* already gone */ }
   }
 }
 
@@ -70,11 +74,17 @@ async function saveBreakoutState(admin: any, meetingId: string, roomsCount: numb
       [{ meeting_id: meetingId, rooms_count: roomsCount, ends_at: endsAt.toISOString(), assignments, updated_at: new Date().toISOString() }],
       { onConflict: 'meeting_id' },
     );
-  } catch (e) { /* table not set up yet: broadcast still works */ }
+  } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* table not set up yet: broadcast still works */ }
 }
 
 async function clearBreakoutState(admin: any, meetingId: string) {
-  try { await admin.from('meeting_breakout_state').delete().eq('meeting_id', meetingId); } catch (e) { /* ignore */ }
+  try { await admin.from('meeting_breakout_state').delete().eq('meeting_id', meetingId); } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* ignore */ }
 }
 
 async function loadBreakoutState(admin: any, meetingId: string): Promise<{ roomsCount: number; endsAt: string; assignments: Record<string, number> } | null> {
@@ -86,7 +96,10 @@ async function loadBreakoutState(admin: any, meetingId: string): Promise<{ rooms
       .maybeSingle();
     if (!data) return null;
     return { roomsCount: (data as any).rooms_count, endsAt: (data as any).ends_at, assignments: (data as any).assignments || {} };
-  } catch (e) { return null; }
+  } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } return null; }
 }
 
 export async function GET(req: NextRequest) {
@@ -112,8 +125,11 @@ export async function GET(req: NextRequest) {
     const remainingSeconds = Math.max(0, Math.floor((new Date(state.endsAt).getTime() - Date.now()) / 1000));
     return NextResponse.json({ ok: true, active: true, roomsCount: state.roomsCount, durationSeconds: remainingSeconds, assignments: state.assignments, myRoom: state.assignments[caller.key] ?? null });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Breakout API] GET Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }
 
@@ -127,7 +143,9 @@ function isValidAssignments(v: any): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'meetings-breakout', 60, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, accessToken, participantRowId, event, assignments, durationSeconds, peerKey, roomNumber, message, roomsCount } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -220,6 +238,9 @@ export async function POST(req: NextRequest) {
       try {
         await broadcastToMeetingEvents(adminSelf, meetingId, 'move-breakout', { server: true, peerKey: callerSelf.key, roomNumber: roomNumber === undefined ? null : roomNumber, durationSeconds: remainingSeconds });
       } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         console.error('[Breakout API] Self-select broadcast failed:', e?.message || e);
         return NextResponse.json({ error: 'BROADCAST_FAILED', message: 'The rooms could not be reached. Please try again.' }, { status: 502 });
       }
@@ -339,13 +360,19 @@ export async function POST(req: NextRequest) {
     try {
       await broadcastToMeetingEvents(admin, meetingId, event, payload);
     } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       console.error('[Breakout API] Broadcast failed:', e?.message || e);
       return NextResponse.json({ error: 'BROADCAST_FAILED', message: 'The rooms could not be reached. Please try again.' }, { status: 502 });
     }
 
     return NextResponse.json({ ok: true, event });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Breakout API] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

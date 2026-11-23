@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // Phase B (9): meeting transcripts — save and read.
 //
@@ -38,7 +39,9 @@ async function getCaller(admin: any, accessToken: string | undefined) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'meetings-transcript', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, accessToken, lines } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -85,12 +88,17 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, lineCount: clean.length });
   } catch (e: any) {
-    return NextResponse.json({ error: 'SERVER_ERROR', message: String(e?.message || e) }, { status: 500 });
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
+    return NextResponse.json({ error: 'SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
+  const limited = checkRateLimit(req, 'meetings-transcript', 60, 60 * 1000);
+  if (limited) return limited;
     const meetingId = req.nextUrl.searchParams.get('meetingId');
     const accessToken = req.nextUrl.searchParams.get('accessToken') || undefined;
     if (!meetingId) {
@@ -145,6 +153,9 @@ export async function GET(req: NextRequest) {
         : null,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: 'SERVER_ERROR', message: String(e?.message || e) }, { status: 500 });
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
+    return NextResponse.json({ error: 'SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

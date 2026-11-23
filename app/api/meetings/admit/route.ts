@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { tierForProfile, TIER_LIMITS, TIER_LABELS } from '../../../../src/utils/tiers';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // Admit or decline a waiting-room participant, server-side. (Fix
 // Round 7, finding #4: admission used to be a direct client-side row
@@ -48,13 +49,18 @@ async function broadcastToRoom(admin: any, meetingId: string, event: string, pay
     const result = await ch.send({ type: 'broadcast', event, payload });
     if (result && result !== 'ok') throw new Error('The room did not accept the broadcast.');
   } finally {
-    try { await admin.removeChannel(ch); } catch (e) { /* already gone */ }
+    try { await admin.removeChannel(ch); } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* already gone */ }
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'meetings-admit', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, accessToken, participantRowId, participantId, status, settings } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -137,7 +143,10 @@ export async function POST(req: NextRequest) {
           .eq('id', meetingId)
           .maybeSingle();
         meetingTeamId = (teamRow as any)?.team_id || null;
-      } catch (e) { /* team_id column not set up yet: not a team meeting */ }
+      } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* team_id column not set up yet: not a team meeting */ }
       if (meetingTeamId) {
         const { data: prow } = await admin
           .from('meeting_participants')
@@ -198,7 +207,10 @@ export async function POST(req: NextRequest) {
             hostIsPremium = !!(hostProfile as any)?.is_premium;
             hostPlanTier = (hostProfile as any)?.plan_tier ?? null;
           }
-        } catch (e) { /* profile unreadable: Free tier */ }
+        } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* profile unreadable: Free tier */ }
       }
       const hostTier = tierForProfile({ is_premium: hostIsPremium, plan_tier: hostPlanTier });
       const maxCapacity = TIER_LIMITS[hostTier];
@@ -238,16 +250,26 @@ export async function POST(req: NextRequest) {
     try {
       await broadcastToRoom(admin, meetingId, 'waitroom-response', { server: true, targetKey: participantId, status });
       if (settings && typeof settings === 'object') {
-        await broadcastToRoom(admin, meetingId, 'settings-update', { server: true, ...settings });
+        // Security audit: client settings must never override the
+        // server marker on this broadcast.
+        const { server: _s, ...safeSettings } = settings as Record<string, unknown>;
+        void _s;
+        await broadcastToRoom(admin, meetingId, 'settings-update', { server: true, ...safeSettings });
       }
     } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       console.error('[Admit API] Broadcast failed after the row was updated:', e?.message || e);
       return NextResponse.json({ error: 'BROADCAST_FAILED', message: 'The guest was ' + (status === 'Admitted' ? 'admitted' : 'declined') + ', but the instant notification could not be sent — they will see it on the next check (a few seconds).' }, { status: 502 });
     }
 
     return NextResponse.json({ ok: true, status, rowUpdated });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Admit API] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

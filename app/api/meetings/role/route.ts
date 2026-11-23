@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // Grant or revoke a meeting role, server-side. (Phase 3, Feature 2.)
 //
@@ -50,7 +51,9 @@ const GRANTABLE_ROLES = ['CoHost', 'Moderator', 'Participant'];
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'meetings-role', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, participantRowId, role, accessToken } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -119,7 +122,10 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, role });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Role API] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

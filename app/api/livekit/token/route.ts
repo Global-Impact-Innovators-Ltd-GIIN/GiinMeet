@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../../../src/supabaseClient';
 import { tierForProfile, TIER_LIMITS, TIER_LABELS } from '../../../../src/utils/tiers';
 import { checkRateLimit } from '../../_lib/security';
+import { readJsonBody } from '../../_lib/security';
 
 // Server-only Supabase admin client. It uses SUPABASE_SERVICE_ROLE_KEY,
 // which bypasses RLS, so it must NEVER be imported by client code and the
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
     // and it blunts token-minting floods.
     const limited = checkRateLimit(req, 'livekit-token', 20, 60 * 1000);
     if (limited) return limited;
-    const body = await req.json().catch(() => ({}));
+    const body = await readJsonBody(req);
     const { roomId, roomSlug, userName, accessToken, participantRowId, meetingId } = body;
 
     if (!roomId && !roomSlug) {
@@ -151,7 +152,10 @@ export async function POST(req: NextRequest) {
           message: 'This meeting was deleted from history.',
         }, { status: 410 });
       }
-    } catch (e) { /* deleted_at column not set up yet: not deleted */ }
+    } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* deleted_at column not set up yet: not deleted */ }
 
     // Phase 3 (Feature 3), team meetings: only team members may
     // join. Best-effort read, the column only exists once
@@ -166,7 +170,10 @@ export async function POST(req: NextRequest) {
         .eq('id', derivedMeetingId)
         .maybeSingle();
       meetingTeamId = (teamRow as any)?.team_id || null;
-    } catch (e) { /* team_id column not set up yet: not a team meeting */ }
+    } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* team_id column not set up yet: not a team meeting */ }
 
     // Round 9 (9C): link expiry, enforced server-side. Best-effort
     // read, the columns only exist once giinmeet_link_expiry.sql has
@@ -187,7 +194,10 @@ export async function POST(req: NextRequest) {
           message: 'This meeting link has expired.',
         }, { status: 403 });
       }
-    } catch (e) { /* link expiry not set up yet: the link is live */ }
+    } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* link expiry not set up yet: the link is live */ }
 
     // Fix Round 7 (#6): the persisted meeting lock. Best-effort
     // single-column read - the column only exists once
@@ -203,7 +213,10 @@ export async function POST(req: NextRequest) {
         .eq('id', derivedMeetingId)
         .maybeSingle();
       isMeetingLocked = !!(lockRow as any)?.is_locked;
-    } catch (e) { /* lock column not set up yet: treat as unlocked */ }
+    } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* lock column not set up yet: treat as unlocked */ }
 
     // The CURRENT host is admin_id (it moves on transfer); user_id
     // (creator) only counts when admin_id was never set. (Phase 6: the
@@ -233,7 +246,10 @@ export async function POST(req: NextRequest) {
             message: 'This account has been suspended. Contact the administrator.',
           }, { status: 403 });
         }
-      } catch (e) { /* not suspended */ }
+      } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* not suspended */ }
 
       identity = user.id;
       if (meetingTeamId && !isHostUser(user.id)) {
@@ -389,7 +405,10 @@ export async function POST(req: NextRequest) {
           hostPlanTier = (hostProfile as any)?.plan_tier ?? null;
           hostIsSuspended = !!(hostProfile as any)?.is_suspended;
         }
-      } catch (e) { /* profile unreadable: Free tier */ }
+      } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* profile unreadable: Free tier */ }
     }
     const hostTier = tierForProfile({ is_premium: hostIsPremium, plan_tier: hostPlanTier });
     // Superadmin portal: a suspended host's meetings are frozen, no
@@ -412,12 +431,18 @@ export async function POST(req: NextRequest) {
       if (typeof stored === 'number' && Number.isFinite(stored) && stored >= 1 && stored <= 10000) {
         maxCapacity = stored;
       }
-    } catch (e) { /* built-in limits stand */ }
+    } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* built-in limits stand */ }
     try {
       if (room.max_capacity !== maxCapacity) {
         await admin.from('rooms').update({ max_capacity: maxCapacity }).eq('id', room.id);
       }
-    } catch (e) { /* stored cap is cosmetic: the tier limit above rules */ }
+    } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* stored cap is cosmetic: the tier limit above rules */ }
     let liveCount: number | null = null;
     let liveIdentities: string[] | null = null;
     const lkUrl = process.env.LIVEKIT_URL;
@@ -430,6 +455,9 @@ export async function POST(req: NextRequest) {
         liveIdentities = liveParticipants.map((p: any) => p.identity);
         liveCount = liveParticipants.length;
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         console.warn('[Token API] LiveKit participant list failed, falling back to database count:', (e as any)?.message);
       }
     }
@@ -567,10 +595,13 @@ export async function POST(req: NextRequest) {
       tier: hostTier,
     });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Token API] Internal Exception:', err);
     return NextResponse.json({
       error: 'INTERNAL_SERVER_ERROR',
-      message: err.message || 'An unexpected server error occurred.',
+      message: 'An unexpected server error occurred.',
     }, { status: 500 });
   }
 }

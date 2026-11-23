@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperadmin, writeAudit } from '../lib';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // The only settings the portal may write. Anything else is refused —
 // a settings table must never become a free-form write surface.
@@ -75,7 +76,9 @@ function isValidValue(key: AllowedKey, value: unknown): string | null {
 //   { accessToken, action: 'set', key, value } -> write one setting (validated, audited)
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'superadmin-settings', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const checked = await requireSuperadmin(body?.accessToken);
     if ('response' in checked) return checked.response;
     const { admin, user: actor } = checked.caller;
@@ -151,9 +154,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: 'BAD_REQUEST', message: `Unknown action: ${body?.action}` }, { status: 400 });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Superadmin Settings] Internal Exception:', err);
     return NextResponse.json(
-      { error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' },
+      { error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' },
       { status: 500 }
     );
   }

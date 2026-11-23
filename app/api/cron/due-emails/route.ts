@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendMail } from '../../../../src/utils/mailer';
 import { loadWorkspaceBrandName } from '../../../../src/utils/brand';
+import { checkRateLimit, secretsEqual } from '../../_lib/security';
 
 // Phase 1 — the email outbox runner. Called by Vercel Cron every 5 minutes
 // (see vercel.json) and does two jobs in one pass:
@@ -40,10 +41,12 @@ function siteOrigin(req: NextRequest): string {
 
 export async function GET(req: NextRequest) {
   try {
+    const limited = checkRateLimit(req, 'cron-due-emails', 10, 60 * 1000);
+    if (limited) return limited;
     const secret = process.env.CRON_SECRET;
     if (secret) {
       const auth = req.headers.get('authorization') || '';
-      if (auth !== `Bearer ${secret}`) {
+      if (!secretsEqual(auth, `Bearer ${secret}`)) {
         return NextResponse.json({ error: 'UNAUTHORIZED', message: 'A valid cron secret is required.' }, { status: 401 });
       }
     }
@@ -155,6 +158,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, queuedReminders, sent, failed, awaitingProvider });
   } catch (err: any) {
     console.error('[Cron] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

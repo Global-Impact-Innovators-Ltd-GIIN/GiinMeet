@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { loadWorkspaceBrandName } from '../../../../src/utils/brand';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // Phase 1 — attendance auto-report. Called once by the host's browser
 // when a meeting ends for everyone (fire-and-forget — the end never
@@ -53,7 +54,9 @@ function formatTime(epochMs: number): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const limited = checkRateLimit(req, 'attendance-report', 30, 60 * 1000);
+    if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, accessToken, rows } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -122,7 +125,10 @@ export async function POST(req: NextRequest) {
       const { data: prof } = await admin.from('profiles').select('name,email').eq('id', user.id).maybeSingle();
       hostEmail = (prof as any)?.email || null;
       if ((prof as any)?.name) hostName = (prof as any).name;
-    } catch (e) { /* no host email: the report stays in the dashboard */ }
+    } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* no host email: the report stays in the dashboard */ }
     if (!hostEmail) {
       return NextResponse.json({ ok: true, queued: false, reason: 'NO_HOST_EMAIL', message: 'The attendance report was saved, but no email address is on file for the host, so no email was queued.' });
     }
@@ -166,7 +172,10 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, queued: true, participants: withLate.length, late: lateCount });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[AttendanceReport] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

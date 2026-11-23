@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireSuperadmin } from '../lib';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // POST /api/superadmin/diagnostics
 //   { accessToken }                      -> migration status for every repo SQL file (probed, never guessed)
@@ -23,13 +24,18 @@ async function probe(admin: any, table: string, column: string): Promise<boolean
     const { error } = await admin.from(table).select(column).limit(1);
     return !error;
   } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     return false;
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'superadmin-diagnostics', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const checked = await requireSuperadmin(body?.accessToken);
     if ('response' in checked) return checked.response;
     const { admin } = checked.caller;
@@ -50,6 +56,9 @@ export async function POST(req: NextRequest) {
           if (data.users.length < 1000) break;
         }
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         console.error('[Superadmin Diagnostics] auth lookup failed:', (e as any)?.message);
       }
       if (!authUser) {
@@ -70,6 +79,9 @@ export async function POST(req: NextRequest) {
         meetingsCount = (meets || []).length;
         liveMeetings = (meets || []).filter((m: any) => m.status === 'In Progress').length;
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         meetingsCount = 0;
       }
       return NextResponse.json({
@@ -111,6 +123,9 @@ export async function POST(req: NextRequest) {
                 : manualDetail || 'Cannot be verified by a read — check the SQL Editor history.',
         });
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         checks.push({ file, what, status: 'manual', detail: `Probe failed: ${String((e as any)?.message || e)}` });
       }
     };
@@ -147,6 +162,9 @@ export async function POST(req: NextRequest) {
         const { data } = await admin.storage.listBuckets();
         return (data || []).some((b: any) => b.name === 'chat-files') ? 'applied' : 'not-applied';
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         return 'manual';
       }
     });
@@ -173,6 +191,9 @@ export async function POST(req: NextRequest) {
         if (data && data.length > 0 && Object.prototype.hasOwnProperty.call(data[0], 'passcode')) return 'not-applied';
         return 'manual';
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         return 'manual';
       }
     });
@@ -197,9 +218,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, checks });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Superadmin Diagnostics] Internal Exception:', err);
     return NextResponse.json(
-      { error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' },
+      { error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' },
       { status: 500 }
     );
   }

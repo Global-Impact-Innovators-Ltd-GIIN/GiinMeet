@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // Host-only passcode fetch. Once the `passcode` column is hidden from anon
 // reads (see giinmeet_passcode_lockdown.sql), the browser can no longer read
@@ -18,7 +19,9 @@ function getAdminClient() {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'meetings-passcode', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, accessToken } = body;
     if (!meetingId || !accessToken) {
       return NextResponse.json({ error: 'UNAUTHORIZED', message: 'A signed-in host session is required.' }, { status: 401 });
@@ -44,7 +47,10 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ passcode: meeting.passcode || null });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Meeting Passcode API] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

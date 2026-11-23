@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { RoomServiceClient } from 'livekit-server-sdk';
+import { checkRateLimit, isUuid, readJsonBody } from '../../_lib/security';
 
 // Room controls, host-verified server-side. (Fix Round 7, findings
 // #1 + #3: every participant used to broadcast mute/kick/settings to
@@ -61,7 +62,10 @@ async function broadcastToRoom(admin: any, meetingId: string, event: string, pay
     const result = await ch.send({ type: 'broadcast', event, payload });
     if (result && result !== 'ok') throw new Error('The room did not accept the broadcast.');
   } finally {
-    try { await admin.removeChannel(ch); } catch (e) { /* already gone */ }
+    try { await admin.removeChannel(ch); } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* already gone */ }
   }
 }
 
@@ -70,7 +74,9 @@ const HOST_ONLY_ACTIONS = ['settings-update'];
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'meetings-control', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, accessToken, participantRowId, action, targetUserId, targetRowId, settings } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -155,6 +161,13 @@ export async function POST(req: NextRequest) {
       if (!key) {
         return NextResponse.json({ error: 'BAD_REQUEST', message: 'Choose a participant to remove.' }, { status: 400 });
       }
+      // Security audit: the key below is interpolated into a PostgREST
+      // .or() filter string. A non-UUID value could inject extra
+      // filters (commas separate filters), widening the remove to
+      // every participant in the meeting. Both key forms are UUIDs.
+      if (!isUuid(key)) {
+        return NextResponse.json({ error: 'BAD_REQUEST', message: 'Choose a participant to remove.' }, { status: 400 });
+      }
       // Phase 3 (Feature 2): a co-host / moderator may remove ordinary
       // participants, but never the host and never another role-holder.
       // Only the host can remove a co-host or a moderator (and only the
@@ -231,11 +244,17 @@ export async function POST(req: NextRequest) {
           const roomSlugs = [mainSlug, 1, 2, 3, 4, 5].map(n => typeof n === 'number' ? `${mainSlug}-breakout-${n}` : n);
           for (const slug of roomSlugs) {
             for (const identity of identities) {
-              try { await roomService.removeParticipant(slug, identity); } catch (e) { /* not in this room: try the next */ }
+              try { await roomService.removeParticipant(slug, identity); } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* not in this room: try the next */ }
             }
           }
         }
-      } catch (e) { /* LiveKit removal is best-effort: the kick already stands */ }
+      } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* LiveKit removal is best-effort: the kick already stands */ }
     }
 
     // Broadcast the control event with the server marker. Receivers
@@ -247,18 +266,28 @@ export async function POST(req: NextRequest) {
       if (!settings || typeof settings !== 'object') {
         return NextResponse.json({ error: 'BAD_REQUEST', message: 'Settings are required.' }, { status: 400 });
       }
-      Object.assign(payload, settings);
+      // Security audit: client settings must never override the
+      // server marker or retarget the broadcast at someone else.
+      const { server: _s, targetUserId: _tu, targetRowId: _tr, ...safeSettings } = settings as Record<string, unknown>;
+      void _s; void _tu; void _tr;
+      Object.assign(payload, safeSettings);
     }
     try {
       await broadcastToRoom(admin, meetingId, action, payload);
     } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       console.error('[Control API] Broadcast failed:', e?.message || e);
       return NextResponse.json({ error: 'BROADCAST_FAILED', message: 'The room could not be reached. Please try again.' }, { status: 502 });
     }
 
     return NextResponse.json({ ok: true, action, rowDeleted });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Control API] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

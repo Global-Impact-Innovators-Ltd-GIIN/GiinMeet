@@ -25,7 +25,7 @@
 //   include any voter data; named server polls include totals only.
 // Rate limited per IP; every value validated server-side.
 import { NextRequest } from 'next/server';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import {
   checkRateLimit,
   cleanText,
@@ -40,8 +40,26 @@ import { resolveC2bCaller } from '../../_lib/c2b';
 
 const TABLE_MISSING = 'Polls need the Phase C2b database setup first (run giinmeet_phaseC2b.sql).';
 
+// Security audit: the anonymous-vote pepper must be its own secret.
+// The old code fell back to the service-role key (key misuse: rotating
+// that key silently broke every existing vote's hasVoted match, and a
+// leaked vote table plus a leaked key de-anonymises votes) and then to
+// a pepper printed in this repo, which de-anonymises votes for anyone
+// who reads the code. Set GIINMEET_POLL_PEPPER in Vercel to a long
+// random string for durable anonymity. Until it is set, a random
+// per-process pepper keeps polls working; a voter may then be able to
+// vote twice across a redeploy, and the server logs a warning.
+let ephemeralPollPepper: string | null = null;
 function voterHash(pollId: string, voterKey: string): string {
-  const pepper = (process.env.GIINMEET_POLL_PEPPER || process.env.SUPABASE_SERVICE_ROLE_KEY || 'giinmeet-poll-pepper').trim();
+  const configured = (process.env.GIINMEET_POLL_PEPPER || '').trim();
+  let pepper = configured;
+  if (!pepper) {
+    if (!ephemeralPollPepper) {
+      ephemeralPollPepper = randomBytes(32).toString('hex');
+      console.warn('[Polls] GIINMEET_POLL_PEPPER is not set, using a temporary pepper. Set it in Vercel for durable anonymous votes.');
+    }
+    pepper = ephemeralPollPepper;
+  }
   return createHash('sha256').update(`${pollId}:${voterKey}:${pepper}`).digest('hex');
 }
 

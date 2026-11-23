@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperadmin, writeAudit } from '../lib';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // The shared workspace brand (workspace_brand, id 1) — the name,
 // slogan, logo and accent every user sees on the sign-in screen, in
@@ -54,7 +55,9 @@ function notSetUpResponse() {
 //   { accessToken, action: 'reset' }       -> delete the brand row (the default GiinMeet brand returns)
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'superadmin-brand', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const checked = await requireSuperadmin(body?.accessToken);
     if ('response' in checked) return checked.response;
     const { admin, user: actor } = checked.caller;
@@ -134,9 +137,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: 'BAD_REQUEST', message: `Unknown action: ${body?.action}` }, { status: 400 });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Superadmin Brand] Internal Exception:', err);
     return NextResponse.json(
-      { error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' },
+      { error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' },
       { status: 500 }
     );
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from '../../_lib/security';
+import { readJsonBody } from '../../_lib/security';
 
 // Resolve a personal-room slug to the current session meeting (Phase 1).
 // A personal room is a permanent link (giinmeet.../#/room/<slug>) that
@@ -30,7 +31,10 @@ async function getHostName(admin: any, userId: string): Promise<string> {
   try {
     const { data: prof } = await admin.from('profiles').select('name').eq('id', userId).maybeSingle();
     if ((prof as any)?.name) return (prof as any).name as string;
-  } catch (e) { /* fall through to the default */ }
+  } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* fall through to the default */ }
   return 'Host';
 }
 
@@ -41,7 +45,7 @@ export async function POST(req: NextRequest) {
     // does not get to hammer the database.
     const limited = checkRateLimit(req, 'rooms-resolve', 30, 60 * 1000);
     if (limited) return limited;
-    const body = await req.json().catch(() => ({}));
+    const body = await readJsonBody(req);
     const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
     if (!slug) {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'A room link is required.' }, { status: 400 });
@@ -118,11 +122,17 @@ export async function POST(req: NextRequest) {
         max_capacity: 50,
         current_engine: 'LIVEKIT',
       }]);
-    } catch (e) { /* retried on join */ }
+    } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* retried on join */ }
 
     return NextResponse.json({ meetingId, title: room.title, hasPasscode: !!room.passcode, hostName });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Resolve Room API] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

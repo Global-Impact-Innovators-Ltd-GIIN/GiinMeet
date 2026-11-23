@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { requireSuperadmin } from '../lib';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // POST /api/superadmin/livekit { accessToken }
 // Live rooms right now, straight from the LiveKit server: room name
@@ -8,7 +9,9 @@ import { requireSuperadmin } from '../lib';
 // guessed numbers — an empty list means no room is live.
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'superadmin-livekit', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const checked = await requireSuperadmin(body?.accessToken);
     if ('response' in checked) return checked.response;
 
@@ -35,15 +38,21 @@ export async function POST(req: NextRequest) {
           name: p.name || p.identity || '',
         }));
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         participants = [];
       }
       out.push({ name: r.name, participants });
     }
     return NextResponse.json({ ok: true, configured: true, rooms: out });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Superadmin LiveKit] Internal Exception:', err);
     return NextResponse.json(
-      { error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' },
+      { error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' },
       { status: 500 }
     );
   }

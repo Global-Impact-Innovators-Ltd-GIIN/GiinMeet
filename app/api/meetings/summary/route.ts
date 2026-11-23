@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // Phase B (10): AI meeting summary — generate from the stored transcript.
 //
@@ -64,13 +65,18 @@ function parseSummaryText(raw: string): { summary: string; decisions: string[]; 
           : [],
       };
     }
-  } catch (e) { /* not JSON — fall through to plain text */ }
+  } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* not JSON — fall through to plain text */ }
   return fallback;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'meetings-summary', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, accessToken } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -126,6 +132,9 @@ export async function POST(req: NextRequest) {
         signal: controller.signal,
       });
     } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       clearTimeout(timer);
       return NextResponse.json({ ok: false, reason: 'LLM_UNREACHABLE', message: 'The summary service could not be reached. The transcript is saved — try generating the summary again from the meeting record.' }, { status: 200 });
     } finally {
@@ -170,10 +179,16 @@ export async function POST(req: NextRequest) {
         .filter((r: any) => r.text.length > 0)
         .slice(0, 50);
       if (rows.length > 0) await admin.from('action_items').insert(rows);
-    } catch (e) { /* action tracking is best-effort; the summary stands */ }
+    } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* action tracking is best-effort; the summary stands */ }
     return NextResponse.json({ ok: true, summary: parsed.summary, decisions: parsed.decisions, actionItems: parsed.actionItems });
   } catch (e: any) {
-    return NextResponse.json({ error: 'SERVER_ERROR', message: String(e?.message || e) }, { status: 500 });
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
+    return NextResponse.json({ error: 'SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }
 
@@ -224,6 +239,9 @@ export async function GET(req: NextRequest) {
         : null,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: 'SERVER_ERROR', message: String(e?.message || e) }, { status: 500 });
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
+    return NextResponse.json({ error: 'SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

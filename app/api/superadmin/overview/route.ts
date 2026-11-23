@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { requireSuperadmin, readSetting } from '../lib';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // POST /api/superadmin/overview { accessToken }
 // Real numbers only — every figure comes from the live database,
@@ -9,7 +10,9 @@ import { requireSuperadmin, readSetting } from '../lib';
 // reason, never invented.
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'superadmin-overview', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const checked = await requireSuperadmin(body?.accessToken);
     if ('response' in checked) return checked.response;
     const { admin } = checked.caller;
@@ -29,6 +32,9 @@ export async function POST(req: NextRequest) {
         .select('id', { count: 'exact', head: true });
       totalUsers = count ?? 0;
     } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       console.error('[Superadmin Overview] profiles count failed:', (e as any)?.message);
     }
     try {
@@ -56,6 +62,9 @@ export async function POST(req: NextRequest) {
         .slice(0, 8)
         .map((u) => ({ email: u.email, lastSignInAt: u.lastSignInAt }));
     } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       console.error('[Superadmin Overview] auth user list failed:', (e as any)?.message);
     }
 
@@ -82,6 +91,9 @@ export async function POST(req: NextRequest) {
         }));
       }
     } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       console.error('[Superadmin Overview] meetings read failed:', (e as any)?.message);
     }
 
@@ -103,11 +115,17 @@ export async function POST(req: NextRequest) {
             const parts = await roomService.listParticipants(r.name);
             count = (parts || []).length;
           } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
             count = -1; // participants unknown for this room
           }
           livekitRooms.push({ name: r.name, participants: count });
         }
       } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         livekitError = String(e?.message || e);
       }
     } else {
@@ -152,6 +170,9 @@ export async function POST(req: NextRequest) {
         storage.push({ bucket: b.name, files, bytes, capped });
       }
     } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       console.error('[Superadmin Overview] storage list failed:', (e as any)?.message);
     }
 
@@ -179,6 +200,9 @@ export async function POST(req: NextRequest) {
         participantMinutesThisMonth = Math.round(total);
       }
     } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       participantMinutesThisMonth = null;
     }
 
@@ -196,6 +220,9 @@ export async function POST(req: NextRequest) {
         recentAudit = data as any[];
       }
     } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       auditAvailable = false;
     }
     let recentDeletions: { meeting_title: string | null; deleted_at: string }[] = [];
@@ -207,6 +234,9 @@ export async function POST(req: NextRequest) {
         .limit(5);
       if (!error && data) recentDeletions = data as any[];
     } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
       recentDeletions = [];
     }
 
@@ -257,9 +287,12 @@ export async function POST(req: NextRequest) {
       setup,
     });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Superadmin Overview] Internal Exception:', err);
     return NextResponse.json(
-      { error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' },
+      { error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' },
       { status: 500 }
     );
   }

@@ -7,6 +7,7 @@
 //   IP and per poll. Accepts JSON, or a form post from the poll page
 //   (which is then sent back to the poll page with ?voted=1).
 import { NextRequest, NextResponse } from 'next/server';
+import { readJsonBody } from '../../_lib/security';
 import {
   checkRateLimit,
   cleanText,
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
         }
       }
     } else {
-      const body = await req.json().catch(() => ({}));
+      const body = await readJsonBody(req);
       token = String((body as any).token || '').trim();
       voterName = String((body as any).voterName || '').trim();
       votes = ((body as any).votes || {}) as Record<string, string>;
@@ -88,6 +89,9 @@ export async function POST(req: NextRequest) {
     }
     return jsonWithSecurity({ ok: true });
   } catch (err) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     return internalError('Scheduling Respond API', err);
   }
 }

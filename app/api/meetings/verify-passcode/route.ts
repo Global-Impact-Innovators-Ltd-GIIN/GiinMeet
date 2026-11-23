@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { readJsonBody } from '../../_lib/security';
 import {
   checkRateLimit,
   clearFailures,
@@ -7,6 +8,7 @@ import {
   getClientIp,
   isLockedOut,
   recordFailureAndCheckLockout,
+  secretsEqual,
 } from '../../_lib/security';
 
 // Server-side passcode verification. The passcode is NEVER compared in the
@@ -33,7 +35,7 @@ export async function POST(req: NextRequest) {
   try {
     const limited = checkRateLimit(req, 'verify-passcode', 30, 60 * 1000);
     if (limited) return limited;
-    const body = await req.json().catch(() => ({}));
+    const body = await readJsonBody(req);
     const { meetingId, passcode } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -62,7 +64,9 @@ export async function POST(req: NextRequest) {
     }
     const hasPasscode = !!meeting.passcode;
     const supplied = typeof passcode === 'string' ? passcode.trim().toUpperCase() : '';
-    const valid = hasPasscode && supplied !== '' && supplied === String(meeting.passcode).toUpperCase();
+    // Constant-time compare, so the response time does not leak how
+    // many leading characters of the code matched.
+    const valid = hasPasscode && supplied !== '' && secretsEqual(supplied, String(meeting.passcode).toUpperCase());
     if (hasPasscode) {
       if (valid) {
         clearFailures(lockKey);
@@ -81,7 +85,10 @@ export async function POST(req: NextRequest) {
     // No passcode set means the meeting is open: any caller "passes".
     return NextResponse.json({ hasPasscode, valid: !hasPasscode || valid });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Verify Passcode API] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

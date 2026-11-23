@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
 import { requireSuperadmin, writeAudit } from '../lib';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 const VALID_TIERS = ['free', 'pro', 'enterprise'] as const;
 
@@ -14,7 +15,9 @@ const VALID_TIERS = ['free', 'pro', 'enterprise'] as const;
 // Every mutating action writes a superadmin_audit_log row (best-effort).
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'superadmin-users', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const checked = await requireSuperadmin(body?.accessToken);
     if ('response' in checked) return checked.response;
     const { admin, user: actor } = checked.caller;
@@ -46,6 +49,9 @@ export async function POST(req: NextRequest) {
           if (data.users.length < 1000) break;
         }
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         console.error('[Superadmin Users] auth list failed:', (e as any)?.message);
       }
       const users = (profiles || []).map((p: any) => ({
@@ -128,6 +134,9 @@ export async function POST(req: NextRequest) {
         } as any);
         if (banErr) banWarning = `The account is flagged suspended, but the sign-in ban could not be applied: ${banErr.message}`;
       } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         banWarning = `The account is flagged suspended, but the sign-in ban could not be applied: ${e?.message || e}`;
       }
       await writeAudit(admin, actor, 'suspend', 'user', userId, { email: targetEmail, reason });
@@ -150,6 +159,9 @@ export async function POST(req: NextRequest) {
         } as any);
         if (unbanErr) banWarning = `The account is active again, but the sign-in ban could not be cleared: ${unbanErr.message}`;
       } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         banWarning = `The account is active again, but the sign-in ban could not be cleared: ${e?.message || e}`;
       }
       await writeAudit(admin, actor, 'activate', 'user', userId, { email: targetEmail });
@@ -202,9 +214,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: 'BAD_REQUEST', message: `Unknown action: ${action}` }, { status: 400 });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Superadmin Users] Internal Exception:', err);
     return NextResponse.json(
-      { error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' },
+      { error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' },
       { status: 500 }
     );
   }

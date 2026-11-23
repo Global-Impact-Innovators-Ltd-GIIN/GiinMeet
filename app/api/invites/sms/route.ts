@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // Phase 2 (#2) — SMS invites via Twilio, gated behind env vars.
 //
@@ -49,7 +50,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'invites-sms', 10, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, phone, accessToken, link, title, time } = body;
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -135,14 +138,20 @@ export async function POST(req: NextRequest) {
       body: new URLSearchParams({ From: from, To: cleanPhone, Body: text }),
     });
     if (!res.ok) {
+      // Security audit: the provider's error body can carry account
+      // detail, so it goes to the server log only, never to the caller.
       const detail = await res.text().catch(() => '');
+      console.error('[SMS API] Twilio refused the message:', res.status, detail.slice(0, 200));
       return NextResponse.json(
-        { error: 'SMS_SEND_FAILED', message: `Twilio refused the message (HTTP ${res.status}). Check the Twilio number and credentials.${detail ? ` ${detail.slice(0, 200)}` : ''}` },
+        { error: 'SMS_SEND_FAILED', message: 'The SMS provider refused the message. Check the Twilio number and credentials.' },
         { status: 502 }
       );
     }
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ error: 'SMS_SEND_FAILED', message: String(e?.message || e) }, { status: 500 });
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
+    return NextResponse.json({ error: 'SMS_SEND_FAILED', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { requireSuperadmin, writeAudit } from '../lib';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // POST /api/superadmin/meetings
 //   { accessToken }                              -> list ALL meetings + host names + participant counts
@@ -8,7 +9,9 @@ import { requireSuperadmin, writeAudit } from '../lib';
 //   { accessToken, action: 'delete', meetingId } -> soft-delete (Completed or expired Scheduled only, same scope as /api/meetings/delete)
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'superadmin-meetings', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const checked = await requireSuperadmin(body?.accessToken);
     if ('response' in checked) return checked.response;
     const { admin, user: actor } = checked.caller;
@@ -96,6 +99,9 @@ export async function POST(req: NextRequest) {
           livekitLive = true;
           livekitParticipants = (parts || []).map((p: any) => p.identity || p.name || '');
         } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
           // Room not live on the video server (or LiveKit unreachable).
           livekitLive = false;
         }
@@ -142,6 +148,9 @@ export async function POST(req: NextRequest) {
           await roomService.deleteRoom(slug);
           livekitRoomDeleted = true;
         } catch (e: any) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
           const msg = String(e?.message || e);
           if (/not found/i.test(msg)) livekitRoomDeleted = true;
           else livekitWarning = 'The video server room could not be torn down automatically. The meeting is still ended — participants are removed by the app within seconds.';
@@ -163,6 +172,9 @@ export async function POST(req: NextRequest) {
           offset += 100;
         }
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         console.error('[Superadmin Meetings] Could not delete meeting chat files:', (e as any)?.message);
       }
       await writeAudit(admin, actor, 'end-meeting', 'meeting', meetingId, {
@@ -197,6 +209,9 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: true, alreadyDeleted: true });
         }
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         /* deleted_at column not set up yet: not deleted */
       }
       const now = new Date().toISOString();
@@ -223,6 +238,9 @@ export async function POST(req: NextRequest) {
           deleted_at: now,
         });
       } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
         console.error('[Superadmin Meetings] Audit row not written:', (e as any)?.message);
       }
       await writeAudit(admin, actor, 'delete-meeting', 'meeting', meetingId, {
@@ -233,9 +251,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: 'BAD_REQUEST', message: `Unknown action: ${action}` }, { status: 400 });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Superadmin Meetings] Internal Exception:', err);
     return NextResponse.json(
-      { error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' },
+      { error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' },
       { status: 500 }
     );
   }

@@ -17,6 +17,7 @@
 //   * Auth is always re-verified server-side (access token -> Supabase
 //     auth.getUser, then the DB role / host check in the route itself).
 //     Nothing in the client is ever trusted for a permission decision.
+import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -154,8 +155,27 @@ export function clearFailures(key: string) {
 
 export function getClientIp(req: NextRequest): string {
   const forwarded = req.headers.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim().slice(0, 64);
+  if (forwarded) {
+    // Security audit: take the LAST entry, not the first. Vercel's edge
+    // appends the real connecting IP at the end; any earlier entries are
+    // client-supplied and can be spoofed, which let an attacker rotate
+    // fake IPs to walk around the per-IP rate limits. The last entry is
+    // the address that actually connected to our edge (or that caller's
+    // proxy), which is the stable identifier for limiting.
+    const parts = forwarded.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1].slice(0, 64);
+  }
   return (req.headers.get('x-real-ip') || 'unknown').slice(0, 64);
+}
+
+/** Constant-time string comparison for secrets and passcodes, so the
+ *  comparison time does not leak how many leading characters matched.
+ *  Returns false when the lengths differ. */
+export function secretsEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
 
 /** Standard per-route gate: `limit` requests per `windowMs` for this

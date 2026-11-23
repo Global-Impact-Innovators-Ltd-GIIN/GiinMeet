@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit, readJsonBody } from '../../_lib/security';
 
 // Round 9 (9A): reactivate a participant's existing row on rejoin,
 // server-side (the admission lockdown blocks client status writes, so
@@ -38,7 +39,9 @@ function isCurrentHost(meeting: { admin_id?: string | null; user_id?: string | n
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+  const limited = checkRateLimit(req, 'meetings-rejoin', 30, 60 * 1000);
+  if (limited) return limited;
+    const body = await readJsonBody(req);
     const { meetingId, participantRowId, accessToken, name, role, status } = body;
     // Phase C2b (11), organisation badge text for guests (and for
     // signed-in users whose profile has none). Saved best-effort: a
@@ -48,7 +51,10 @@ export async function POST(req: NextRequest) {
       if (!organisation) return;
       try {
         await admin.from('meeting_participants').update({ organisation }).eq('id', rowId);
-      } catch (e) { /* column not set up yet: badge stays blank */ }
+      } catch (e) {
+    if (e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    } /* column not set up yet: badge stays blank */ }
     };
     if (!meetingId || typeof meetingId !== 'string') {
       return NextResponse.json({ error: 'BAD_REQUEST', message: 'meetingId is required.' }, { status: 400 });
@@ -152,7 +158,10 @@ export async function POST(req: NextRequest) {
     if (updated) await saveOrganisation(updated.id);
     return NextResponse.json({ found: true, row: updated });
   } catch (err: any) {
+    if (err instanceof Error && err.message === 'PAYLOAD_TOO_LARGE') {
+      return NextResponse.json({ error: 'PAYLOAD_TOO_LARGE', message: 'That request is too large.' }, { status: 413 });
+    }
     console.error('[Rejoin API] Internal Exception:', err);
-    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: err.message || 'An unexpected server error occurred.' }, { status: 500 });
+    return NextResponse.json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }
