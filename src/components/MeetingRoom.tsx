@@ -1277,6 +1277,33 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const peerStatesRef = useRef(peerStates);
   const remoteStreamsRef = useRef(remoteStreams);
   useEffect(() => { peerStatesRef.current = peerStates; }, [peerStates]);
+
+  // Phase C1 (34), speaking time: who spoke, and who never got a turn.
+  // A 1-second tick adds one second for every person whose speaking
+  // indicator is on (self + remote peers). Only totals leave the
+  // browser: the host flushes them to Supabase when the meeting ends.
+  // Muted speakers never count (their indicator is off while muted).
+  const speakSecondsRef = useRef<Record<string, { name: string; seconds: number }>>({});
+  const isSpeakingRef = useRef(false);
+  useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
+  useEffect(() => {
+    const tick = setInterval(() => {
+      try {
+        if (isSpeakingRef.current && !isMutedRef.current) {
+          const k = myKey;
+          const cur = speakSecondsRef.current[k] || { name: currentUser?.name || 'You', seconds: 0 };
+          speakSecondsRef.current[k] = { name: cur.name, seconds: cur.seconds + 1 };
+        }
+        Object.entries(peerStatesRef.current).forEach(([key, ps]) => {
+          if (ps.isSpeaking && !ps.isMuted) {
+            const cur = speakSecondsRef.current[key] || { name: ps.name, seconds: 0 };
+            speakSecondsRef.current[key] = { name: ps.name || cur.name, seconds: cur.seconds + 1 };
+          }
+        });
+      } catch (e) { /* speaking time is best-effort */ }
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [myKey]);
   useEffect(() => { remoteStreamsRef.current = remoteStreams; }, [remoteStreams]);
 
   const [selectedCamera, setSelectedCamera] = useState(() => localStorage.getItem('giin_selected_camera') || '');
@@ -5617,6 +5644,37 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Phase 1 — attendance auto-report: after the meeting ends for everyone,
+  // Phase C1 (34), flush attendance + speaking time to Supabase when
+  // the host ends the meeting (host only, fire-and-forget). Builds
+  // join/leave events from the local attendance record and speak events
+  // from the speaking-time accumulator. The server replaces the
+  // meeting's events, so a retry never double-counts anyone.
+  const flushAttendanceEvents = async () => {
+    if (!isAdminRef.current) return;
+    try {
+      const raw = localStorage.getItem(`giin_attendance_${meetingId}`);
+      if (!raw) return;
+      const map = JSON.parse(raw) as Record<string, { name: string; joinedAt: number; leftAt: number | null }>;
+      const events: { participantKey: string; name: string; eventType: string; at: string; seconds?: number }[] = [];
+      Object.entries(map).forEach(([key, v]) => {
+        events.push({ participantKey: key, name: v.name, eventType: 'join', at: new Date(v.joinedAt).toISOString() });
+        if (v.leftAt) events.push({ participantKey: key, name: v.name, eventType: 'leave', at: new Date(v.leftAt).toISOString() });
+      });
+      Object.entries(speakSecondsRef.current).forEach(([key, v]) => {
+        if (v.seconds > 0) {
+          // The attendance record holds the authoritative name for this
+          // key; the accumulator's copy is only a fallback.
+          events.push({ participantKey: key, name: map[key]?.name || v.name, eventType: 'speak', at: new Date().toISOString(), seconds: v.seconds });
+        }
+      });
+      if (events.length === 0) return;
+      const result: any = await giinApi.recordAttendanceEvents(meetingId, events);
+      if (result && result.ok === false) {
+        console.warn('[GiinMeet] Attendance events were not saved:', result.reason || result.message || 'unknown');
+      }
+    } catch (e) { /* best-effort: the meeting is already ended */ }
+  };
+
   // send the local attendance record (localStorage, per meeting) to the
   // host's email via the server route (host-verified, stored + queued).
   // Fire-and-forget: the end never waits for it and never fails because
@@ -5683,6 +5741,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       enterEndedState('you-ended', (result as any)?.livekitWarning);
       // Phase 1 — attendance auto-report (fire-and-forget).
       void sendAttendanceReport();
+      // Phase C1 (34), attendance + speaking time to Supabase (fire-and-forget).
+      void flushAttendanceEvents();
       // Phase B (9 + 10) — transcript save + AI summary (fire-and-forget).
       void saveTranscriptAndSummary();
     } catch (err: any) {

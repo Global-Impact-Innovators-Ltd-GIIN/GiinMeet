@@ -7,6 +7,7 @@ import { TemplatesPanel, type MeetingTemplate } from './TemplatesPanel';
 import { RecentMeetings } from './RecentMeetings';
 import { LibraryPanel } from './LibraryPanel';
 import SchedulingAssistant from './SchedulingAssistant';
+import MeetingInsights from './MeetingInsights';
 import { MeetingRecordExtras } from './MeetingRecordExtras';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
@@ -1364,6 +1365,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         )}
                         {/* Phase C1 (28) — notes and recordings/files for this meeting. */}
                         <MeetingRecordExtras meetingId={meeting.id} />
+                        {/* Phase C1 (34), attendance and engagement insights. */}
+                        <MeetingInsights meetingId={meeting.id} />
                       </div>
                     );
                   })()}

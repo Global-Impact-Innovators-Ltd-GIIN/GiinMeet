@@ -1295,6 +1295,38 @@ export const giinApi = {
     }
   },
 
+  // Phase C1 (34), attendance and engagement insights. The host's
+  // browser flushes join/leave/speak events at the end; the read returns
+  // the server summary (or NOT_CONFIGURED before the C1 SQL is run).
+  recordAttendanceEvents: async (meetingId: string, events: { participantKey: string; name: string; eventType: string; at: string; seconds?: number }[]) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/meetings/attendance-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, events, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  getAttendanceEvents: async (meetingId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const params = new URLSearchParams({ meetingId, accessToken: session.access_token });
+      const res = await fetch(`/api/meetings/attendance-events?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
   pullCalendarEvents: async (fromIso?: string, toIso?: string) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
