@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode } from '../supabaseClient';
 import { encryptMessage } from '../services/e2ee';
+import { t } from '../i18n';
 
 interface Contact {
   id: string;

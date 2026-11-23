@@ -7,6 +7,7 @@ import { DeviceSettingsModal } from './DeviceSettingsModal';
 import { buildJoinLink } from '../supabaseClient';
 import { ShortLinkBox } from './ShortLinkBox';
 import { getParticipantInitials } from '../utils/getParticipantInitials';
+import { t } from '../i18n';
 
 interface MeetingLobbyProps {
   meetingId: string;

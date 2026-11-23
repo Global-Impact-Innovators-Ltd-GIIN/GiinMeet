@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, ChevronDown, ChevronUp, Bot, Send, HelpCircle } from 'lucide-react';
+import { t } from '../i18n';
 
 interface FAQItem {
   question: string;

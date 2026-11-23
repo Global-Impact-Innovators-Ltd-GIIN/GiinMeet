@@ -3,6 +3,7 @@ import { Users, Plus, Trash2, LogOut, Clock, Play, CheckCircle2, UserPlus, Alert
 import { giinApi, generateMeetingPasscode, probeTeamsSupport, TEAMS_NOT_SET_UP_MESSAGE } from '../supabaseClient';
 import type { Team, TeamMember, TeamSettings } from '../supabaseClient';
 import { TIER_MAX_DURATION_MINUTES, clampDurationToTier, type PlanTier } from '../utils/tiers';
+import { t } from '../i18n';
 
 // Phase 3 (Feature 3) — Team workspaces.
 // A team is a shared space: members, its own meetings, and shared

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   Check, Sparkles, Info
 } from 'lucide-react';
+import { t } from '../i18n';
 
 interface BillingProps {
   isPremium: boolean;

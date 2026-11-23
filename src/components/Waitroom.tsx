@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, ArrowLeft, Loader2, Sparkles, UserPlus, CheckCircle } from 'lucide-react';
 import { giinApi, supabase, isMeetingHostForUser } from '../supabaseClient';
+import { t } from '../i18n';
 
 interface WaitroomProps {
   meetingId: string;

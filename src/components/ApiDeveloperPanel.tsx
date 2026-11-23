@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { KeyRound, Webhook, Plus, Trash2, Copy, Check, RefreshCw, AlertCircle } from 'lucide-react';
 import { giinApi, PHASED_NOT_SET_UP_MESSAGE } from '../supabaseClient';
 import { canUseDeveloperApi, type PlanTier } from '../utils/tiers';
+import { t } from '../i18n';
 
 // Phase D (42), Developer panel: API keys and webhooks, in the
 // dashboard. A key is shown exactly once, at creation, then never

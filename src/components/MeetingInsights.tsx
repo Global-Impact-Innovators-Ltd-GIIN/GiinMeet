@@ -9,6 +9,7 @@
 // seconds gets a clear badge, so the host can invite them in next time.
 import React, { useEffect, useState } from 'react';
 import { giinApi } from '../supabaseClient';
+import { t } from '../i18n';
 
 function fmtClock(iso: string | null): string {
   if (!iso) return ',';

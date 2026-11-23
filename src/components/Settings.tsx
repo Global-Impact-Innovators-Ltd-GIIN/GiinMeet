@@ -11,6 +11,7 @@ import { probeBrandSupport, loadWorkspaceBrand, saveWorkspaceBrand, resetWorkspa
 import { OrganisationsPanel } from './OrganisationsPanel';
 import { ApiDeveloperPanel } from './ApiDeveloperPanel';
 import type { PlanTier } from '../utils/tiers';
+import { t } from '../i18n';
 
 interface SettingsProps {
   planTier?: PlanTier;

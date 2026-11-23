@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Edit2, Sparkles, Trash2, X } from 'lucide-react';
+import { t } from '../i18n';
 
 interface Point {
   x: number;

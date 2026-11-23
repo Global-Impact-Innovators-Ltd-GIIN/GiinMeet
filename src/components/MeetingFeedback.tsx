@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Star, CheckCircle2 } from 'lucide-react';
 import { giinApi } from '../supabaseClient';
+import { t } from '../i18n';
 
 // Phase D (46), feedback after every meeting: one tap, nothing more.
 // A 1 to 5 star tap plus an optional one-line comment, shown when a

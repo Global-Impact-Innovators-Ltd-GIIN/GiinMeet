@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StickyNote, Film, Trash2, Plus } from 'lucide-react';
 import { giinApi } from '../supabaseClient';
+import { t } from '../i18n';
 
 // Phase C1 (28), notes and files inside one meeting's Record panel.
 //

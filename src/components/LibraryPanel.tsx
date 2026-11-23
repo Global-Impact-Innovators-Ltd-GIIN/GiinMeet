@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Library, Search } from 'lucide-react';
 import { giinApi } from '../supabaseClient';
+import { t } from '../i18n';
 
 // Phase C1 (28), recordings and notes library, search.
 //

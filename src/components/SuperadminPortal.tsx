@@ -9,6 +9,7 @@ import {
 import { supabase } from '../supabaseClient';
 import { tierForProfile, TIER_LABELS, type PlanTier } from '../utils/tiers';
 import { applyAccentColor, applyUiStyle, applyGlassOpacity, applyFont } from '../utils/theme';
+import { t } from '../i18n';
 
 // ============================================================================
 // GiinMeet Superadmin Portal — a COMPLETELY SEPARATE portal from the user

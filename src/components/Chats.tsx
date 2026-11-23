@@ -9,6 +9,7 @@ import { giinApi, supabase } from '../supabaseClient';
 import { useClickOutside, useClickOutsideMany } from '../hooks/useClickOutside';
 import { getLocalBrandName } from '../utils/brand';
 import { encryptMessage, decryptMessage } from '../services/e2ee';
+import { LANGUAGES, t } from '../i18n';
 
 export interface MessageReaction {
   emoji: string;

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Calendar, Check, RefreshCw } from 'lucide-react';
 import { giinApi } from '../supabaseClient';
+import { t } from '../i18n';
 
 // Phase C1 (23) — calendar sync panel.
 //

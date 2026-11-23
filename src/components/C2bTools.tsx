@@ -13,6 +13,7 @@ import {
   Languages, Lock, Mic, Monitor, Square, StickyNote, Volume2, X,
 } from 'lucide-react';
 import { giinApi, supabase } from '../supabaseClient';
+import { LANGUAGES, t } from '../i18n';
 
 export const LANG_LABEL: Record<string, string> = { en: 'English', fr: 'French', rw: 'Kinyarwanda' };
 

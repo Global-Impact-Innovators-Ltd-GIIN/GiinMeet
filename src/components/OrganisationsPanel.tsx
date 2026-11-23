@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Building2, Plus, AlertCircle } from 'lucide-react';
 import { giinApi, PHASED_NOT_SET_UP_MESSAGE } from '../supabaseClient';
+import { t } from '../i18n';
 
 // Phase D (47), Organisations panel: create an organisation and set
 // its brand (name, logo, colours, slogan). Only the organisation's

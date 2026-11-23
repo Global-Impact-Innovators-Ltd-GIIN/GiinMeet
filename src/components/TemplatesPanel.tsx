@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { LayoutTemplate, Play, CalendarPlus, Trash2, Plus } from 'lucide-react';
 import { giinApi } from '../supabaseClient';
+import { t } from '../i18n';
 
 // Phase C1 (24) — meeting templates.
 //

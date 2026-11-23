@@ -10,6 +10,7 @@
 // the poll link is the only link shown, and it points at giinmeet only.
 import React, { useState } from 'react';
 import { giinApi } from '../supabaseClient';
+import { t } from '../i18n';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 

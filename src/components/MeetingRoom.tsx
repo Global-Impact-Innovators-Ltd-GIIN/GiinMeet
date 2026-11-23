@@ -228,7 +228,7 @@ export const clearStoredBreakout = (meetingId: string) => {
 
 import { giinApi, supabase, ensureMeetingRoom, generateMeetingPasscode, buildJoinLink, buildWhatsAppInviteUrl, isMeetingHostForUser, getSystemSettings } from '../supabaseClient';
 import { ShortLinkBox } from './ShortLinkBox';
-import { t, useUiLanguage } from '../i18n';
+import { t, useUiLanguage, LANGUAGES } from '../i18n';
 import { useClickOutside, useClickOutsideMany } from '../hooks/useClickOutside';
 
 // Helper functions defined outside the component to satisfy purity rules

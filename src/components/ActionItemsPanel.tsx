@@ -10,6 +10,7 @@
 // looks empty for a reason the user cannot see.
 import React, { useEffect, useState } from 'react';
 import { giinApi } from '../supabaseClient';
+import { t } from '../i18n';
 
 export default function ActionItemsPanel({
   meetingId,

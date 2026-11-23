@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Mail, Lock, User, ArrowRight, Globe, Phone, ArrowLeft } from 'lucide-react';
 import { giinApi, supabase, getTransparentLogo } from '../supabaseClient';
+import { t } from '../i18n';
 
 const WORLD_DIALING_CODES = [
   { code: '+93', name: 'Afghanistan', iso: 'AF' },

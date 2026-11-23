@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Camera, Mic, Volume2, X } from 'lucide-react';
+import { t } from '../i18n';
 
 interface DeviceSettingsModalProps {
   isOpen: boolean;

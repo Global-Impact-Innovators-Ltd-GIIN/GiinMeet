@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Edit, CheckSquare, Plus, User, Calendar, Save, ClipboardCopy, Palette, Sparkles, Cpu, Trash2, Loader2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { t } from '../i18n';
 
 interface ActionItem {
   id: string;
