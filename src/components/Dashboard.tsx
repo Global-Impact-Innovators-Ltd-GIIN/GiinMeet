@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2 } from 'lucide-react';
+import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2, Download } from 'lucide-react';
 import { buildJoinLink, buildShortPersonalRoomLink, generateMeetingPasscode, getSystemSettings, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
 import { CalendarSyncPanel } from './CalendarSyncPanel';
@@ -419,6 +419,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  // Phase C1 (32) — installable PWA: the browser offers the install
+  // prompt once (beforeinstallprompt); iPhones have no prompt, so they
+  // get the one-line Add to Home Screen hint instead. Nothing shows
+  // when the app is already installed (standalone).
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [isIos, setIsIos] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  useEffect(() => {
+    try {
+      setIsStandalone(
+        window.matchMedia('(display-mode: standalone)').matches ||
+          (window.navigator as any).standalone === true,
+      );
+      setIsIos(/iphone|ipad|ipod/i.test(window.navigator.userAgent));
+      const handler = (e: any) => {
+        e.preventDefault();
+        setInstallPrompt(e);
+      };
+      window.addEventListener('beforeinstallprompt', handler);
+      return () => window.removeEventListener('beforeinstallprompt', handler);
+    } catch (e) {
+      // The install prompt is optional; the app works without it.
+    }
+  }, []);
+  const handleInstallApp = async () => {
+    if (!installPrompt) return;
+    try {
+      installPrompt.prompt();
+      await installPrompt.userChoice;
+      setInstallPrompt(null);
+    } catch (e) {
+      // Dismissed or failed: the button simply stays available.
+    }
+  };
+
   // Phase 1 — personal room: one permanent link for this user. Fetched on
   // mount (never auto-created — the user creates it with one click).
   const [personalRoom, setPersonalRoom] = useState<{ slug: string; title: string } | null>(null);
@@ -678,6 +713,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <p className="welcome-subtext" style={{ color: 'rgba(255,255,255,0.85)' }}>
             Connect, collaborate, and virtualize with HD audio and video.
           </p>
+          {/* Phase C1 (32) — install GiinMeet on the home screen. Only
+              shown when it can actually be installed, and hidden once it is. */}
+          {!isStandalone && installPrompt && (
+            <button
+              type="button"
+              onClick={() => void handleInstallApp()}
+              style={{ marginTop: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.55rem 1rem', borderRadius: '999px', border: '1px solid rgba(255,255,255,0.5)', backgroundColor: 'rgba(255,255,255,0.12)', color: 'white', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}
+            >
+              <Download size={15} /> Install GiinMeet app
+            </button>
+          )}
+          {!isStandalone && !installPrompt && isIos && (
+            <p style={{ margin: '0.9rem 0 0', fontSize: '0.8rem', color: 'rgba(255,255,255,0.75)' }}>
+              On iPhone, tap Share, then Add to Home Screen to install GiinMeet.
+            </p>
+          )}
         </div>
       </div>
 
