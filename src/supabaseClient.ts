@@ -1388,6 +1388,49 @@ export const giinApi = {
     }
   },
 
+  // Phase C1 (36), caption translation (English, French,
+  // Kinyarwanda). One language per user, final lines only. Guests are
+  // authenticated by their participant row for the meeting.
+  translateCaption: async (text: string, sourceLang: string, targetLang: string, meetingId?: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const payload: Record<string, unknown> = { text, sourceLang, targetLang };
+      if (session?.access_token) {
+        payload.accessToken = session.access_token;
+      } else if (meetingId) {
+        payload.meetingId = meetingId;
+        try {
+          payload.participantRowId = localStorage.getItem(`giin_participant_row_${meetingId}`) || undefined;
+        } catch (e) { /* guests without a stored row cannot translate */ }
+      }
+      const res = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  saveCaptionLanguage: async (language: 'none' | 'en' | 'fr' | 'rw') => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/profile/caption-language', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
   pullCalendarEvents: async (fromIso?: string, toIso?: string) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();

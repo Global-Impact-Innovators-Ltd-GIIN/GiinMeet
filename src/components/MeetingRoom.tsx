@@ -15,6 +15,7 @@ import { sortHandRaiseQueue, nextLayoutMode, layoutModeLabel, layoutModeHint } f
 import { startBackgroundFx, type BackgroundFxMode } from '../utils/backgroundFx';
 import { getLocalBrandName } from '../utils/brand';
 import { recordRecentMeeting } from '../utils/recent';
+import TranslatedCaption from './TranslatedCaption';
 import { isNoiseSuppressionSupported, loadRnnoiseBinary, readNoiseSuppressionPreference, saveNoiseSuppressionPreference, NOISE_SUPPRESSION_WORKLET_URL, type NoiseSuppressionStatus } from '../utils/noiseSuppression';
 
 // Web Audio API Synthesized sound effects
@@ -1188,7 +1189,31 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isMuteOnEntryEnabled, setIsMuteOnEntryEnabled] = useState(false);
 
   const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
-  const [transcripts, setTranscripts] = useState<{ name: string; text: string; time: string }[]>([]);
+  // Phase C1 (36), caption translation: each person chooses ONE
+  // caption language (or none), never all three at once. French means
+  // speech is recognised in French; English or Kinyarwanda means
+  // English recognition, with Kinyarwanda reached by translating the
+  // English text (Kinyarwanda speech recognition is weak). Saved in
+  // this browser and, for signed-in users, in their profile.
+  const [captionLang, setCaptionLang] = useState<'none' | 'en' | 'fr' | 'rw'>(() => {
+    try {
+      const saved = localStorage.getItem('giin_caption_lang');
+      return saved === 'fr' || saved === 'rw' || saved === 'none' ? saved : 'en';
+    } catch (e) {
+      return 'en';
+    }
+  });
+  const [translationUnavailable, setTranslationUnavailable] = useState(false);
+  const handleCaptionLangChange = (lang: 'none' | 'en' | 'fr' | 'rw') => {
+    setCaptionLang(lang);
+    setIsCaptionsEnabled(lang !== 'none');
+    setTranslationUnavailable(false);
+    try {
+      localStorage.setItem('giin_caption_lang', lang);
+    } catch (e) { /* the choice is best-effort in this browser */ }
+    void giinApi.saveCaptionLanguage(lang);
+  };
+  const [transcripts, setTranscripts] = useState<{ name: string; text: string; time: string; sourceLang?: 'en' | 'fr' }[]>([]);
   const [activeCaption, setActiveCaption] = useState<{ name: string; text: string } | null>(null);
   // Phase B (9): plain-words notice when captions cannot run in this
   // browser (never a technical error), and a ref mirror of the
@@ -4378,7 +4403,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         
         if (data.isFinal) {
           const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          setTranscripts(prev => [...prev, { name: data.senderName, text: data.text, time }]);
+          setTranscripts(prev => [...prev, { name: data.senderName, text: data.text, time, sourceLang: data.sourceLang === 'fr' ? 'fr' : 'en' }]);
           setTimeout(() => {
             setActiveCaption(null);
           }, 4000);
@@ -5459,7 +5484,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         rec = new SpeechRecognition();
         rec.continuous = true;
         rec.interimResults = true;
-        rec.lang = 'en-US';
+        // Phase C1 (36), recognise in the speaker's chosen language:
+        // French when they chose French, English otherwise (Kinyarwanda
+        // captions are English text translated, not Kinyarwanda speech).
+        rec.lang = captionLang === 'fr' ? 'fr-FR' : 'en-US';
 
         rec.onresult = (event: any) => {
           let interimTranscript = '';
@@ -5484,14 +5512,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 payload: {
                   senderName: currentUser?.name || 'You',
                   text: currentText,
-                  isFinal: !!finalTranscript
+                  isFinal: !!finalTranscript,
+                  // Phase C1 (36), the speaker's language, so each
+                  // viewer can translate the line into their own one.
+                  sourceLang: captionLang === 'fr' ? 'fr' : 'en'
                 }
               });
             }
 
             if (finalTranscript) {
               const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              setTranscripts(prev => [...prev, { name: currentUser?.name || 'You', text: finalTranscript, time }]);
+              setTranscripts(prev => [...prev, { name: currentUser?.name || 'You', text: finalTranscript, time, sourceLang: captionLang === 'fr' ? 'fr' : 'en' }]);
               setTimeout(() => {
                 setActiveCaption(null);
               }, 4000);
@@ -5529,7 +5560,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         rec.stop();
       }
     };
-  }, [isCaptionsEnabled]);
+  }, [isCaptionsEnabled, captionLang]);
 
   // Toggle buttons
   const toggleMute = () => {
@@ -10346,6 +10377,38 @@ Media encrypted in transit (DTLS-SRTP).`;
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4, padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>{captionsUnavailable}</p>
                   )}
                   <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>Captions are yours alone to turn on or off — each person chooses for themselves. When the host ends the meeting, the full transcript is saved to the meeting record.</p>
+                  {/* Phase C1 (36), caption language: ONE language per
+                      person (or none), never all three at once. Kinyarwanda
+                      captions are English text translated into Kinyarwanda. */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'white' }}>Caption language</span>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      {([['none', 'Off'], ['en', 'English'], ['fr', 'French'], ['rw', 'Kinyarwanda']] as const).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => handleCaptionLangChange(value)}
+                          style={{
+                            padding: '0.4rem 0.75rem',
+                            borderRadius: '999px',
+                            border: captionLang === value ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
+                            backgroundColor: captionLang === value ? 'rgba(250,189,2,0.15)' : 'transparent',
+                            color: 'white',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {translationUnavailable && (
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>
+                        Translation is not set up yet, so captions show in the language spoken. Ask your workspace admin to add a translation key.
+                      </p>
+                    )}
+                  </div>
 
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
                     <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRANSCRIPT HISTORY</span>
@@ -10362,7 +10425,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-accent)' }}>{t.name}</span>
                               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{t.time}</span>
                             </div>
-                            <p style={{ fontSize: '0.8rem', color: 'white', margin: 0, lineHeight: 1.4 }}>{t.text}</p>
+                            <p style={{ fontSize: '0.8rem', color: 'white', margin: 0, lineHeight: 1.4 }}><TranslatedCaption text={t.text} sourceLang={t.sourceLang || 'en'} targetLang={captionLang} meetingId={meetingId} onNoKey={() => setTranslationUnavailable(true)} /></p>
                           </div>
                         ))}
                       </div>
