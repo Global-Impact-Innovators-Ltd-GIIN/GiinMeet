@@ -1164,6 +1164,104 @@ export const giinApi = {
     }
   },
 
+  // Phase C1 (23) — calendar sync (Google + Outlook, two-way). All calls
+  // go through the server routes: the OAuth tokens never reach the
+  // browser, and the status answer only says which calendars are
+  // connected. Never throws — callers show the honest reason instead.
+  getCalendarStatus: async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch(`/api/calendar/status?accessToken=${encodeURIComponent(session.access_token)}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  connectCalendar: async (provider: 'google' | 'outlook') => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/calendar/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  disconnectCalendar: async (provider: 'google' | 'outlook') => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/calendar/disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, accessToken: session.access_token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  // Push one meeting to the connected calendars (fire-and-forget from the
+  // schedule flow: a calendar failure must never look like a scheduling
+  // failure). Returns the per-provider results for the caller to show.
+  syncMeetingToCalendar: async (meetingId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/calendar/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, accessToken: session.access_token, action: 'push' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  pullCalendarEvents: async (fromIso?: string, toIso?: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const params = new URLSearchParams({ accessToken: session.access_token });
+      if (fromIso) params.set('from', fromIso);
+      if (toIso) params.set('to', toIso);
+      const res = await fetch(`/api/calendar/sync?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
+  applyCalendarChanges: async (updates: { meetingId: string; newTime: string }[]) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { ok: false, reason: 'NO_SESSION' };
+      const res = await fetch('/api/calendar/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: session.access_token, action: 'pull-apply', updates }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return data || { ok: false, reason: 'BAD_RESPONSE' };
+    } catch (e: any) {
+      return { ok: false, reason: String(e?.message || e) };
+    }
+  },
+
   // Transfer the host role, server-verified (Fix Round 6 / Phase 6).
   // POST /api/meetings/transfer-host checks the caller is the current
   // host and the new host is a signed-in participant in the meeting.

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2 } from 'lucide-react';
 import { buildJoinLink, buildPersonalRoomLink, generateMeetingPasscode, getSystemSettings, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
+import { CalendarSyncPanel } from './CalendarSyncPanel';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
 interface Meeting {
@@ -471,6 +472,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           : `series-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     let firstSaved: Meeting | null = null;
     let created = 0;
+    const savedIds: string[] = [];
     for (let i = 0; i < occurrences; i++) {
       const t = new Date(baseTime);
       if (scheduleRecurrence === 'daily') t.setDate(t.getDate() + i);
@@ -490,6 +492,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       });
       if (saved) {
         created++;
+        savedIds.push(saved.id);
         if (!firstSaved) firstSaved = saved;
       }
     }
@@ -506,6 +509,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setScheduleRecurrenceCount(4);
       setShowScheduleModal(false);
       setShowSuccessModal(true);
+      // Phase C1 (23) — push every created meeting to the connected
+      // calendars. Fire-and-forget: a calendar failure must never look
+      // like a scheduling failure, and the meeting is already saved.
+      savedIds.forEach((id) => { void giinApi.syncMeetingToCalendar(id); });
     }
   };
 
@@ -638,6 +645,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </>
         )}
       </div>
+
+      {/* Phase C1 (23) — calendar sync: one grouped section, two provider rows. */}
+      <CalendarSyncPanel meetings={meetingHistory} />
 
       {/* Quick Action Grid */}
       <div style={{
