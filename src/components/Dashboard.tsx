@@ -402,6 +402,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  // Phase C1 (29) — manual follow-up send from the Record panel (the
+  // automatic send happens when the host ends the meeting).
+  const [followUpEmails, setFollowUpEmails] = useState('');
+  const [followUpStatus, setFollowUpStatus] = useState<Record<string, string>>({});
+  const [followUpSending, setFollowUpSending] = useState<string | null>(null);
+  const sendFollowUp = async (id: string) => {
+    setFollowUpSending(id);
+    const extras = followUpEmails.split(/[,\n;]+/).map((e) => e.trim()).filter(Boolean);
+    const result: any = await giinApi.sendFollowUp(id, extras);
+    setFollowUpSending(null);
+    if (result?.ok) {
+      setFollowUpStatus((prev) => ({ ...prev, [id]: `Follow-up sent to ${result.sent} ${result.sent === 1 ? 'person' : 'people'}.` }));
+    } else {
+      setFollowUpStatus((prev) => ({ ...prev, [id]: result?.message || 'The follow-up could not be sent.' }));
+    }
+  };
+
   // Phase 1 — personal room: one permanent link for this user. Fetched on
   // mount (never auto-created — the user creates it with one click).
   const [personalRoom, setPersonalRoom] = useState<{ slug: string; title: string } | null>(null);
@@ -1241,6 +1258,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <button type="button" className="premium-btn premium-btn-secondary" style={{ alignSelf: 'flex-start', padding: '0.35rem 0.75rem', fontSize: '0.75rem' }} onClick={() => void regenerateSummary(meeting.id)}>
                           {summary ? 'Regenerate summary' : 'Generate summary'}
                         </button>
+                        {/* Phase C1 (29) — post-meeting follow-up: summary, decisions
+                            and action items by email. Also sent automatically when
+                            the host ends the meeting. */}
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            value={followUpEmails}
+                            onChange={(e) => setFollowUpEmails(e.target.value)}
+                            placeholder="Extra email addresses (optional, comma separated)"
+                            style={{ flex: '1 1 220px', minWidth: 0, padding: '0.45rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.8rem' }}
+                          />
+                          <button
+                            type="button"
+                            className="premium-btn premium-btn-primary"
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                            disabled={followUpSending === meeting.id || !summary}
+                            title={summary ? 'Email the summary, decisions and action items to the attendees' : 'Generate the summary first'}
+                            onClick={() => void sendFollowUp(meeting.id)}
+                          >
+                            {followUpSending === meeting.id ? 'Sending…' : 'Send follow-up email'}
+                          </button>
+                        </div>
+                        {followUpStatus[meeting.id] && (
+                          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>{followUpStatus[meeting.id]}</p>
+                        )}
                         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRANSCRIPT ({lines.length} lines)</span>
                         {lines.length === 0 ? (
                           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No transcript was saved for this meeting.</p>

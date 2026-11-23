@@ -5654,6 +5654,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (summary && summary.ok === false) {
         console.warn('[GiinMeet] Summary was not generated:', summary.reason || summary.message || 'unknown');
       }
+      // Phase C1 (29) — post-meeting follow-up, automatic: the summary,
+      // decisions and action items go to the attendees by email. Only
+      // when a summary was actually generated; fire-and-forget, like the
+      // transcript save above.
+      if (summary && summary.ok !== false) {
+        try {
+          const sent: any = await giinApi.sendFollowUp(meetingId);
+          if (sent && sent.ok === false) {
+            console.warn('[GiinMeet] Follow-up was not sent:', sent.reason || sent.message || 'unknown');
+          }
+        } catch (e) { /* best-effort: the meeting is already ended */ }
+      }
     } catch (e) { /* best-effort: the meeting is already ended */ }
   };
 
