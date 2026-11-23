@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 
-// Phase C1 (25) — the pretty personal-room link.
+// Phase C1 (25), the pretty personal-room link.
 //
 // https://giinmeet.nimdaukus.com/<handle> is a short, memorable alias for
 // the in-app room link (/#/room/<handle>). This page only validates the
@@ -9,7 +9,7 @@ import { redirect } from 'next/navigation';
 // (passcode gate + waiting room for everyone except the host) takes over
 // from there. Static routes (/superadmin, /api/*) take precedence over
 // this dynamic segment, and reserved words are refused here.
-const RESERVED = new Set(['superadmin', 'api', 'dashboard', 'join', 'room', 'login', 'signup']);
+const RESERVED = new Set(['superadmin', 'api', 'dashboard', 'join', 'room', 'login', 'signup', 's']);
 
 export default async function PersonalRoomHandlePage({
   params,

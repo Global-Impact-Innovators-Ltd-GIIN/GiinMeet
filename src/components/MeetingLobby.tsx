@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { DeviceSettingsModal } from './DeviceSettingsModal';
 import { buildJoinLink } from '../supabaseClient';
+import { ShortLinkBox } from './ShortLinkBox';
 import { getParticipantInitials } from '../utils/getParticipantInitials';
 
 interface MeetingLobbyProps {
@@ -15,7 +16,7 @@ interface MeetingLobbyProps {
   currentUser: { name: string; email: string } | null;
   onJoin: (videoOn: boolean, audioOn: boolean) => void;
   onCancel: () => void;
-  // Phase 3 (Feature 4) — shared workspace brand, passed from App.
+  // Phase 3 (Feature 4), shared workspace brand, passed from App.
   brandName?: string;
   logoUrl?: string;
 }
@@ -33,7 +34,7 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
 }) => {
   // Fix Round 6: honour the join presets from Settings (mute on join /
   // camera off on join). The lobby toggles still win once the user
-  // touches them — these only set the starting position.
+  // touches them, these only set the starting position.
   const [isVideoOn, setIsVideoOn] = useState(() => { try { return localStorage.getItem('giin_video_off_on_join') !== 'true'; } catch (e) { return true; } });
   const [isAudioOn, setIsAudioOn] = useState(() => { try { return localStorage.getItem('giin_mute_on_join') !== 'true'; } catch (e) { return true; } });
   const [copied, setCopied] = useState(false);
@@ -75,12 +76,12 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
         .catch(err => {
           console.warn('Camera preview not available:', err);
           const reason = err?.name === 'NotAllowedError'
-            ? 'Camera blocked — allow the camera in the browser address bar (click the camera icon), then press the camera button again. You can still join with the camera off.'
+            ? 'Camera blocked, allow the camera in the browser address bar (click the camera icon), then press the camera button again. You can still join with the camera off.'
             : err?.name === 'NotFoundError'
-            ? 'No camera was found on this device — you can still join with the camera off.'
+            ? 'No camera was found on this device, you can still join with the camera off.'
             : err?.name === 'NotReadableError'
-            ? 'Your camera is in use by another app — close that app, then press the camera button again.'
-            : 'Your camera could not be started — check the browser permission in the address bar. You can still join with the camera off.';
+            ? 'Your camera is in use by another app, close that app, then press the camera button again.'
+            : 'Your camera could not be started, check the browser permission in the address bar. You can still join with the camera off.';
           setCameraError(reason);
           setIsVideoOn(false);
         });
@@ -372,9 +373,12 @@ export const MeetingLobby: React.FC<MeetingLobbyProps> = ({
                 </button>
               </div>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                The passcode is included in the link, so guests join without typing it — they only see a passcode prompt if the link&apos;s code is wrong or missing.
+                The passcode is included in the link, so guests join without typing it, they only see a passcode prompt if the link&apos;s code is wrong or missing.
               </span>
             </div>
+
+            {/* Phase C2a (1 + 2): short link and QR code for this meeting. */}
+            <ShortLinkBox meetingId={meetingId} />
 
             <button
               onClick={handleJoinClick}

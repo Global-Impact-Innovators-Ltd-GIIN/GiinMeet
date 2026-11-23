@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { History, RotateCcw, Copy, Check } from 'lucide-react';
 import { readRecentMeetings, type RecentMeeting } from '../utils/recent';
-import { buildJoinLink } from '../supabaseClient';
+import { buildJoinLink, giinApi } from '../supabaseClient';
 
-// Phase C1 (26) — recent meetings, one-tap rejoin.
+// Phase C1 (26), recent meetings, one-tap rejoin.
 //
 // One grouped section: the meetings this device joined most recently,
 // merged with the newest meetings from history, newest first. Rejoin
@@ -24,6 +24,8 @@ interface Props {
 
 export const RecentMeetings: React.FC<Props> = ({ meetings }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [shortCopiedId, setShortCopiedId] = useState<string | null>(null);
+  const [shortLoadingId, setShortLoadingId] = useState<string | null>(null);
   const recents = useMemo(() => {
     const local = readRecentMeetings();
     const byId = new Map<string, RecentMeeting>();
@@ -42,6 +44,23 @@ export const RecentMeetings: React.FC<Props> = ({ meetings }) => {
 
   const handleRejoin = (id: string) => {
     window.location.hash = `#/join?id=${id}`;
+  };
+
+  // Phase C2a (1): copy the short link for a meeting instead of the
+  // full link. Host only, server-verified; a guest just gets no link.
+  const handleCopyShort = async (m: RecentMeeting) => {
+    setShortLoadingId(m.id);
+    const result: any = await giinApi.getOrCreateShortLink(m.id);
+    setShortLoadingId(null);
+    if (result?.ok && result.shortUrl) {
+      try {
+        await navigator.clipboard.writeText(result.shortUrl);
+        setShortCopiedId(m.id);
+        setTimeout(() => setShortCopiedId(null), 2000);
+      } catch (e) {
+        // Copy is best effort.
+      }
+    }
   };
 
   const handleCopy = async (m: RecentMeeting) => {
@@ -105,6 +124,16 @@ export const RecentMeetings: React.FC<Props> = ({ meetings }) => {
               onClick={() => void handleCopy(m)}
             >
               {copiedId === m.id ? <Check size={14} /> : <Copy size={14} />}
+            </button>
+            <button
+              type="button"
+              className="premium-btn premium-btn-secondary"
+              style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}
+              title="Copy the short link"
+              disabled={shortLoadingId === m.id}
+              onClick={() => void handleCopyShort(m)}
+            >
+              {shortCopiedId === m.id ? <Check size={14} /> : <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>Short</span>}
             </button>
           </div>
         ))}
