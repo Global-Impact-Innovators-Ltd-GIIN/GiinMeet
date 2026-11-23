@@ -1342,6 +1342,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // already closes on its own full-screen backdrop, and Live Tools is
   // a docked panel, not a menu, so neither is wired here.
   const emojiMenuRef = useClickOutside<HTMLDivElement>(() => setShowEmojiReactions(false), showEmojiReactions);
+  // The Reactions toolbar button, for anchoring the emoji picker
+  // above it. The picker falls back to centred when the button is
+  // hidden on phones and the picker was opened from the More menu.
+  const reactionsBtnRef = useRef<HTMLButtonElement | null>(null);
+  const reactionsBtnRect = reactionsBtnRef.current?.getBoundingClientRect();
+  const reactionsPickerAnchored = !!reactionsBtnRect && reactionsBtnRect.width > 0;
+  const reactionsPickerWidth = 356;
+  const reactionsPickerLeft = reactionsBtnRect && reactionsBtnRect.width > 0
+    ? Math.min(Math.max(8, reactionsBtnRect.left + reactionsBtnRect.width / 2 - reactionsPickerWidth / 2), Math.max(8, window.innerWidth - reactionsPickerWidth - 8))
+    : 0;
+  const reactionsPickerBottom = reactionsBtnRect && reactionsBtnRect.width > 0
+    ? window.innerHeight - reactionsBtnRect.top + 8
+    : 85;
   const handRaiseRef = useClickOutside<HTMLDivElement>(() => setShowHandRaiseMenu(false), showHandRaiseMenu);
   const infoCardRef = useRef<HTMLDivElement | null>(null);
   const infoToggleDesktopRef = useRef<HTMLButtonElement | null>(null);
@@ -1515,7 +1528,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [selectedSpeaker, setSelectedSpeaker] = useState(() => localStorage.getItem('giin_selected_speaker') || '');
   // Device pickers on the mute / video buttons (Zoom / Meet pattern):
   // which picker is open, and the live device list behind it.
-  const [deviceMenu, setDeviceMenu] = useState<'audio' | 'video' | null>(null);
+  const [deviceMenu, setDeviceMenu] = useState<'audio' | 'video' | 'speaker' | null>(null);
   // Where the open picker is anchored: the chevron button that opened
   // it, so the menu sits above its own button instead of floating in
   // the middle of the video. Cleared with the menu.
@@ -1524,21 +1537,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // A resize (rotation, keyboard, window change) would leave an open
   // picker floating over the wrong place, so close it and let the user
-  // reopen it on the button it belongs to.
+  // reopen it on the button it belongs to. The emoji picker closes
+  // with the device pickers.
   useEffect(() => {
-    if (!deviceMenu) return;
-    const close = () => { setDeviceMenu(null); setDeviceMenuAnchor(null); };
+    if (!deviceMenu && !showEmojiReactions) return;
+    const close = () => { setDeviceMenu(null); setDeviceMenuAnchor(null); setShowEmojiReactions(false); };
     window.addEventListener('resize', close);
     window.addEventListener('orientationchange', close);
     return () => {
       window.removeEventListener('resize', close);
       window.removeEventListener('orientationchange', close);
     };
-  }, [deviceMenu]);
+  }, [deviceMenu, showEmojiReactions]);
 
-  // Open the mic / camera picker anchored to the chevron that was
-  // tapped, or close it when it is already open.
-  const toggleDeviceMenu = (which: 'audio' | 'video', e: { currentTarget: HTMLButtonElement }) => {
+  // Open the mic / camera / speaker picker anchored to the
+  // chevron that was tapped, or close it when it is already open.
+  const toggleDeviceMenu = (which: 'audio' | 'video' | 'speaker', e: { currentTarget: HTMLButtonElement }) => {
     if (deviceMenu === which) {
       setDeviceMenu(null);
       setDeviceMenuAnchor(null);
@@ -12096,9 +12110,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         </div>
       )}
 
-      {/* Device picker menus (mic + speaker, camera), opened from the
-          chevron beside the mute / video buttons. One menu at a time,
-          tap outside to close, pick a device to switch it live. */}
+      {/* Device picker menus (mic + speaker, camera, speaker alone),
+          opened from the chevron beside the mute / video / speaker
+          buttons. One menu at a time, tap outside to close, pick a
+          device to switch it live. */}
       {deviceMenu && (
         <>
           <div aria-hidden="true" onClick={() => { setDeviceMenu(null); setDeviceMenuAnchor(null); }} style={{ position: 'fixed', inset: 0, zIndex: 14000 }} />
@@ -12125,7 +12140,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             overscrollBehavior: 'contain',
             boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)'
           }}>
-            {deviceMenu === 'audio' ? (
+            {deviceMenu === 'audio' && (
               <>
                 <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem' }}>MICROPHONE</div>
                 {deviceList.filter(d => d.kind === 'audioinput').map(d => (
@@ -12138,7 +12153,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 {deviceList.filter(d => d.kind === 'audioinput').length === 0 && (
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.35rem 0.85rem', margin: 0 }}>No microphones found.</p>
                 )}
-                <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem', borderTop: '1px solid var(--border-color)', marginTop: '0.35rem', paddingTop: '0.6rem' }}>SPEAKER</div>
+              </>
+            )}
+            {(deviceMenu === 'audio' || deviceMenu === 'speaker') && (
+              <>
+                <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem', ...(deviceMenu === 'audio' ? { borderTop: '1px solid var(--border-color)', marginTop: '0.35rem', paddingTop: '0.6rem' } : {}) }}>SPEAKER</div>
                 {deviceList.filter(d => d.kind === 'audiooutput').map(d => (
                   <button key={d.deviceId} type="button" onClick={() => { changeSpeaker(d.deviceId); setDeviceMenu(null); }} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'none', border: 'none', padding: '0.6rem 0.85rem', width: '100%', minHeight: '44px', borderRadius: '6px', color: 'var(--text-main)', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left' }}>
                     <Volume2 size={16} style={{ flexShrink: 0 }} />
@@ -12150,7 +12169,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.35rem 0.85rem', margin: 0 }}>No speakers found, using the default speaker.</p>
                 )}
               </>
-            ) : (
+            )}
+            {deviceMenu === 'video' && (
               <>
                 <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem' }}>CAMERA</div>
                 {deviceList.filter(d => d.kind === 'videoinput').map(d => (
@@ -12763,6 +12783,59 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               </button>
             </div>
 
+            {/* Speaker output, with a device picker chevron. The
+                round button mutes all speakers with one tap (the
+                feedback breaker), the chevron only opens the speaker
+                choice. Hidden on phones, where the bar is already
+                full: the speaker list stays one tap away in the
+                microphone chevron menu, and mute lives in More. */}
+            <div className="mobile-hidden" style={{ display: 'flex', alignItems: 'center', position: 'relative', flexShrink: 0 }}>
+              <button
+                className="toolbar-control-btn"
+                onClick={() => setIsSpeakersMuted(!isSpeakersMuted)}
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: isSpeakersMuted ? '#EF4444' : '#1E293B',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)'
+                }}
+                title={isSpeakersMuted ? 'Unmute speakers' : 'Mute speakers'}
+              >
+                {isSpeakersMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+              </button>
+              <button
+                type="button"
+                className="device-chevron"
+                onClick={(e) => toggleDeviceMenu('speaker', e)}
+                aria-label="Choose speaker"
+                title="Choose speaker"
+                style={{
+                  width: '18px',
+                  height: '40px',
+                  marginLeft: '-7px',
+                  borderRadius: '0 20px 20px 0',
+                  backgroundColor: isSpeakersMuted ? '#EF4444' : '#1E293B',
+                  border: 'none',
+                  borderLeft: '1px solid rgba(255,255,255,0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                <ChevronUp size={12} />
+              </button>
+            </div>
+
             {/* Screen Share */}
             <button
               className="toolbar-control-btn"
@@ -12977,48 +13050,49 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               </button>
             )}
 
-            {/* More Options Dropdown Toggle */}
-            <button 
-              className="toolbar-control-btn"
-              onClick={() => setShowMoreMenu(!showMoreMenu)}
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                backgroundColor: showMoreMenu ? 'rgba(255, 255, 255, 0.15)' : '#1E293B',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
-              }}
-              title={t('room.more_options')}
-            >
-              <MoreHorizontal size={18} />
-            </button>
-
-            {/* Emoji Reactions popover. The trigger lives in the More
-                menu now (Reactions), this wrapper only holds the popover. */}
-            <div ref={emojiMenuRef} style={{ position: 'relative' }}>
+            {/* Reactions, floating emoji for everyone. The button
+                sits in the bar next to raise hand on desktop; on
+                phones it is hidden and the More menu item opens the
+                same picker. The picker is anchored above this button,
+                and falls back to centred when the button is hidden. */}
+            <div ref={emojiMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                ref={reactionsBtnRef}
+                className="toolbar-control-btn mobile-hidden"
+                onClick={() => setShowEmojiReactions(v => !v)}
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: showEmojiReactions ? 'var(--color-accent)' : '#1E293B',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: showEmojiReactions ? 'black' : 'white',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)'
+                }}
+                title="Reactions"
+              >
+                <Smile size={18} />
+              </button>
               {showEmojiReactions && (
                 <div style={{
                   position: 'fixed',
-                  bottom: '85px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
+                  bottom: reactionsPickerBottom,
+                  left: reactionsPickerAnchored ? reactionsPickerLeft : '50%',
+                  transform: reactionsPickerAnchored ? 'none' : 'translateX(-50%)',
                   display: 'flex',
                   gap: '12px',
-                  backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                  backgroundColor: '#0F172A',
                   padding: '10px 16px',
                   borderRadius: '30px',
                   border: '1px solid #1E293B',
                   boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
-                  zIndex: 9999,
-                  backdropFilter: 'blur(10px)'
+                  zIndex: 9999
                 }}>
-                  {['👏', '👍', '❤️', '😂', '😮'].map(emoji => (
+                  {['👏', '👍', '❤️', '😂', '😮', '🎉'].map(emoji => (
                     <button
                       key={emoji}
                       onClick={() => sendReaction(emoji)}
@@ -13044,6 +13118,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 </div>
               )}
             </div>
+
+            {/* More Options Dropdown Toggle */}
+            <button 
+              className="toolbar-control-btn"
+              onClick={() => setShowMoreMenu(!showMoreMenu)}
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: showMoreMenu ? 'rgba(255, 255, 255, 0.15)' : '#1E293B',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)'
+              }}
+              title={t('room.more_options')}
+            >
+              <MoreHorizontal size={18} />
+            </button>
 
             {/* Floating More Options Menu */}
             {showMoreMenu && (
