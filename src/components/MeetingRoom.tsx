@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Room as LiveKitRoom, RoomEvent, Track } from 'livekit-client';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff,
-  Clock, Pin, LayoutGrid, LayoutList,
+  Clock, Pin, LayoutGrid, LayoutList, Star, Wifi, WifiOff,
   SendHorizontal, Edit2, ShieldCheck, AlertTriangle, Copy, Check, Settings,
   MoreHorizontal, BarChart3, Volume2, VolumeX, Info, Languages, Sparkles, Sliders, Minimize2, Maximize2, Smile,
   LogOut, UserCheck, User, Keyboard, X, Hand, Paperclip, ListChecks, Plus, Trash2, GripVertical
@@ -11,6 +11,8 @@ import { ScreenAnnotation } from './ScreenAnnotation';
 import { WorkspacePanel } from './WorkspacePanel';
 import { DeviceSettingsModal } from './DeviceSettingsModal';
 import { getParticipantInitials } from '../utils/getParticipantInitials';
+import { sortHandRaiseQueue, nextLayoutMode, layoutModeLabel, layoutModeHint } from '../utils/phaseB';
+import { startBackgroundFx, type BackgroundFxMode } from '../utils/backgroundFx';
 import { getLocalBrandName } from '../utils/brand';
 
 // Web Audio API Synthesized sound effects
@@ -921,6 +923,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (videoQualityLevelRef.current === level) return;
     videoQualityLevelRef.current = level;
     setIsLowVideoQuality(level === 'low');
+    // Phase B (21): when the connection forces a step-down, offer
+    // low-bandwidth mode — it is the bigger saving (camera off).
+    if (level === 'low' && !lowBandwidthRef.current) setShowLowBandwidthSuggestion(true);
+    if (level === 'high') setShowLowBandwidthSuggestion(false);
     const room = livekitRoomRef.current;
     if (!room || room.state !== 'connected') return;
     try {
@@ -1058,8 +1064,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // Round 9 (9A): ref mirror of the timer, so enterEndedState (a
   // useCallback with empty deps) can read the meeting length at end.
   const elapsedSecondsRef = useRef(0);
-  const [layoutMode, setLayoutMode] = useState<'grid' | 'speaker'>('grid');
+  const [layoutMode, setLayoutMode] = useState<'grid' | 'speaker' | 'side'>('grid');
   const [pinnedKey, setPinnedKey] = useState<string | null>(null);
+  // Phase B (14): host spotlight — the person the host spotlights for
+  // EVERYONE in the room (synced by broadcast). Local pinning
+  // (pinnedKey) stays local: it only changes what YOU watch.
+  const [spotlightKey, setSpotlightKey] = useState<string | null>(null);
+  // Phase B (21): low-bandwidth mode — audio-first for weak connections.
+  const [lowBandwidth, setLowBandwidth] = useState(false);
+  const lowBandwidthRef = useRef(false);
+  const lowBandwidthVideoWasOnRef = useRef(true);
+  const [showLowBandwidthSuggestion, setShowLowBandwidthSuggestion] = useState(false);
+  // Phase B (16): blur / virtual background state.
+  const [bgFxMode, setBgFxMode] = useState<BackgroundFxMode>('none');
+  const [bgFxStatus, setBgFxStatus] = useState<string | null>(null);
+  const bgFxSessionRef = useRef<{ track: MediaStreamTrack; stop: () => void } | null>(null);
+  const bgFxRawTrackRef = useRef<MediaStreamTrack | null>(null);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   // A ref mirror of activePanel so realtime handlers (which close over the
   // first render) can tell whether the chat panel is open right now.
@@ -1123,6 +1143,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
   const [transcripts, setTranscripts] = useState<{ name: string; text: string; time: string }[]>([]);
   const [activeCaption, setActiveCaption] = useState<{ name: string; text: string } | null>(null);
+  // Phase B (9): plain-words notice when captions cannot run in this
+  // browser (never a technical error), and a ref mirror of the
+  // transcript so the end-of-meeting save reads the latest lines.
+  const [captionsUnavailable, setCaptionsUnavailable] = useState<string | null>(null);
+  const transcriptsRef = useRef<{ name: string; text: string; time: string }[]>([]);
+  useEffect(() => { transcriptsRef.current = transcripts; }, [transcripts]);
+  // Phase B (10): AI summary state (generation + stored result).
+  const [summaryStatus, setSummaryStatus] = useState<'idle' | 'loading' | 'done' | 'unavailable'>('idle');
+  const [summaryDecisions, setSummaryDecisions] = useState<string[]>([]);
+  const [summaryActionItems, setSummaryActionItems] = useState<{ text: string; owner: string }[]>([]);
+  const [summaryNote, setSummaryNote] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -2285,6 +2316,37 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     broadcastEvent('clear-all-hands', {});
   };
 
+  // Phase B (14): host spotlight — one speaker for everyone. The host's
+  // choice travels on the same broadcast channel as hand raises, so
+  // every client (main room and breakout rooms) sees it.
+  const setHostSpotlight = (peerKey: string | null) => {
+    if (!isAdmin) return;
+    if (peerKey === null) {
+      setSpotlightKey(null);
+      broadcastEvent('spotlight-clear', {});
+      return;
+    }
+    setSpotlightKey(peerKey);
+    setLayoutMode('speaker');
+    broadcastEvent('spotlight-set', { peerKey });
+  };
+
+  // Phase B (12): call on the next person in the hand-raise queue —
+  // oldest raised hand first. Their hand comes down and the host
+  // spotlight moves to them, so the room sees who has the floor.
+  const callOnNext = () => {
+    if (!isAdmin) return;
+    const queue = sortHandRaiseQueue(handRaises);
+    const next = queue[0];
+    if (!next) {
+      triggerToast('Nobody has their hand raised right now.');
+      return;
+    }
+    lowerHand(next.userId);
+    setHostSpotlight(next.userId);
+    triggerToast(`${next.name} has the floor.`);
+  };
+
   // Active peer connection keys state to avoid ref access during render
   const [activePeerKeys, setActivePeerKeys] = useState<string[]>([]);
 
@@ -2730,13 +2792,41 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   // Collaborative Whiteboard Drawing Functions
-  // AI summary is not available: no transcription or summarisation service is
-  // wired up yet. The panel says so instead of showing a pre-written summary
-  // that was never about this meeting. Set immediately — there is nothing
-  // to "analyze", so no fake spinner or delay.
-  const generateAiSummary = () => {
-    setAiSummary('AI summaries are not available yet — no transcription service is connected. This panel will show a real summary once speech-to-text is wired up.');
-    setIsGeneratingSummary(false);
+  // Phase B (10): AI summary — generated from the transcript by the
+  // configured LLM (POST /api/meetings/summary). No key configured means
+  // no summary is generated and the panel says so plainly; a missing or
+  // empty transcript is the same. Never a fake pre-written summary.
+  const generateAiSummary = async () => {
+    if (isGeneratingSummary) return;
+    if (!isAdmin) {
+      setSummaryStatus('unavailable');
+      setSummaryNote('Only the host can generate the summary.');
+      return;
+    }
+    setIsGeneratingSummary(true);
+    setSummaryNote(null);
+    try {
+      // Save the transcript first so the summary always reads the latest
+      // captions, even mid-meeting.
+      if (transcriptsRef.current.length > 0) {
+        await giinApi.saveTranscript(meetingId, transcriptsRef.current);
+      }
+      const result: any = await giinApi.generateMeetingSummary(meetingId);
+      if (result?.ok) {
+        setAiSummary(result.summary || '');
+        setSummaryDecisions(Array.isArray(result.decisions) ? result.decisions : []);
+        setSummaryActionItems(Array.isArray(result.actionItems) ? result.actionItems : []);
+        setSummaryStatus('done');
+      } else {
+        setSummaryStatus('unavailable');
+        setSummaryNote(result?.message || 'AI summaries need setup — no summary provider key is configured.');
+      }
+    } catch (e: any) {
+      setSummaryStatus('unavailable');
+      setSummaryNote('The summary could not be generated right now — the transcript is still saved. Try again from the meeting record.');
+    } finally {
+      setIsGeneratingSummary(false);
+    }
   };
 
   // Q&A Hub Functions
@@ -2877,11 +2967,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // The room-count input is free text: clamp it so the assignments and
     // the count every client receives always agree (rooms 1-5).
     roomsCount = Math.min(5, Math.max(1, roomsCount || 2));
+    // Phase B (20): pre-assignments the host made before starting win —
+    // only people the host did not place are dealt round-robin.
     const assignments: { [peerKey: string]: number } = {};
+    Object.entries(breakoutAssignments).forEach(([peerKey, room]) => {
+      if (room >= 1 && room <= roomsCount) assignments[peerKey] = room;
+    });
     let roomIdx = 0;
     participants.forEach(p => {
       const peerKey = p.userId || p.id;
-      if (peerKey !== myKey && p.role !== 'Admin') {
+      if (peerKey !== myKey && p.role !== 'Admin' && !assignments[peerKey]) {
         assignments[peerKey] = (roomIdx % roomsCount) + 1;
         roomIdx++;
       }
@@ -4217,6 +4312,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         setHandRaiseReason(null);
         setHandRaises([]);
       })
+      .on('broadcast', { event: 'spotlight-set' }, (payload: any) => {
+        const data = payload.payload;
+        // Phase B (14): the host's spotlight is for everyone — show it,
+        // and switch to speaker view so it is actually visible.
+        if (data?.peerKey) {
+          setSpotlightKey(data.peerKey);
+          setLayoutMode('speaker');
+        }
+      })
+      .on('broadcast', { event: 'spotlight-clear' }, () => {
+        setSpotlightKey(null);
+        setSpotlightName(null);
+      })
       .on('broadcast', { event: 'signal' }, (payload: any) => {
         const data = payload.payload;
         if (data.targetKey === myKey) {
@@ -5244,6 +5352,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => {
     let rec: any = null;
     if (isCaptionsEnabled) {
+      setCaptionsUnavailable(null);
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
         rec = new SpeechRecognition();
@@ -5305,7 +5414,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           console.error(err);
         }
       } else {
-        alert('Speech recognition is not supported in this browser. Try Chrome or Safari.');
+        // Phase B (9): no technical error, no alert — a plain message in
+        // the transcript panel, and captions switch back off.
+        setCaptionsUnavailable('Live captions need setup — this browser does not support on-device speech recognition. Try Chrome or Edge for live captions.');
         setTimeout(() => {
           setIsCaptionsEnabled(false);
         }, 0);
@@ -5359,6 +5470,40 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
     // Broadcast video state change (through the helper -- see toggleMute).
     broadcastMediaState({ isVideoOn: nextVideoOn });
+  };
+
+  // Phase B (21): low-bandwidth mode — audio-first for weak connections.
+  // Your camera goes off, the uplink steps down to the low encoding
+  // (screen share included), and background effects switch off. Your
+  // audio is never touched. Turning it off brings your camera back (if
+  // it was on) and restores full quality — the Phase A watcher steps
+  // down again if the connection is still poor.
+  const setLowBandwidthMode = async (on: boolean) => {
+    if (on === lowBandwidthRef.current) return;
+    lowBandwidthRef.current = on;
+    setLowBandwidth(on);
+    setShowLowBandwidthSuggestion(false);
+    if (on) {
+      lowBandwidthVideoWasOnRef.current = isVideoOnRef.current;
+      await disableBackgroundFx(true);
+      setBgFxStatus('Background effects are off in low-bandwidth mode.');
+      if (isVideoOnRef.current) {
+        setIsVideoOn(false);
+        if (localVideoTrackRef.current) localVideoTrackRef.current.enabled = false;
+        broadcastMediaState({ isVideoOn: false });
+      }
+      await applyLocalVideoQuality('low');
+      triggerToast('Low-bandwidth mode is on — audio first, video off. Everything else still works.');
+    } else {
+      setBgFxStatus(null);
+      if (lowBandwidthVideoWasOnRef.current) {
+        if (localVideoTrackRef.current) localVideoTrackRef.current.enabled = true;
+        setIsVideoOn(true);
+        broadcastMediaState({ isVideoOn: true });
+      }
+      await applyLocalVideoQuality('high');
+      triggerToast('Low-bandwidth mode is off — your camera is back on.');
+    }
   };
 
   const handleLeaveOrEnd = () => {
@@ -5417,6 +5562,27 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (e) { /* the report is best-effort; the meeting is already ended */ }
   };
 
+  // Phase B (9 + 10): when the host ends the meeting, save the merged
+  // transcript to the meeting record, then generate the AI summary from
+  // it. Fire-and-forget — the end never waits for it and never fails
+  // because of it. The summary send hooks into Phase C (feature 29).
+  const saveTranscriptAndSummary = async () => {
+    if (!isAdmin) return;
+    const lines = transcriptsRef.current;
+    if (lines.length === 0) return;
+    try {
+      const saved: any = await giinApi.saveTranscript(meetingId, lines);
+      if (saved && saved.ok === false) {
+        console.warn('[GiinMeet] Transcript was not saved:', saved.reason || saved.message || 'unknown');
+        return;
+      }
+      const summary: any = await giinApi.generateMeetingSummary(meetingId);
+      if (summary && summary.ok === false) {
+        console.warn('[GiinMeet] Summary was not generated:', summary.reason || summary.message || 'unknown');
+      }
+    } catch (e) { /* best-effort: the meeting is already ended */ }
+  };
+
   const handleEndForAll = async () => {
     if (endingInProgress || endedRef.current) return;
     setEndingInProgress(true);
@@ -5431,6 +5597,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       enterEndedState('you-ended', (result as any)?.livekitWarning);
       // Phase 1 — attendance auto-report (fire-and-forget).
       void sendAttendanceReport();
+      // Phase B (9 + 10) — transcript save + AI summary (fire-and-forget).
+      void saveTranscriptAndSummary();
     } catch (err: any) {
       console.error('[GiinMeet] End for everyone failed:', err);
       setEndError(err?.message || 'Could not end the meeting. Nobody was removed — please try again.');
@@ -5691,6 +5859,80 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const changeVideoFilter = (filter: string) => {
     setVideoFilter(filter);
     broadcastVideoFilter(filter, isStudioLightEnabled);
+  };
+
+  // Phase B (16): blur / GIIN virtual background. The raw camera track
+  // is kept in bgFxRawTrackRef; the processed track replaces it as the
+  // published camera track (LiveKit) and on the P2P senders, and the
+  // local preview stream shows the processed picture. Anything that
+  // fails falls back to the normal camera with a plain message — the
+  // effect never breaks the call.
+  const replaceLocalVideoTrack = async (track: MediaStreamTrack) => {
+    localVideoTrackRef.current = track;
+    setStream(prev => {
+      const next = prev || new MediaStream();
+      next.getVideoTracks().forEach(t => next.removeTrack(t));
+      next.addTrack(track);
+      return next;
+    });
+    Object.values(pcsRef.current).forEach(pc => {
+      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender) sender.replaceTrack(track).catch(() => {});
+    });
+    await publishLiveKitTrack(track, Track.Source.Camera);
+    resumeVideoElements();
+  };
+
+  const enableBackgroundFx = async (mode: 'blur' | 'giin') => {
+    if (lowBandwidthRef.current) {
+      triggerToast('Background effects are off in low-bandwidth mode — turn it off to use them.');
+      return;
+    }
+    if (!isVideoOnRef.current) {
+      triggerToast('Turn your camera on first to use a background effect.');
+      return;
+    }
+    const raw = bgFxSessionRef.current ? bgFxRawTrackRef.current : localVideoTrackRef.current;
+    if (!raw || raw.readyState !== 'live') {
+      triggerToast('Turn your camera on first to use a background effect.');
+      return;
+    }
+    setBgFxStatus('Loading background effect…');
+    try {
+      await disableBackgroundFx(true);
+      const session = await startBackgroundFx(raw, mode, () => {
+        // The model failed mid-call: fall back to the normal camera.
+        void disableBackgroundFx();
+        triggerToast('The background effect stopped — your video is back to normal.');
+      });
+      bgFxSessionRef.current = session;
+      bgFxRawTrackRef.current = raw;
+      setBgFxMode(mode);
+      setBgFxStatus(mode === 'blur' ? 'Background blur is on.' : 'GIIN background is on.');
+      await replaceLocalVideoTrack(session.track);
+    } catch (e: any) {
+      setBgFxStatus(null);
+      setBgFxMode('none');
+      triggerToast(e?.message || 'Background effects are not available right now — your video stays normal.');
+    }
+  };
+
+  const disableBackgroundFx = async (silent = false) => {
+    const session = bgFxSessionRef.current;
+    const raw = bgFxRawTrackRef.current;
+    bgFxSessionRef.current = null;
+    bgFxRawTrackRef.current = null;
+    if (session) {
+      try { session.stop(); } catch (e) { /* ignore */ }
+    }
+    if (session && raw && raw.readyState === 'live') {
+      setBgFxMode('none');
+      if (!silent) setBgFxStatus(null);
+      await replaceLocalVideoTrack(raw);
+    } else {
+      setBgFxMode('none');
+      if (!silent) setBgFxStatus(null);
+    }
   };
 
   const broadcastVideoFilter = (filter: string, studioLight: boolean) => {
@@ -6694,6 +6936,74 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </button>
         </div>
       )}
+      {/* Phase B (21): automatic low-bandwidth suggestion — shown when
+          the Phase A quality guard steps the uplink down. */}
+      {showLowBandwidthSuggestion && !lowBandwidth && (
+        <div style={{
+          position: 'absolute',
+          top: breakoutRoom !== null || breakoutBroadcast ? '170px' : '80px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: 'rgba(11, 15, 25, 0.95)',
+          color: 'white',
+          padding: '8px 12px',
+          borderRadius: '12px',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          zIndex: 99,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          border: '1px solid var(--color-accent)',
+          maxWidth: '90%'
+        }}>
+          <WifiOff size={14} color="var(--color-accent)" />
+          <span>Connection is weak — switch to low-bandwidth mode (audio first, video off)?</span>
+          <button
+            onClick={() => void setLowBandwidthMode(true)}
+            style={{ border: 'none', background: 'var(--color-accent)', color: 'black', padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            Turn on
+          </button>
+          <button
+            onClick={() => setShowLowBandwidthSuggestion(false)}
+            aria-label="Dismiss suggestion"
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, color: 'white', padding: 0, lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {/* Phase B (21): low-bandwidth mode indicator. */}
+      {lowBandwidth && (
+        <div style={{
+          position: 'absolute',
+          top: breakoutRoom !== null ? '125px' : '80px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: 'rgba(250, 189, 2, 0.95)',
+          color: '#111827',
+          padding: '6px 12px',
+          borderRadius: '20px',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          zIndex: 99,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+        }}>
+          <WifiOff size={14} />
+          <span>Low-bandwidth mode — audio first, your video is off</span>
+          <button
+            onClick={() => void setLowBandwidthMode(false)}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700, color: '#111827', textDecoration: 'underline', padding: 0 }}
+          >
+            Turn off
+          </button>
+        </div>
+      )}
       {/* Upper Status Bar */}
       <div className="meeting-topbar" style={{
         display: 'flex',
@@ -7408,20 +7718,21 @@ Media encrypted in transit (DTLS-SRTP).`;
             // map second (same missed-broadcast case as above).
             const screenSharePeerKey = Object.keys(peerStates).find(k => peerStates[k].isScreenSharing) || Object.keys(remoteScreenStreams)[0] || null;
 
-            // Speaker-layout spotlight: the pinned person if set (and still
-            // in the room), else whoever is speaking, else the first remote
-            // participant, else yourself. Only used in speaker mode.
+            // Phase B (14 + 15): the spotlight is the host's pick first
+            // (for everyone in the room), then your own pin, then whoever
+            // is speaking, else the first remote participant, else
+            // yourself. It drives speaker view AND side-by-side view.
             const remotePeerKeys = participants
               .filter(p => (p.userId || p.id) !== myKey)
               .map(p => p.userId || p.id);
             const speakingPeerKey = remotePeerKeys.find(k => peerStates[k]?.isSpeaking && !peerStates[k]?.isMuted);
-            const spotlightKey = layoutMode === 'speaker'
-              ? (pinnedKey && (pinnedKey === 'local' || remotePeerKeys.includes(pinnedKey)) ? pinnedKey : (speakingPeerKey || remotePeerKeys[0] || 'local'))
+            const computedSpotlightKey = (layoutMode === 'speaker' || layoutMode === 'side')
+              ? (spotlightKey && (spotlightKey === 'local' || remotePeerKeys.includes(spotlightKey)) ? spotlightKey : (pinnedKey && (pinnedKey === 'local' || remotePeerKeys.includes(pinnedKey)) ? pinnedKey : (speakingPeerKey || remotePeerKeys[0] || 'local')))
               : null;
 
             // Render local video card
             const localVideoCard = (
-              <div className={`meeting-card ${isSpeaking && !isMuted ? 'speaking' : ''}${spotlightKey === 'local' ? ' spotlight' : ''}`} style={{
+              <div className={`meeting-card ${isSpeaking && !isMuted ? 'speaking' : ''}${computedSpotlightKey === 'local' ? ' spotlight' : ''}`} style={{
                 position: 'relative',
                 borderRadius: 'var(--radius-md)',
                 overflow: 'hidden',
@@ -7625,7 +7936,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                 };
 
                 return (
-                  <div key={p.id} className={`meeting-card participant-tile ${pState.isSpeaking && !pState.isMuted ? 'speaking' : ''}${spotlightKey === peerKey ? ' spotlight' : ''}`} style={{
+                  <div key={p.id} className={`meeting-card participant-tile ${pState.isSpeaking && !pState.isMuted ? 'speaking' : ''}${computedSpotlightKey === peerKey ? ' spotlight' : ''}`} style={{
                     position: 'relative',
                     borderRadius: 'var(--radius-md)',
                     overflow: 'hidden',
@@ -7665,6 +7976,40 @@ Media encrypted in transit (DTLS-SRTP).`;
                     >
                       <Pin size={13} />
                     </button>
+                    {/* Phase B (14): host spotlight — the host spotlights
+                        one speaker for EVERYONE; a participant's own pin
+                        (above) only changes what they watch. */}
+                    {isAdmin && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (spotlightKey === peerKey) {
+                            setHostSpotlight(null);
+                          } else {
+                            setHostSpotlight(peerKey);
+                          }
+                        }}
+                        style={{
+                          position: 'absolute',
+                          top: '86px',
+                          right: '10px',
+                          width: '28px',
+                          height: '28px',
+                          borderRadius: '50%',
+                          backgroundColor: spotlightKey === peerKey ? 'var(--color-accent)' : 'rgba(0,0,0,0.55)',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: spotlightKey === peerKey ? 'black' : 'white',
+                          cursor: 'pointer',
+                          zIndex: 10
+                        }}
+                        title={spotlightKey === peerKey ? `Stop spotlighting ${p.name} for everyone` : `Spotlight ${p.name} for everyone`}
+                      >
+                        <Star size={13} />
+                      </button>
+                    )}
                     {/* Fix Round 8: host mute on the video card — the same
                         server-verified mute as the participants list, with
                         its own unmistakable button (red pill, MicOff icon
@@ -7776,7 +8121,7 @@ Media encrypted in transit (DTLS-SRTP).`;
                   {(() => {
                     const isUserHandRaised = handRaises.some(hr => hr.userId === peerKey);
                     const userHandRaise = handRaises.find(hr => hr.userId === peerKey);
-                    const handRaiseIndex = handRaises.findIndex(hr => hr.userId === peerKey);
+                    const handRaiseIndex = sortHandRaiseQueue(handRaises).findIndex(hr => hr.userId === peerKey);
                     
                     return isUserHandRaised && userHandRaise && (
                       <div style={{
@@ -8076,7 +8421,7 @@ Media encrypted in transit (DTLS-SRTP).`;
 
             // No Screen Share: Normal grid tiling
             return (
-              <div className={`meeting-grid scroll-refined${layoutMode === 'speaker' ? ' speaker-mode' : ''}`} style={{
+              <div className={`meeting-grid scroll-refined${layoutMode === 'speaker' ? ' speaker-mode' : ''}${layoutMode === 'side' ? ' side-mode' : ''}`} style={{
                 flex: 1,
                 minHeight: 0,
                 minWidth: 0,
@@ -8114,11 +8459,12 @@ Media encrypted in transit (DTLS-SRTP).`;
                     first tiles) when 3+ tiles overflow the viewport height
                     — plain align/justify centering on a scrollable flex
                     container hides the top rows above the scroll origin. */}
-                <div style={{
+                <div className="meeting-tiles" style={{
                   margin: '0 auto',
                   flexShrink: 0,
                   width: '100%',
-                  display: 'flex',
+                  display: layoutMode === 'side' && window.innerWidth >= 768 ? 'grid' : 'flex',
+                  gridTemplateColumns: layoutMode === 'side' && window.innerWidth >= 768 ? 'minmax(0, 1fr) 240px' : undefined,
                   flexWrap: 'wrap',
                   gap: window.innerWidth < 768 ? '0.75rem' : '1.25rem',
                   justifyContent: 'center',
@@ -8293,16 +8639,24 @@ Media encrypted in transit (DTLS-SRTP).`;
                       🙋 Speaker Queue ({handRaises.length})
                     </span>
                     {isAdmin && (
-                      <button 
-                        onClick={clearAllHands}
-                        style={{ border: 'none', background: 'none', color: '#EF4444', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 600 }}
-                      >
-                        Lower All
-                      </button>
+                      <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <button
+                          onClick={callOnNext}
+                          style={{ border: 'none', background: 'var(--color-accent)', color: 'black', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 700, padding: '3px 8px', borderRadius: '4px' }}
+                        >
+                          Call on next
+                        </button>
+                        <button 
+                          onClick={clearAllHands}
+                          style={{ border: 'none', background: 'none', color: '#EF4444', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          Lower All
+                        </button>
+                      </span>
                     )}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {handRaises.map((hr, index) => {
+                    {sortHandRaiseQueue(handRaises).map((hr, index) => {
                       const waitingSecs = Math.floor((Date.now() - hr.timestamp) / 1000);
                       const waitingText = waitingSecs < 60 ? `${waitingSecs}s` : `${Math.floor(waitingSecs / 60)}m`;
                       
@@ -8836,6 +9190,37 @@ Media encrypted in transit (DTLS-SRTP).`;
                         />
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>min</span>
                       </div>
+                    </div>
+
+                    {/* Phase B (20): pre-assign rooms before starting —
+                        the host places each person in a room in advance;
+                        anyone left on Auto is dealt round-robin. */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Place people in rooms first (optional):</span>
+                      {participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').length === 0 ? (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No other participants yet — they can be placed once they join.</span>
+                      ) : (
+                        participants.filter(p => (p.userId || p.id) !== myKey && p.role !== 'Admin').map(p => {
+                          const peerKey = p.userId || p.id;
+                          const assigned = breakoutAssignments[peerKey];
+                          return (
+                            <div key={peerKey} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                              <span style={{ fontSize: '0.75rem', color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>{p.name}</span>
+                              <select
+                                value={assigned ? String(assigned) : 'auto'}
+                                onChange={(e) => setBreakoutAssignments(prev => { const next = { ...prev }; if (e.target.value === 'auto') delete next[peerKey]; else next[peerKey] = parseInt(e.target.value, 10); return next; })}
+                                aria-label={`Pre-assign ${p.name} to a breakout room`}
+                                style={{ height: '26px', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid #1E293B', borderRadius: '4px', cursor: 'pointer' }}
+                              >
+                                <option value="auto" style={{ color: 'black' }}>Auto</option>
+                                {Array.from({ length: breakoutRoomsCount }).map((_, idx) => (
+                                  <option key={idx + 1} value={String(idx + 1)} style={{ color: 'black' }}>Room {idx + 1}</option>
+                                ))}
+                              </select>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
 
                     <button 
@@ -9442,7 +9827,41 @@ Media encrypted in transit (DTLS-SRTP).`;
                   ))}
                 </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
-                  Soft Blur blurs your whole video — it is not a background blur. A true background blur (you sharp, background blurred) needs a segmentation engine and is planned for Phase 2.
+                  Soft Blur blurs your whole video — it is not a background blur. For a true background effect, use Background below.
+                </p>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* Phase B (16): true background blur / GIIN virtual
+                  background, via on-device segmentation. */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>BACKGROUND</span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                  {[
+                    { id: 'none', label: 'Off' },
+                    { id: 'blur', label: 'Blur background' },
+                    { id: 'giin', label: 'GIIN background' }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      onClick={() => { if (f.id === 'none') void disableBackgroundFx(); else void enableBackgroundFx(f.id as 'blur' | 'giin'); }}
+                      className="premium-btn"
+                      style={{
+                        justifyContent: 'center',
+                        fontSize: '0.75rem',
+                        height: '40px',
+                        border: bgFxMode === f.id ? '1px solid var(--color-accent)' : '1px solid var(--border-color)',
+                        backgroundColor: bgFxMode === f.id ? 'rgba(250,189,2,0.1)' : 'rgba(255,255,255,0.02)',
+                        color: bgFxMode === f.id ? 'var(--color-accent)' : 'white'
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.3 }}>
+                  {bgFxStatus || 'You stay sharp and your background is blurred or replaced with the GIIN backdrop. It loads once from the internet; if it cannot load, your video stays normal. It switches off automatically in low-bandwidth mode.'}
                 </p>
               </div>
 
@@ -9535,6 +9954,11 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </label>
                   </div>
 
+                  {captionsUnavailable && (
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4, padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}>{captionsUnavailable}</p>
+                  )}
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>Captions are yours alone to turn on or off — each person chooses for themselves. When the host ends the meeting, the full transcript is saved to the meeting record.</p>
+
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
                     <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>TRANSCRIPT HISTORY</span>
                     
@@ -9606,6 +10030,24 @@ Media encrypted in transit (DTLS-SRTP).`;
                             {aiSummary}
                           </p>
                         </div>
+
+                        {summaryDecisions.length > 0 && (
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>✅ Decisions</div>
+                            <ul style={{ paddingLeft: '1.2rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              {summaryDecisions.map((d, i) => (<li key={i}>{d}</li>))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {summaryActionItems.length > 0 && (
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <div style={{ fontWeight: 700, color: 'white', marginBottom: '0.35rem' }}>📌 Action items</div>
+                            <ul style={{ paddingLeft: '1.2rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              {summaryActionItems.map((a, i) => (<li key={i}>{a.text}{a.owner ? ` — ${a.owner}` : ''}</li>))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
 
                       <button 
@@ -9621,14 +10063,14 @@ Media encrypted in transit (DTLS-SRTP).`;
                     </div>
                   ) : (
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', height: '200px', textAlign: 'center' }}>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>AI summaries are not available yet — no transcription service is connected.</span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{summaryNote || 'Generate a short summary of this meeting from the transcript — decisions and action items included.'}</span>
                       <button 
                         onClick={generateAiSummary}
                         className="premium-btn premium-btn-primary"
                         style={{ padding: '0.5rem 1rem', fontSize: '0.8rem', height: '36px', gap: '0.4rem', justifyContent: 'center', width: '100%' }}
                       >
                         <Sparkles size={14} />
-                        <span>Generate AI Summary</span>
+                        <span>{summaryStatus === 'done' ? 'Regenerate summary' : 'Generate AI Summary'}</span>
                       </button>
                     </div>
                   )}
@@ -10177,9 +10619,9 @@ Media encrypted in transit (DTLS-SRTP).`;
             <Edit2 size={20} />
           </button>
 
-          {/* Layout: Grid / Speaker (spotlight follows the pinned person, else the speaker) */}
+          {/* Phase B (15): Layout — Grid / Speaker / Side-by-side. The spotlight (host pick, else pin, else speaker) drives speaker and side-by-side. */}
           <button 
-            onClick={() => setLayoutMode(layoutMode === 'grid' ? 'speaker' : 'grid')}
+            onClick={() => setLayoutMode(nextLayoutMode(layoutMode))}
             style={{
               width: '56px',
               height: '56px',
@@ -10195,10 +10637,10 @@ Media encrypted in transit (DTLS-SRTP).`;
               cursor: 'pointer',
               transition: 'all 0.2s ease'
             }}
-            title={layoutMode === 'grid' ? 'Switch to Speaker view (spotlight on the speaker)' : 'Switch to Grid view'}
+            title={layoutModeHint(layoutMode)}
           >
             {layoutMode === 'grid' ? <LayoutGrid size={18} /> : <LayoutList size={18} />}
-            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{layoutMode === 'grid' ? 'Speaker' : 'Grid'}</span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{layoutModeLabel(layoutMode)}</span>
           </button>
 
           {/* End Call / Hang Up */}
@@ -10846,6 +11288,33 @@ Media encrypted in transit (DTLS-SRTP).`;
                   </button>
 
                   <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '0.35rem 0.85rem 0.1rem', borderTop: '1px solid #1E293B', marginTop: '0.35rem', paddingTop: '0.6rem' }}>MEDIA</div>
+                  {/* Phase B (21): low-bandwidth mode toggle. */}
+                  <button
+                    onClick={() => {
+                      void setLowBandwidthMode(!lowBandwidth);
+                      setShowMoreMenu(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      backgroundColor: lowBandwidth ? 'rgba(250,189,2,0.15)' : 'transparent',
+                      border: 'none',
+                      padding: '0.6rem 0.85rem',
+                      width: '100%',
+                      minHeight: '44px',
+                      flexShrink: 0,
+                      borderRadius: '6px',
+                      color: 'white',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {lowBandwidth ? <WifiOff size={16} style={{ flexShrink: 0 }} /> : <Wifi size={16} style={{ flexShrink: 0 }} />}
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '1 1 auto', minWidth: 0 }}>{lowBandwidth ? 'Low-bandwidth mode: On' : 'Low-bandwidth mode'}</span>
+                  </button>
+
                   {/* Camera Filters */}
                   <button 
                     onClick={() => {
