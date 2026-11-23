@@ -1175,6 +1175,10 @@ function App() {
 
   // Active call states
   const [activeCallTitle, setActiveCallTitle] = useState<string | null>(null);
+  // Phase D (37): the verified meeting passcode, in memory only, so
+  // the room can derive the media encryption key. Cleared when the
+  // meeting ends, never written to storage.
+  const [activeCallPasscode, setActiveCallPasscode] = useState('');
   const [activeCallVideoState, setActiveCallVideoState] = useState<boolean>(true);
   const [activeCallMuted, setActiveCallMuted] = useState<boolean>(false);
 
@@ -1550,6 +1554,7 @@ function App() {
 
   const handleEndMeeting = async (skipServerEnd = false) => {
     setActiveCallTitle(null);
+    setActiveCallPasscode('');
     const endedId = activeMeetingId;
     if (endedId) {
       // Ending a meeting for everyone is a HOST-ONLY act. App calls this
@@ -1843,7 +1848,7 @@ function App() {
     }));
   };
 
-  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number }; teamId?: string; teamName?: string }) => {
+  const handleAddMeeting = async (meet: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number }; teamId?: string; teamName?: string; e2eeEnabled?: boolean; organisationId?: string | null }) => {
     if (!user || !user.id) {
       window.alert('Sign in to schedule a meeting.');
       return null;
@@ -1890,6 +1895,16 @@ function App() {
       if (meet.reminder) {
         newDbMeet.reminder_enabled = meet.reminder.enabled;
         newDbMeet.reminder_minutes_before = meet.reminder.minutesBefore;
+      }
+      // Phase D (37, 47): the encryption choice and the organisation
+      // brand travel the same way; createMeeting probe-gates the
+      // columns and keeps the choice in localStorage until the
+      // Phase D database setup has run.
+      if (meet.e2eeEnabled) {
+        newDbMeet.e2ee_enabled = true;
+      }
+      if (meet.organisationId) {
+        newDbMeet.organisation_id = meet.organisationId;
       }
       // Phase 1, the recurring-series link travels the same way.
       if (meet.series) {
@@ -2131,9 +2146,10 @@ function App() {
         user={user}
         brandName={brandName}
         logoUrl={logoUrl}
-        onAdmitted={(title, _participantId, displayName) => {
+        onAdmitted={(title, _participantId, displayName, passcode) => {
           setIsP2PCall(false);
           setActiveCallTitle(title);
+          if (passcode) setActiveCallPasscode(passcode);
           setActiveMeetingId(joinMeetingData.meetingId);
           if (!user) {
             setGuestUser({ id: _participantId, name: displayName, email: 'guest@phone.giinmeet.com' });
@@ -2161,6 +2177,7 @@ function App() {
           onRejoinMeeting={handleRejoinMeeting}
           onSaveWorkspaceData={handleSaveWorkspaceData}
           currentUser={guestUser}
+          meetingPasscode={activeCallPasscode || undefined}
           initialVideoState={preJoinVideoOn}
           initialMutedState={!preJoinAudioOn}
           isP2PCall={false}
@@ -3091,6 +3108,7 @@ function App() {
           onRejoinMeeting={handleRejoinMeeting}
               onSaveWorkspaceData={handleSaveWorkspaceData}
               currentUser={user}
+              meetingPasscode={activeCallPasscode || undefined}
               initialVideoState={activeCallVideoState}
               initialMutedState={activeCallMuted}
               isP2PCall={isP2PCall}

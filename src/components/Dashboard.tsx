@@ -13,6 +13,8 @@ import { MeetingRecordExtras } from './MeetingRecordExtras';
 import { ShortLinkBox } from './ShortLinkBox';
 import { CertificatesPanel } from './CertificatesPanel';
 import { NotesExport } from './NotesExport';
+import { ApiDeveloperPanel } from './ApiDeveloperPanel';
+import { OrganisationsPanel } from './OrganisationsPanel';
 import { MeetingPrepBrief } from './MeetingPrepBrief';
 import { t, useUiLanguage } from '../i18n';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
@@ -53,7 +55,7 @@ interface DashboardProps {
   onNavigate: (view: string) => void;
   onStartMeeting: (title?: string, dmThreadId?: string, isVideo?: boolean, existingMeetingId?: string, requireWaitingRoom?: boolean, passcode?: string | null) => void;
   meetingHistory: Meeting[];
-  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number }; teamId?: string; teamName?: string }) => Promise<Meeting | null>;
+  onAddMeeting: (meeting: { title: string; time: string; duration: string; requireWaitingRoom?: boolean; passcode?: string | null; linkExpiry?: { mode: string; expiresAt: string | null }; reminder?: { enabled: boolean; minutesBefore: number }; series?: { id: string; rule: string; count: number }; teamId?: string; teamName?: string; e2eeEnabled?: boolean; organisationId?: string | null }) => Promise<Meeting | null>;
   onCancelMeeting?: (meetingId: string, title: string) => void;
   // Delete from history (soft delete, owner only, completed/expired only).
   onDeleteMeeting?: (meetingId: string, title: string) => void;
@@ -93,6 +95,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const waitingRoomAppliedRef = useRef(false);
   const [schedulePasscodeEnabled, setSchedulePasscodeEnabled] = useState(true);
   const [schedulePasscode, setSchedulePasscode] = useState('');
+  // Phase D (37, 47): end-to-end encryption choice for this meeting,
+  // and the organisation whose brand the meeting carries.
+  const [scheduleE2ee, setScheduleE2ee] = useState(false);
+  const [scheduleOrganisationId, setScheduleOrganisationId] = useState('');
+  const [myOrganisations, setMyOrganisations] = useState<{ id: string; name: string; slug: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    giinApi.getMyOrganisations().then((orgs) => { if (!cancelled) setMyOrganisations(orgs || []); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const [scheduledMeetingDetails, setScheduledMeetingDetails] = useState<Meeting | null>(null);
   const [copiedSuccessId, setCopiedSuccessId] = useState<'link' | 'details' | null>(null);
   const [copyFailedId, setCopyFailedId] = useState<'link' | 'details' | null>(null);
@@ -628,6 +640,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         duration: clampDurationToTier(templateDuration, planTier),
         requireWaitingRoom,
         passcode,
+        e2eeEnabled: scheduleE2ee,
+        organisationId: scheduleOrganisationId || null,
         linkExpiry: { mode: scheduleLinkExpiry, expiresAt: computeLinkExpiry(scheduleLinkExpiry, t.toISOString()) },
         reminder: { enabled: scheduleReminderEnabled, minutesBefore: scheduleReminderMinutes },
         series: seriesId ? { id: seriesId, rule: scheduleRecurrence, count: occurrences } : undefined
@@ -647,6 +661,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setRequireWaitingRoom(true);
       setSchedulePasscodeEnabled(true);
       setSchedulePasscode('');
+      setScheduleE2ee(false);
+      setScheduleOrganisationId('');
       setScheduleRecurrence('none');
       setScheduleRecurrenceCount(4);
       setShowScheduleModal(false);
@@ -848,6 +864,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
         onStartTemplate={handleStartTemplate}
         onScheduleTemplate={handleScheduleTemplate}
       />
+
+      {/* Phase D (42): API keys and webhooks, one grouped section. */}
+      <ApiDeveloperPanel />
+
+      {/* Phase D (47): organisations and white-label branding, one grouped section. */}
+      <OrganisationsPanel />
 
       {/* Phase C1 (26), recent meetings, one-tap rejoin. */}
       <RecentMeetings meetings={meetingHistory} />
@@ -1788,6 +1810,48 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                 )}
               </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>End-to-end encryption</label>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', fontSize: '0.85rem', cursor: schedulePasscodeEnabled ? 'pointer' : 'default', color: 'white', opacity: schedulePasscodeEnabled ? 1 : 0.55 }}>
+                  <input
+                    type="checkbox"
+                    checked={scheduleE2ee && schedulePasscodeEnabled}
+                    disabled={!schedulePasscodeEnabled}
+                    onChange={(e) => setScheduleE2ee(e.target.checked)}
+                    style={{ marginTop: '3px' }}
+                  />
+                  <div>
+                    <strong style={{ display: 'block' }}>Encrypt audio and video end to end</strong>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Audio and video are encrypted so only people in the meeting can hear and see them. Chat, files, names and the agenda are not covered by this, they stay protected by transport encryption only. Needs a passcode, the passcode is the key, so anyone with the passcode can join and decrypt.
+                    </span>
+                  </div>
+                </label>
+                {!schedulePasscodeEnabled && (
+                  <span style={{ display: 'block', fontSize: '0.75rem', color: '#F59E0B', marginTop: '0.4rem' }}>Turn the passcode on above to use end-to-end encryption.</span>
+                )}
+              </div>
+
+              {myOrganisations.length > 0 && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Organisation brand</label>
+                  <select
+                    className="premium-input"
+                    value={scheduleOrganisationId}
+                    onChange={(e) => setScheduleOrganisationId(e.target.value)}
+                    style={{ height: '44px', width: '100%' }}
+                  >
+                    <option value="">GiinMeet branding</option>
+                    {myOrganisations.map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ))}
+                  </select>
+                  <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                    The waiting room and invites carry the organisation's name, logo and colours, with a small powered by GiinMeet mark.
+                  </span>
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
                 <button 

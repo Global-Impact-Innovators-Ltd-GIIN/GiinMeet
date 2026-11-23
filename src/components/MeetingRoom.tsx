@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Room as LiveKitRoom, RoomEvent, Track } from 'livekit-client';
+import { Room as LiveKitRoom, RoomEvent, Track, ExternalE2EEKeyProvider } from 'livekit-client';
+import { MeetingFeedback } from './MeetingFeedback';
 import { 
   Mic, MicOff, AudioLines, Video as VideoIcon, VideoOff, Monitor, Users, MessageSquare, PhoneOff,
   Clock, Pin, LayoutGrid, LayoutList, Star, Wifi, WifiOff,
@@ -339,6 +340,10 @@ interface MeetingRoomProps {
   onRejoinMeeting?: (meetingId: string) => void;
   onSaveWorkspaceData?: (notes: string, actionItemsCount: number) => void;
   currentUser: { id: string; name: string; email: string } | null;
+  // Phase D (37): the meeting passcode the guest typed (or the link
+  // carried), passed from the waiting room. It is used ONLY to derive
+  // the media encryption key in this browser, never sent anywhere.
+  meetingPasscode?: string;
   initialVideoState?: boolean;
   initialMutedState?: boolean;
   isP2PCall?: boolean;
@@ -354,6 +359,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   onRejoinMeeting,
   onSaveWorkspaceData, 
   currentUser,
+  meetingPasscode,
   initialVideoState = true,
   initialMutedState = false,
   isP2PCall = false,
@@ -1322,6 +1328,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isStudioLightEnabled, setIsStudioLightEnabled] = useState(false);
   
   const [isMeetingLocked, setIsMeetingLocked] = useState(false);
+  // Phase D (37): media end-to-end encryption for this meeting.
+  const [e2eeEnabled, setE2eeEnabled] = useState(false);
+  const [e2eeActive, setE2eeActive] = useState(false);
+  const [e2eeWarning, setE2eeWarning] = useState('');
+  // Phase D (38): regulars who bypass the lobby (host only).
+  const [regulars, setRegulars] = useState<{ id: string; email: string; name: string | null }[]>([]);
+  const [newRegularEmail, setNewRegularEmail] = useState('');
+  const [newRegularName, setNewRegularName] = useState('');
+  // Phase D (38): one lobby message draft per waiting guest.
+  const [lobbyDrafts, setLobbyDrafts] = useState<Record<string, string>>({});
+  // Phase D (46 + 39): report form on the ended screen.
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState('spam');
+  const [reportDetail, setReportDetail] = useState('');
+  const [reportSent, setReportSent] = useState(false);
+  const [reportError, setReportError] = useState('');
   const [isScreenShareBlockedForGuests, setIsScreenShareBlockedForGuests] = useState(false);
   // Fix Round 8 (#3): screen-share feedback state, a click that opens
   // nothing must never look dead again.
@@ -1891,6 +1913,43 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           setLivekitRole(serverRole);
         }
 
+        // Phase D (37): media end-to-end encryption. When the meeting
+        // has it on, the audio and video are encrypted between the
+        // participants with a key derived in this browser from the
+        // meeting passcode (LiveKit E2EE, PBKDF2). The key is never
+        // sent to the server and never stored. When the key cannot be
+        // built (no passcode on this device, or the worker fails), the
+        // room still joins, on standard transport encryption, and says
+        // so plainly instead of pretending to be encrypted.
+        let e2eeOptions: { keyProvider: ExternalE2EEKeyProvider; worker: Worker } | undefined;
+        if (breakoutRoom === null) {
+          try {
+            const e2eeStatus = await giinApi.getE2eeStatus(meetingId);
+            const enabled = !!e2eeStatus.enabled;
+            setE2eeEnabled(enabled);
+            if (enabled) {
+              let keyPasscode = meetingPasscode || '';
+              if (!keyPasscode && isHost) {
+                try { keyPasscode = (await giinApi.getMeetingPasscode(meetingId)) || ''; } catch (e) { /* host passcode unavailable */ }
+              }
+              if (!keyPasscode) {
+                setE2eeWarning('Encryption is on for this meeting, but this device has no meeting passcode, so media is using standard transport encryption only. Rejoin with the passcode to encrypt media.');
+              } else {
+                const keyProvider = new ExternalE2EEKeyProvider();
+                await keyProvider.setKey(`giinmeet-e2ee:${meetingId}:${keyPasscode}`);
+                const worker = new Worker(new URL('livekit-client/e2ee-worker', import.meta.url));
+                e2eeOptions = { keyProvider, worker };
+                setE2eeActive(true);
+              }
+            }
+          } catch (e) {
+            // The encryption setting is unavailable (Phase D SQL not
+            // run yet, or offline): the room joins unencrypted, as
+            // before, and nothing pretends otherwise.
+            setE2eeEnabled(false);
+          }
+        }
+
         // Fix Round 6: stopLocalTrackOnUnpublish:false. The SDK default
         // (true) stops a track the moment it is unpublished, which
         // would stop the raw mic track when Studio Voice publishes its
@@ -1901,7 +1960,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const room = new LiveKitRoom({
           adaptiveStream: true,
           dynacast: true,
-          stopLocalTrackOnUnpublish: false
+          stopLocalTrackOnUnpublish: false,
+          ...(e2eeOptions ? { e2ee: e2eeOptions } : {})
         });
 
         livekitRoomRef.current = room;
@@ -5322,6 +5382,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     broadcastMediaState({ isScreenSharing: false });
   };
 
+  // Phase D (37): load the encryption flag on mount, so Host
+  // Controls shows the real setting even before the video connects.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const status = await giinApi.getE2eeStatus(meetingId);
+        if (active) setE2eeEnabled(!!status.enabled);
+      } catch (e) { /* unencrypted until proven otherwise */ }
+    })();
+    return () => { active = false; };
+  }, [meetingId]);
+
   // Hosts and co-hosts check for waiting participants via realtime and fallback polling
   useEffect(() => {
     if (!canAdmit) return;
@@ -5416,6 +5489,90 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setWaitingList(prev => prev.filter(p => p.id !== participantId && p.participantRowId !== participantId));
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Phase D (38): admit everyone waiting, up to the tier capacity.
+  const handleAdmitAll = async () => {
+    try {
+      const result = await giinApi.admitAllWaiting(meetingId);
+      triggerToast(
+        result.admitted > 0
+          ? `${result.admitted} ${result.admitted === 1 ? 'person' : 'people'} admitted${result.waitingLeft > 0 ? `, ${result.waitingLeft} still waiting${result.full ? ' (the room is full for this plan)' : ''}` : ''}.`
+          : 'Nobody was admitted. The room may be full for this plan.',
+      );
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not admit everyone, please try again.');
+    }
+  };
+
+  // Phase D (38): one line from the host to a waiting guest.
+  const handleSendLobbyMessage = async (participantRowId: string) => {
+    const message = (lobbyDrafts[participantRowId] || '').trim();
+    if (!message) return;
+    try {
+      await giinApi.messageLobbyGuest(meetingId, participantRowId, message);
+      setLobbyDrafts((prev) => ({ ...prev, [participantRowId]: '' }));
+      triggerToast('Message sent to the waiting guest.');
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not send the message.');
+    }
+  };
+
+  // Phase D (38): the host's regulars (lobby bypass list).
+  const loadRegulars = async () => {
+    try {
+      setRegulars(await giinApi.getRegulars());
+    } catch (e: any) {
+      triggerToast(e?.message || 'Could not load regulars.');
+    }
+  };
+
+  const handleAddRegular = async () => {
+    const email = newRegularEmail.trim().toLowerCase();
+    if (!email) return;
+    try {
+      await giinApi.addRegular(email, newRegularName.trim() || undefined);
+      setNewRegularEmail('');
+      setNewRegularName('');
+      await loadRegulars();
+      triggerToast(`${email} will bypass the lobby from now on.`);
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not add the regular.');
+    }
+  };
+
+  // Phase D (37): the host's encryption toggle, in Host Controls.
+  const handleToggleE2ee = async (enabled: boolean) => {
+    try {
+      const result = await giinApi.setE2eeEnabled(meetingId, enabled);
+      setE2eeEnabled(result.enabled);
+      if (result.enabled) {
+        triggerToast('Encryption is on for this meeting. New joiners encrypt media with the meeting passcode as the key. People already in the room must rejoin for their media to be encrypted.');
+      } else {
+        triggerToast('Encryption is off for this meeting. Media uses standard transport encryption.');
+      }
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not change the encryption setting.');
+    }
+  };
+
+  // Phase D (39): block a participant by account, host only. The
+  // block is server-enforced: they get no new token and cannot
+  // rejoin by refreshing.
+  const handleBlockParticipant = async (participant: any) => {
+    const userId = participant.userId || participant.user_id;
+    const name = participant.name || 'This person';
+    if (!userId) {
+      triggerToast('Guests without an account cannot be blocked by email here. Remove them instead, or decline them in the lobby.');
+      return;
+    }
+    if (!confirm(`Block ${name}? They will not be able to rejoin your meetings until you unblock them.`)) return;
+    try {
+      await giinApi.blockUserById(userId);
+      triggerToast(`${name} is blocked from your meetings.`);
+    } catch (err: any) {
+      triggerToast(err?.message || 'Could not block this person.');
     }
   };
 
@@ -7382,6 +7539,67 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         {endedState.detail && (
           <p style={{ margin: 0, fontSize: '0.85rem', color: '#FCA5A5', maxWidth: '420px', lineHeight: 1.5 }}>{endedState.detail}</p>
         )}
+        {endedState.reason !== 'removed' && (
+          <MeetingFeedback meetingId={meetingId} guestName={currentUser?.name} />
+        )}
+        {endedState.reason !== 'removed' && !reportSent && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', width: '100%', maxWidth: '420px' }}>
+            {reportOpen ? (
+              <>
+                <select
+                  value={reportReason}
+                  onChange={(e) => setReportReason(e.target.value)}
+                  className="premium-input"
+                  style={{ width: '100%', height: '40px', fontSize: '0.85rem' }}
+                >
+                  <option value="spam">Spam</option>
+                  <option value="abuse">Abuse</option>
+                  <option value="harassment">Harassment</option>
+                  <option value="scam">Scam</option>
+                  <option value="other">Something else</option>
+                </select>
+                <input
+                  type="text"
+                  value={reportDetail}
+                  onChange={(e) => setReportDetail(e.target.value)}
+                  maxLength={500}
+                  placeholder="What happened? (optional)"
+                  className="premium-input"
+                  style={{ width: '100%', height: '40px', fontSize: '0.85rem' }}
+                />
+                <button
+                  onClick={async () => {
+                    setReportError('');
+                    try {
+                      await giinApi.reportMeeting(meetingId, reportReason, reportDetail.trim() || undefined);
+                      setReportSent(true);
+                      setReportOpen(false);
+                    } catch (err: any) {
+                      setReportError(err?.message || 'Could not send the report.');
+                    }
+                  }}
+                  className="premium-btn premium-btn-secondary"
+                  style={{ height: '40px', padding: '0 1.25rem', fontSize: '0.85rem', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
+                >
+                  Send report
+                </button>
+                {reportError && (
+                  <span style={{ fontSize: '0.8rem', color: '#FCA5A5' }}>{reportError}</span>
+                )}
+              </>
+            ) : (
+              <button
+                onClick={() => setReportOpen(true)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem', textDecoration: 'underline' }}
+              >
+                Report a problem with this meeting
+              </button>
+            )}
+          </div>
+        )}
+        {reportSent && (
+          <span style={{ fontSize: '0.85rem', color: '#10B981', fontWeight: 600 }}>Report sent. The superadmin will review it.</span>
+        )}
         {currentUser?.email === 'guest@phone.giinmeet.com' ? (
           <>
             {endedState.reason !== 'removed' && (
@@ -8070,26 +8288,59 @@ Media encrypted in transit (DTLS-SRTP).`;
             overflowY: 'auto',
             minWidth: '320px'
           }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
-              {waitingList.length} {waitingList.length === 1 ? 'person' : 'people'} waiting to join
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
+                {waitingList.length} {waitingList.length === 1 ? 'person' : 'people'} waiting to join
+              </span>
+              {waitingList.length > 1 && (
+                <button
+                  onClick={handleAdmitAll}
+                  className="premium-btn premium-btn-accent"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
+                >
+                  Admit all
+                </button>
+              )}
+            </div>
             {waitingList.map((w: any) => (
-              <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{w.name}</span>
+              <div key={w.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', padding: '0.5rem 0', borderTop: '1px solid rgba(255,255,255,0.12)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{w.name}</span>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      onClick={() => handleAdmitParticipant(w.participantRowId || w.id, 'Admitted')}
+                      className="premium-btn premium-btn-accent"
+                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
+                    >
+                      Admit
+                    </button>
+                    <button
+                      onClick={() => handleAdmitParticipant(w.participantRowId || w.id, 'Declined')}
+                      className="premium-btn premium-btn-danger"
+                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px', backgroundColor: '#EF4444' }}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+                {w.knock_message && (
+                  <span style={{ fontSize: '0.8rem', color: '#FDE68A', lineHeight: 1.4 }}>Knock: {w.knock_message}</span>
+                )}
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="text"
+                    value={lobbyDrafts[w.participantRowId || w.id] || ''}
+                    onChange={(e) => setLobbyDrafts((prev) => ({ ...prev, [w.participantRowId || w.id]: e.target.value }))}
+                    maxLength={280}
+                    placeholder="Message this guest while they wait"
+                    style={{ flex: 1, minWidth: 0, height: '30px', padding: '0 0.6rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.25)', backgroundColor: 'rgba(0,0,0,0.25)', color: 'white', fontSize: '0.8rem' }}
+                  />
                   <button
-                    onClick={() => handleAdmitParticipant(w.participantRowId || w.id, 'Admitted')}
-                    className="premium-btn premium-btn-accent"
-                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px' }}
+                    onClick={() => handleSendLobbyMessage(w.participantRowId || w.id)}
+                    disabled={!(lobbyDrafts[w.participantRowId || w.id] || '').trim()}
+                    style={{ border: '1px solid rgba(255,255,255,0.35)', background: 'none', color: 'white', cursor: 'pointer', padding: '0 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, height: '30px', opacity: (lobbyDrafts[w.participantRowId || w.id] || '').trim() ? 1 : 0.5 }}
                   >
-                    Admit
-                  </button>
-                  <button
-                    onClick={() => handleAdmitParticipant(w.participantRowId || w.id, 'Declined')}
-                    className="premium-btn premium-btn-danger"
-                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: '28px', backgroundColor: '#EF4444' }}
-                  >
-                    Decline
+                    Send
                   </button>
                 </div>
               </div>
@@ -9902,6 +10153,24 @@ Media encrypted in transit (DTLS-SRTP).`;
                           Remove
                         </button>
                         )}
+                        {isAdmin && p.userId && p.userId !== currentUser?.id && (
+                          <button
+                            onClick={() => handleBlockParticipant(p)}
+                            style={{
+                              border: 'none',
+                              background: 'rgba(239, 68, 68, 0.1)',
+                              cursor: 'pointer',
+                              color: '#EF4444',
+                              fontSize: '0.7rem',
+                              fontWeight: 600,
+                              padding: '3px 6px',
+                              borderRadius: '4px'
+                            }}
+                            title="Block this person from your meetings (server-enforced, they cannot rejoin by refreshing)"
+                          >
+                            Block
+                          </button>
+                        )}
                       </div>
                     )}
                     
@@ -9997,6 +10266,99 @@ Media encrypted in transit (DTLS-SRTP).`;
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                   Prevent any new participants from joining the meeting room.
                 </span>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* Phase D (37): media end-to-end encryption toggle.
+                  The key is derived in each browser from the meeting
+                  passcode, so a meeting with no passcode cannot turn
+                  it on. People already in the room must rejoin for
+                  their media to be encrypted. */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Encrypted Media</span>
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                    <input
+                      type="checkbox"
+                      checked={e2eeEnabled}
+                      onChange={(e) => handleToggleE2ee(e.target.checked)}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: e2eeEnabled ? 'var(--color-accent)' : '#1E293B',
+                      transition: '0.3s', borderRadius: '20px'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '14px', width: '14px', left: '3px', bottom: '3px',
+                        backgroundColor: e2eeEnabled ? '#07090E' : 'white',
+                        transition: '0.3s', borderRadius: '50%',
+                        transform: e2eeEnabled ? 'translateX(14px)' : 'none'
+                      }} />
+                    </span>
+                  </label>
+                </div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  Audio and video encrypted between participants, with the meeting passcode as the key. GiinMeet and LiveKit only relay encrypted media. Chat, files, names and meeting details are not covered.
+                </span>
+              </div>
+
+              <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
+
+              {/* Phase D (38): regulars who bypass the lobby. */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div className="flex-between">
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white' }}>Regulars (skip the lobby)</span>
+                  <button
+                    onClick={loadRegulars}
+                    style={{ background: 'none', border: '1px solid #1E293B', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.25rem 0.6rem', fontSize: '0.75rem', fontWeight: 600 }}
+                  >
+                    Show list
+                  </button>
+                </div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  People you trust bypass the waiting room and join straight in. Only signed-in people can be regulars.
+                </span>
+                {regulars.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                    {regulars.map((r) => (
+                      <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '0.8rem', color: 'white' }}>{r.name ? `${r.name} (${r.email})` : r.email}</span>
+                        <button
+                          onClick={async () => { try { await giinApi.removeRegular(r.email); await loadRegulars(); } catch (err: any) { triggerToast(err?.message || 'Could not remove the regular.'); } }}
+                          style={{ background: 'none', border: 'none', color: '#FCA5A5', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="email"
+                    value={newRegularEmail}
+                    onChange={(e) => setNewRegularEmail(e.target.value)}
+                    placeholder="Email of a regular"
+                    style={{ flex: 1, minWidth: 0, height: '34px', padding: '0 0.6rem', borderRadius: '6px', border: '1px solid #1E293B', backgroundColor: '#0B0F19', color: 'white', fontSize: '0.8rem' }}
+                  />
+                  <button
+                    onClick={handleAddRegular}
+                    disabled={!newRegularEmail.trim()}
+                    style={{ background: 'var(--color-accent)', border: 'none', color: '#07090E', cursor: 'pointer', padding: '0 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700, height: '34px', opacity: newRegularEmail.trim() ? 1 : 0.5 }}
+                  >
+                    Add
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={newRegularName}
+                  onChange={(e) => setNewRegularName(e.target.value)}
+                  maxLength={120}
+                  placeholder="Name (optional)"
+                  style={{ height: '34px', padding: '0 0.6rem', borderRadius: '6px', border: '1px solid #1E293B', backgroundColor: '#0B0F19', color: 'white', fontSize: '0.8rem' }}
+                />
               </div>
 
               <hr style={{ border: 'none', borderBottom: '1px solid #1E293B', margin: 0 }} />
@@ -11975,6 +12337,20 @@ Media encrypted in transit (DTLS-SRTP).`;
                 </span>
               );
             })()}
+            {/* Phase D (37): media encryption state, in plain words. */}
+            {e2eeEnabled && (
+              <span
+                title={e2eeActive
+                  ? 'Audio and video are encrypted between participants with the meeting passcode as the key. Chat, files, names and meeting details are not covered.'
+                  : 'Encryption is on for this meeting, but media on this device is using standard transport encryption only.'}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.5rem', color: e2eeActive ? '#10B981' : '#F59E0B', fontSize: '0.8rem', fontWeight: 600 }}
+              >
+                {e2eeActive ? 'Encrypted media' : 'Encryption on, standard media here'}
+              </span>
+            )}
+            {e2eeWarning && (
+              <span style={{ fontSize: '0.75rem', color: '#FCA5A5', maxWidth: '320px' }}>{e2eeWarning}</span>
+            )}
             {/* Fix Round 8 (Evidence 1): the room retries the video
                 server on its own while on a direct connection, but the
                 host can also force one retry from here. */}

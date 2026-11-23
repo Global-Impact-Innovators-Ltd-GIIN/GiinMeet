@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit, readJsonBody } from '../../_lib/security';
+import { isUserBlocked } from '../../_lib/phaseD';
 
 // Round 9 (9A): reactivate a participant's existing row on rejoin,
 // server-side (the admission lockdown blocks client status writes, so
@@ -92,6 +93,26 @@ export async function POST(req: NextRequest) {
       row = data as any;
     }
     if (!row) return NextResponse.json({ found: false });
+    // Phase D (39): a blocked user cannot reactivate an old row by
+    // rejoining. The meeting host is the blocker; guests (no account)
+    // are covered by the Removed / admit checks instead.
+    if (verifiedUserId) {
+      const { data: hostMeeting } = await admin
+        .from('meetings')
+        .select('admin_id, user_id')
+        .eq('id', meetingId)
+        .maybeSingle();
+      if (hostMeeting) {
+        const { data: callerProfile } = await admin
+          .from('profiles')
+          .select('email')
+          .eq('id', verifiedUserId)
+          .maybeSingle();
+        if (await isUserBlocked(admin, (hostMeeting as any).admin_id || (hostMeeting as any).user_id, verifiedUserId, (callerProfile as any)?.email || null)) {
+          return NextResponse.json({ error: 'BLOCKED', message: 'The host has blocked you from this meeting.' }, { status: 403 });
+        }
+      }
+    }
     if (row.status === 'Removed') {
       return NextResponse.json({ error: 'REMOVED', message: 'You were removed from this meeting by the host.' }, { status: 403 });
     }

@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../../../src/supabaseClient';
 import { tierForProfile, TIER_LIMITS, TIER_LABELS } from '../../../../src/utils/tiers';
 import { checkRateLimit } from '../../_lib/security';
+import { deliverMeetingEvent, isUserBlocked } from '../../_lib/phaseD';
 import { readJsonBody } from '../../_lib/security';
 
 // Server-only Supabase admin client. It uses SUPABASE_SERVICE_ROLE_KEY,
@@ -115,7 +116,7 @@ export async function POST(req: NextRequest) {
     // Fetch the meeting row (admin truth) once.
     const { data: meeting, error: meetingError } = await admin
       .from('meetings')
-      .select('id, admin_id, user_id, require_waiting_room, status')
+      .select('id, admin_id, user_id, require_waiting_room, status, title, time')
       .eq('id', derivedMeetingId)
       .maybeSingle();
 
@@ -252,6 +253,15 @@ export async function POST(req: NextRequest) {
     } /* not suspended */ }
 
       identity = user.id;
+      // Phase D (39): a user the host blocked gets no token, even with
+      // an old admitted row. The admit and rejoin routes check too;
+      // this is the final gate.
+      if (!isHostUser(user.id) && await isUserBlocked(admin, meeting.admin_id || meeting.user_id, user.id, user.email)) {
+        return NextResponse.json({
+          error: 'BLOCKED',
+          message: 'The host has blocked you from this meeting.',
+        }, { status: 403 });
+      }
       if (meetingTeamId && !isHostUser(user.id)) {
         const { data: memberRow } = await admin
           .from('team_members')
@@ -579,6 +589,33 @@ export async function POST(req: NextRequest) {
     });
 
     const token = await at.toJwt();
+
+    // Phase D (42): the first token mint starts the meeting. The
+    // status flips to In Progress once (best-effort, never fails the
+    // mint), and the meeting.started webhook fires for the host.
+    // Breakout tokens never start the main meeting.
+    if (breakoutRoomNumber === null && meeting.status !== 'In Progress' && meeting.status !== 'Completed') {
+      try {
+        // The status guard makes the flip atomic: only the caller
+        // whose update actually moved the row fires the webhook, so
+        // two people joining at once do not send it twice.
+        const { data: flipped } = await admin
+          .from('meetings')
+          .update({ status: 'In Progress' })
+          .eq('id', derivedMeetingId)
+          .eq('status', (meeting as any).status)
+          .select('id');
+        if (flipped && flipped.length > 0) {
+          await deliverMeetingEvent(admin, meeting.admin_id || meeting.user_id, 'meeting.started', {
+            id: derivedMeetingId,
+            title: (meeting as any).title || null,
+            time: (meeting as any).time || null,
+          });
+        }
+      } catch {
+        /* the token is the point; the webhook is best-effort */
+      }
+    }
 
     // One info line per mint (no secrets): lets us confirm in Vercel logs
     // that a real mint happened and which room/role it was for.

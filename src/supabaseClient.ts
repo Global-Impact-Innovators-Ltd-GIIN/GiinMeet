@@ -213,6 +213,37 @@ export async function probeTeamMeetingSupport(): Promise<boolean> {
 export const TEAMS_NOT_SET_UP_MESSAGE =
   'Team workspaces are not set up yet, run giinmeet_phase3_teams.sql in the Supabase SQL Editor first.';
 
+// Phase D, same probe for the meetings.e2ee_enabled column
+// (giinmeet_phaseD.sql). Until it runs, the encryption toggle is
+// hidden and meetings behave exactly as before.
+let e2eeSupportedCache: boolean | null = null;
+export async function probeE2eeSupport(): Promise<boolean> {
+  if (e2eeSupportedCache !== null) return e2eeSupportedCache;
+  try {
+    const { error } = await supabase.from('meetings').select('e2ee_enabled').limit(1);
+    e2eeSupportedCache = !error;
+  } catch (e) {
+    e2eeSupportedCache = false;
+  }
+  return e2eeSupportedCache;
+}
+
+export const PHASED_NOT_SET_UP_MESSAGE =
+  'Phase D is not set up yet, run giinmeet_phaseD.sql in the Supabase SQL Editor first.';
+
+// Phase D, same probe for the meetings.organisation_id column.
+let organisationSupportedCache: boolean | null = null;
+export async function probeOrganisationSupport(): Promise<boolean> {
+  if (organisationSupportedCache !== null) return organisationSupportedCache;
+  try {
+    const { error } = await supabase.from('meetings').select('organisation_id').limit(1);
+    organisationSupportedCache = !error;
+  } catch (e) {
+    organisationSupportedCache = false;
+  }
+  return organisationSupportedCache;
+}
+
 // ---- System settings (Superadmin portal) ---------------------------
 // Public read of the system_settings table (giinmeet_superadmin.sql).
 // Every field falls back to the built-in default when the table or
@@ -285,6 +316,11 @@ export interface Team {
   created_by: string;
   created_at?: string;
   myRole?: 'admin' | 'member' | null;
+  // Phase D (44): team branding and the persistent team room.
+  logo_url?: string | null;
+  accent_color?: string | null;
+  accent_hover?: string | null;
+  room_meeting_id?: string | null;
 }
 
 export interface TeamMember {
@@ -889,7 +925,7 @@ export const giinApi = {
   // best-effort here (it is retried when the meeting is joined); if it
   // fails, a clear warning is logged and the video call will surface the
   // missing room instead of silently dropping to a peer-to-peer call.
-  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null; reminder_enabled?: boolean; reminder_minutes_before?: number; series_id?: string; recurrence_rule?: string; recurrence_count?: number; team_id?: string | null }) => {
+  createMeeting: async (meeting: { user_id: string; title: string; time: string; duration: string; status: string; host: string; require_waiting_room?: boolean; passcode?: string | null; link_expiry_mode?: string; link_expires_at?: string | null; reminder_enabled?: boolean; reminder_minutes_before?: number; series_id?: string; recurrence_rule?: string; recurrence_count?: number; team_id?: string | null; e2ee_enabled?: boolean; organisation_id?: string | null }) => {
     // Generate UUID on the client side to avoid race conditions and mismatches
     const meetingId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -979,6 +1015,31 @@ export const giinApi = {
         payload.team_id = teamId;
       } else {
         throw new Error(TEAMS_NOT_SET_UP_MESSAGE);
+      }
+    }
+
+    // Phase D (37 + 47), same probe pattern: the encryption flag and
+    // the organisation ride in the spread, so strip them and re-add
+    // only when the columns exist. Until giinmeet_phaseD.sql runs, an
+    // encryption choice is kept in localStorage so the dashboard can
+    // still show it, and the meeting is created unencrypted, never
+    // pretending otherwise.
+    delete payload.e2ee_enabled;
+    delete payload.organisation_id;
+    const e2eeEnabled = (meeting as any).e2ee_enabled as boolean | undefined;
+    if (e2eeEnabled) {
+      if (await probeE2eeSupport()) {
+        payload.e2ee_enabled = true;
+      } else {
+        try { localStorage.setItem(`giin_e2ee_${meetingId}`, 'true'); } catch (e) {}
+      }
+    }
+    const organisationId = (meeting as any).organisation_id as string | undefined;
+    if (organisationId) {
+      if (await probeOrganisationSupport()) {
+        payload.organisation_id = organisationId;
+      } else {
+        throw new Error(PHASED_NOT_SET_UP_MESSAGE);
       }
     }
 
@@ -2056,6 +2117,231 @@ export const giinApi = {
     return (data.passcode as string | null) ?? null;
   },
 
+  // ---- Phase D --------------------------------------------------------
+  // All Phase D calls go through the server routes below, which
+  // re-verify the session and the role server-side. A route that
+  // answers ok:false with reason NOT_CONFIGURED means
+  // giinmeet_phaseD.sql has not run yet, and the caller says so
+  // plainly instead of pretending the feature worked.
+  phaseDCall: async (path: string, body: Record<string, unknown>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, accessToken: session?.access_token || undefined }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'That did not work. Please try again.');
+    }
+    return data;
+  },
+
+  // Phase D (37), meeting encryption: read the flag, or set it (host
+  // only). participantRowId lets an admitted guest read it too.
+  getE2eeStatus: async (meetingId: string) => {
+    let participantRowId: string | null = null;
+    try { participantRowId = localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { /* storage unavailable */ }
+    const data = await giinApi.phaseDCall('/api/meetings/e2ee', {
+      action: 'get', meetingId, participantRowId: participantRowId || undefined,
+    });
+    return data as { ok: boolean; enabled: boolean; coverage: string };
+  },
+  setE2eeEnabled: async (meetingId: string, enabled: boolean) => {
+    const data = await giinApi.phaseDCall('/api/meetings/e2ee', {
+      action: 'set', meetingId, enabled,
+    });
+    return data as { ok: boolean; enabled: boolean; coverage: string };
+  },
+
+  // Phase D (38), waiting room: preview (agenda, countdown source,
+  // brand), knock, lobby message, admit-all, regular check.
+  getWaitingRoomPreview: async (meetingId: string) => {
+    const res = await fetch('/api/meetings/waiting-room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'preview', meetingId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not load the waiting room.');
+    }
+    return data as {
+      ok: boolean; title: string; time: string | null; status: string | null;
+      agenda: { id: string; text: string; startTime?: string; endTime?: string; durationMinutes?: number }[];
+      e2eeEnabled: boolean; requireWaitingRoom: boolean;
+      brand: { name: string; logoUrl: string | null; accent: string | null; slogan: string | null } | null;
+    };
+  },
+  knockWaitingRoom: async (meetingId: string, participantRowId: string, message: string) => {
+    const res = await fetch('/api/meetings/waiting-room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'knock', meetingId, participantRowId, message }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not send your knock.');
+    }
+    return data;
+  },
+  messageLobbyGuest: async (meetingId: string, participantRowId: string, message: string) => {
+    return giinApi.phaseDCall('/api/meetings/waiting-room', {
+      action: 'message', meetingId, participantRowId, message,
+    });
+  },
+  admitAllWaiting: async (meetingId: string) => {
+    const data = await giinApi.phaseDCall('/api/meetings/waiting-room', {
+      action: 'admit-all', meetingId,
+    });
+    return data as { ok: boolean; admitted: number; waitingLeft: number; full: boolean };
+  },
+  checkRegularBypass: async (meetingId: string) => {
+    try {
+      const data = await giinApi.phaseDCall('/api/meetings/waiting-room', {
+        action: 'check-regular', meetingId,
+      });
+      return !!(data as any).regular;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  // Phase D (38), regulars: the host's own bypass list.
+  getRegulars: async () => {
+    const data = await giinApi.phaseDCall('/api/meetings/regulars', { action: 'list' });
+    return ((data as any).regulars || []) as { id: string; email: string; name: string | null; created_at: string }[];
+  },
+  addRegular: async (email: string, name?: string) => {
+    return giinApi.phaseDCall('/api/meetings/regulars', { action: 'add', email, name });
+  },
+  removeRegular: async (email: string) => {
+    return giinApi.phaseDCall('/api/meetings/regulars', { action: 'remove', email });
+  },
+
+  // Phase D (39), blocking: the signed-in user's own block list.
+  getBlocks: async () => {
+    const data = await giinApi.phaseDCall('/api/meetings/block', { action: 'list' });
+    return ((data as any).blocks || []) as { id: string; blocked_user_id: string | null; blocked_email: string | null; reason: string | null; created_at: string }[];
+  },
+  blockUser: async (email: string, reason?: string) => {
+    return giinApi.phaseDCall('/api/meetings/block', { action: 'block', email, reason });
+  },
+  blockUserById: async (userId: string, reason?: string) => {
+    return giinApi.phaseDCall('/api/meetings/block', { action: 'block', userId, reason });
+  },
+  unblockUser: async (email: string) => {
+    return giinApi.phaseDCall('/api/meetings/block', { action: 'unblock', email });
+  },
+
+  // Phase D (39), report a meeting to the superadmin.
+  reportMeeting: async (meetingId: string, reason: string, detail?: string, reporterEmail?: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch('/api/meetings/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, reason, detail, accessToken: session?.access_token || undefined, reporterEmail }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not send the report.');
+    }
+    return data;
+  },
+
+  // Phase D (46), one-tap feedback after a meeting, and the host
+  // summary of a meeting's feedback.
+  submitFeedback: async (meetingId: string, rating: number, comment?: string, guestName?: string) => {
+    let participantRowId: string | null = null;
+    try { participantRowId = localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { /* storage unavailable */ }
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch('/api/meetings/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'submit', meetingId, rating, comment, guestName, accessToken: session?.access_token || undefined, participantRowId: participantRowId || undefined }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not save your rating.');
+    }
+    return data;
+  },
+  getFeedbackSummary: async (meetingId: string) => {
+    const data = await giinApi.phaseDCall('/api/meetings/feedback', { action: 'summary', meetingId });
+    return data as { ok: boolean; count: number; average: number | null; distribution: number[]; comments: { comment: string; guestName: string | null; createdAt: string }[] };
+  },
+
+  // Phase D (47 + 41), organisations: create, list mine, public
+  // brand, update brand, members.
+  getMyOrganisations: async () => {
+    try {
+      const data = await giinApi.phaseDCall('/api/organisations', { action: 'mine' });
+      return ((data as any).organisations || []) as { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; accentHover: string | null; slogan: string | null; role: string }[];
+    } catch (e) {
+      return [];
+    }
+  },
+  createOrganisation: async (name: string, slug: string) => {
+    const data = await giinApi.phaseDCall('/api/organisations', { action: 'create', name, slug });
+    return (data as any).organisation;
+  },
+  updateOrganisationBrand: async (orgId: string, brand: { name?: string; logoUrl?: string | null; accentColor?: string; accentHover?: string; slogan?: string | null }) => {
+    const data = await giinApi.phaseDCall('/api/organisations', { action: 'update-brand', orgId, ...brand });
+    return (data as any).organisation;
+  },
+
+  // Phase D (41, 47): organisation members, roles per organisation.
+  // Listing and adding are admin-only, enforced server-side.
+  getOrganisationMembers: async (orgId: string) => {
+    try {
+      const data = await giinApi.phaseDCall('/api/organisations', { action: 'members', orgId });
+      return ((data as any).members || []) as { userId: string; email: string | null; role: string; joinedAt: string }[];
+    } catch (e) {
+      return [];
+    }
+  },
+  addOrganisationMember: async (orgId: string, email: string, role: 'admin' | 'member') => {
+    await giinApi.phaseDCall('/api/organisations', { action: 'add-member', orgId, email, role });
+  },
+
+  // Phase D (44), team room (one-tap persistent room) and team brand.
+  getOrCreateTeamRoom: async (teamId: string) => {
+    const data = await giinApi.phaseDCall('/api/teams/room', { action: 'get-or-create', teamId });
+    return data as { ok: boolean; meetingId: string; title: string; created: boolean };
+  },
+  updateTeamBrand: async (teamId: string, brand: { logoUrl?: string | null; accentColor?: string; accentHover?: string }) => {
+    const data = await giinApi.phaseDCall('/api/teams/room', { action: 'brand', teamId, ...brand });
+    return (data as any).team;
+  },
+
+  // Phase D (42), API keys and webhooks (Developer panel).
+  getApiKeys: async () => {
+    const data = await giinApi.phaseDCall('/api/public-api/keys', { action: 'list' });
+    return ((data as any).keys || []) as { id: string; name: string; key_prefix: string; created_at: string; last_used_at: string | null; revoked_at: string | null }[];
+  },
+  createApiKey: async (name: string) => {
+    const data = await giinApi.phaseDCall('/api/public-api/keys', { action: 'create', name });
+    return data as { ok: boolean; key: string; record: { id: string; name: string; key_prefix: string; created_at: string } };
+  },
+  revokeApiKey: async (keyId: string) => {
+    return giinApi.phaseDCall('/api/public-api/keys', { action: 'revoke', keyId });
+  },
+  getWebhooks: async () => {
+    const data = await giinApi.phaseDCall('/api/public-api/webhooks', { action: 'list' });
+    return ((data as any).webhooks || []) as { id: string; url: string; events: string[]; active: boolean; created_at: string }[];
+  },
+  createWebhook: async (url: string, events?: string[]) => {
+    const data = await giinApi.phaseDCall('/api/public-api/webhooks', { action: 'create', url, events });
+    return data as { ok: boolean; secret: string; webhook: { id: string; url: string; events: string[]; active: boolean; created_at: string } };
+  },
+  deleteWebhook: async (webhookId: string) => {
+    return giinApi.phaseDCall('/api/public-api/webhooks', { action: 'delete', webhookId });
+  },
+  getWebhookDeliveries: async (webhookId: string) => {
+    const data = await giinApi.phaseDCall('/api/public-api/webhooks', { action: 'deliveries', webhookId });
+    return ((data as any).deliveries || []) as { id: string; meeting_id: string | null; event: string; status_code: number | null; ok: boolean; attempted_at: string }[];
+  },
+
   // Send a password-reset email (Supabase). The user gets a link; the
   // reset itself happens on the recovery screen in Auth.tsx. Email
   // delivery depends on Supabase SMTP being configured in the dashboard.
@@ -2784,11 +3070,23 @@ export const giinApi = {
         .eq('user_id', user.id);
       if (mErr || !memberships || memberships.length === 0) return [];
       const roleByTeam = new Map((memberships as any[]).map((m: any) => [m.team_id, m.role]));
-      const { data: teams, error: tErr } = await supabase
+      // Phase D (44): team branding columns ride along when
+      // giinmeet_phaseD.sql has run; a missing column must never
+      // break the whole team list, so fall back to the old columns.
+      let { data: teams, error: tErr } = await supabase
         .from('teams')
-        .select('id,name,created_by,created_at')
+        .select('id,name,created_by,created_at,logo_url,accent_color,accent_hover,room_meeting_id')
         .in('id', [...roleByTeam.keys()])
         .order('created_at', { ascending: true });
+      if (tErr) {
+        const retry = await supabase
+          .from('teams')
+          .select('id,name,created_by,created_at')
+          .in('id', [...roleByTeam.keys()])
+          .order('created_at', { ascending: true });
+        teams = retry.data;
+        tErr = retry.error;
+      }
       if (tErr || !teams) return [];
       return (teams as any[]).map((t: any) => ({ ...t, myRole: roleByTeam.get(t.id) ?? null }));
     } catch (e) {

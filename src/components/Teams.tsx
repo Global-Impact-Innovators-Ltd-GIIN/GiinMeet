@@ -59,6 +59,11 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'error' | 'ok'; text: string } | null>(null);
 
+  // Phase D (44): team branding drafts + the one-tap team room.
+  const [brandLogoUrl, setBrandLogoUrl] = useState('');
+  const [brandAccent, setBrandAccent] = useState('#3B82F6');
+  const [roomBusy, setRoomBusy] = useState(false);
+
   const [createName, setCreateName] = useState('');
   const [addEmail, setAddEmail] = useState('');
   const [schedTitle, setSchedTitle] = useState('');
@@ -81,6 +86,39 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
     }
     return list;
   }, [selectedTeamId]);
+
+  // Phase D (44): open the team's persistent room in one tap.
+  const openTeamRoom = async () => {
+    if (!selectedTeam || roomBusy) return;
+    setRoomBusy(true);
+    setNotice(null);
+    try {
+      const room = await giinApi.getOrCreateTeamRoom(selectedTeam.id);
+      onStartMeeting(room.title, undefined, true, room.meetingId);
+    } catch (e: any) {
+      setNotice({ kind: 'error', text: e?.message || 'Could not open the team room.' });
+    } finally {
+      setRoomBusy(false);
+    }
+  };
+
+  const saveTeamBrand = async () => {
+    if (!selectedTeam) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      await giinApi.updateTeamBrand(selectedTeam.id, {
+        logoUrl: brandLogoUrl.trim() || null,
+        accentColor: brandAccent.trim() || undefined,
+      });
+      await loadTeams();
+      setNotice({ kind: 'ok', text: 'Team brand saved. The waiting room and the room carry it now.' });
+    } catch (e: any) {
+      setNotice({ kind: 'error', text: e?.message || 'Could not save the team brand.' });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const loadTeamDetail = useCallback(async (teamId: string) => {
     const [mem, set, meets] = await Promise.all([
@@ -117,6 +155,11 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
     else { setMembers([]); setSettings(null); setTeamMeetings([]); }
   }, [selectedTeamId, loadTeamDetail]);
 
+  useEffect(() => {
+    setBrandLogoUrl(selectedTeam?.logo_url || '');
+    setBrandAccent(selectedTeam?.accent_color || '#3B82F6');
+  }, [selectedTeamId, selectedTeam?.logo_url, selectedTeam?.accent_color]);
+
   const fail = (e: any, fallback: string) => {
     setNotice({ kind: 'error', text: e?.message || fallback });
   };
@@ -132,7 +175,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
       const list = await loadTeams();
       setSelectedTeamId(team.id);
       if (!list.some((t) => t.id === team.id)) setTeams((prev) => [...prev, team]);
-      setNotice({ kind: 'ok', text: `Team “${team.name}” created — you are its admin.` });
+      setNotice({ kind: 'ok', text: `Team “${team.name}” created, you are its admin.` });
     } catch (err: any) {
       fail(err, 'Could not create the team.');
     } finally {
@@ -214,7 +257,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
     try {
       const next = await giinApi.updateTeamSettings(selectedTeam.id, patch);
       setSettings(next);
-      setNotice({ kind: 'ok', text: 'Team settings saved — they apply to meetings scheduled from now on.' });
+      setNotice({ kind: 'ok', text: 'Team settings saved, they apply to meetings scheduled from now on.' });
     } catch (err: any) {
       fail(err, 'Could not save the team settings.');
     } finally {
@@ -240,7 +283,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
         setSchedTime('');
         setSchedPasscode('');
         await loadTeamDetail(selectedTeam.id);
-        setNotice({ kind: 'ok', text: `Team meeting scheduled — every member of “${selectedTeam.name}” can see it on their dashboard.` });
+        setNotice({ kind: 'ok', text: `Team meeting scheduled, every member of “${selectedTeam.name}” can see it on their dashboard.` });
       }
     } catch (err: any) {
       fail(err, 'Could not schedule the team meeting.');
@@ -264,7 +307,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
           <Users size={22} /> Team Workspaces
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-          Shared spaces for a team — its members, its meetings, and its settings. Team meetings use the same video call as a personal meeting; only team members can see or join them.
+          Shared spaces for a team, its members, its meetings, and its settings. Team meetings use the same video call as a personal meeting; only team members can see or join them.
         </p>
       </div>
 
@@ -274,7 +317,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
             <AlertCircle size={16} color="var(--color-accent)" /> {TEAMS_NOT_SET_UP_MESSAGE}
           </p>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-            The Teams view is ready, but the database tables do not exist yet — so no team can be created or listed until then. Nothing here is faked.
+            The Teams view is ready, but the database tables do not exist yet, so no team can be created or listed until then. Nothing here is faked.
           </p>
         </div>
       )}
@@ -291,7 +334,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
         <form onSubmit={handleCreateTeam} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <input
             className="premium-input"
-            placeholder="Team name — e.g. GIIN Engineering"
+            placeholder="Team name, e.g. GIIN Engineering"
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
             disabled={supported === false || busy}
@@ -360,6 +403,25 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                   You are {isAdmin ? 'an admin' : 'a member'} of this team{isCreator ? ' (you created it)' : ''}. {members.length} member{members.length === 1 ? '' : 's'}.
                 </p>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem', alignItems: 'center' }}>
+                  {selectedTeam.logo_url && (
+                    <img src={selectedTeam.logo_url} alt={`${selectedTeam.name} logo`} style={{ width: '32px', height: '32px', objectFit: 'contain', borderRadius: '6px' }} />
+                  )}
+                  <button
+                    type="button"
+                    className="premium-btn premium-btn-primary"
+                    style={{ padding: '0.55rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    disabled={busy || roomBusy}
+                    onClick={() => void openTeamRoom()}
+                    title="Join the team's own room, no scheduling needed"
+                  >
+                    <Play size={15} /> {roomBusy ? 'Opening room...' : 'Open team room'}
+                  </button>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>One tap, the whole team joins the same room.</span>
+                </div>
+                {notice && (
+                  <p style={{ fontSize: '0.85rem', marginTop: '0.75rem', color: notice.kind === 'error' ? '#FCA5A5' : '#6EE7B7' }}>{notice.text}</p>
+                )}
 
                 {/* Members */}
                 <h4 style={{ fontSize: '0.95rem', marginTop: '1.25rem', marginBottom: '0.5rem' }}>Members</h4>
@@ -403,7 +465,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                       </button>
                     </div>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      They must already have a GiinMeet account — if the email has no account, you will be told so instead of the invite vanishing.
+                      They must already have a GiinMeet account, if the email has no account, you will be told so instead of the invite vanishing.
                       {contacts.length > 0 && ' Or pick a contact:'}
                     </p>
                     {contacts.length > 0 && (
@@ -468,6 +530,42 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                 ) : (
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Settings could not be loaded.</p>
                 )}
+                {/* Phase D (44): team branding, admin only. */}
+                {isAdmin && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '560px', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                    <h4 style={{ fontSize: '0.95rem', margin: 0 }}>Team branding</h4>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
+                      The team's logo and colour show in the waiting room and in the room, so guests see the team, not just GiinMeet.
+                    </p>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>
+                      Logo URL
+                      <input
+                        className="premium-input"
+                        type="url"
+                        value={brandLogoUrl}
+                        onChange={(e) => setBrandLogoUrl(e.target.value)}
+                        disabled={busy}
+                        placeholder="https://.../team-logo.png"
+                        style={{ height: '44px' }}
+                      />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>
+                      Accent colour
+                      <input
+                        type="color"
+                        value={/^#[0-9a-fA-F]{6}$/.test(brandAccent) ? brandAccent : '#3B82F6'}
+                        onChange={(e) => setBrandAccent(e.target.value)}
+                        disabled={busy}
+                        style={{ width: '56px', height: '36px', padding: 0, border: '1px solid var(--border-color)', borderRadius: '6px', background: 'none', cursor: 'pointer' }}
+                      />
+                    </label>
+                    <div>
+                      <button type="button" className="premium-btn premium-btn-primary" disabled={busy} onClick={() => void saveTeamBrand()} style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}>
+                        Save team brand
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Schedule a team meeting */}
@@ -517,7 +615,7 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                       />
                     )}
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      Uses the team's defaults — waiting room {settings?.default_require_waiting_room ? 'on' : 'off'}, duration {settings?.default_duration || '40m limit'}. Every member sees it on their dashboard.
+                      Uses the team's defaults, waiting room {settings?.default_require_waiting_room ? 'on' : 'off'}, duration {settings?.default_duration || '40m limit'}. Every member sees it on their dashboard.
                     </p>
                     <div>
                       <button type="submit" className="premium-btn premium-btn-primary" disabled={busy || !schedTitle.trim() || !schedTime} style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -528,37 +626,56 @@ export const Teams: React.FC<TeamsProps> = ({ user, onStartMeeting, onScheduleTe
                 )}
               </div>
 
-              {/* Team meetings */}
+              {/* Team meetings: upcoming and live first, then the
+                  per-team history of past meetings (Phase D, 44). */}
               <div className="glass-panel" style={{ padding: '1.25rem' }}>
                 <h4 style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>Team meetings ({teamMeetings.length})</h4>
                 {teamMeetings.length === 0 ? (
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No meetings in this team yet — schedule one above.</p>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No meetings in this team yet, schedule one above.</p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {teamMeetings.map((m: any) => (
-                      <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
-                        <div style={{ width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: m.status === 'In Progress' ? 'rgba(16, 185, 129, 0.15)' : m.status === 'Scheduled' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(100, 116, 139, 0.1)' }}>
-                          {m.status === 'Completed' ? <CheckCircle2 size={18} color="#64748B" /> : m.status === 'In Progress' ? <Play size={16} style={{ color: '#10B981' }} /> : <Clock size={18} color="#3B82F6" />}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.9rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {(() => { try { return new Date(m.time).toLocaleString(); } catch (e) { return m.time; } })()} &bull; {m.duration} &bull; Host: {m.host || '—'}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    {(() => {
+                      const past = teamMeetings.filter((m: any) => m.status === 'Completed');
+                      const upcoming = teamMeetings.filter((m: any) => m.status !== 'Completed');
+                      const row = (m: any) => (
+                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card)' }}>
+                          <div style={{ width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: m.status === 'In Progress' ? 'rgba(16, 185, 129, 0.15)' : m.status === 'Scheduled' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(100, 116, 139, 0.1)' }}>
+                            {m.status === 'Completed' ? <CheckCircle2 size={18} color="#64748B" /> : m.status === 'In Progress' ? <Play size={16} style={{ color: '#10B981' }} /> : <Clock size={18} color="#3B82F6" />}
                           </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '0.9rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              {(() => { try { return new Date(m.time).toLocaleString(); } catch (e) { return m.time; } })()} &bull; {m.duration} &bull; Host: {m.host || '-'}
+                            </div>
+                          </div>
+                          <span className={`badge ${m.status === 'Completed' ? 'badge-success' : m.status === 'In Progress' ? 'badge-premium' : 'badge-info'}`}>{m.status}</span>
+                          {m.status !== 'Completed' && (
+                            <button
+                              type="button"
+                              className="premium-btn premium-btn-accent"
+                              style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', borderRadius: '4px' }}
+                              onClick={() => onStartMeeting(m.title, undefined, true, m.id)}
+                            >
+                              {m.status === 'In Progress' ? 'Join Now' : 'Join'}
+                            </button>
+                          )}
                         </div>
-                        <span className={`badge ${m.status === 'Completed' ? 'badge-success' : m.status === 'In Progress' ? 'badge-premium' : 'badge-info'}`}>{m.status}</span>
-                        {m.status !== 'Completed' && (
-                          <button
-                            type="button"
-                            className="premium-btn premium-btn-accent"
-                            style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', borderRadius: '4px' }}
-                            onClick={() => onStartMeeting(m.title, undefined, true, m.id)}
-                          >
-                            {m.status === 'In Progress' ? 'Join Now' : 'Join'}
-                          </button>
+                      );
+                      return (<>
+                        {upcoming.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Upcoming and live ({upcoming.length})</span>
+                            {upcoming.map(row)}
+                          </div>
                         )}
-                      </div>
-                    ))}
+                        {past.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Meeting history ({past.length})</span>
+                            {past.map(row)}
+                          </div>
+                        )}
+                      </>);
+                    })()}
                   </div>
                 )}
               </div>

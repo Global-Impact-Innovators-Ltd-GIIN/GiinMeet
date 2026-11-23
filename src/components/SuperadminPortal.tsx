@@ -4,6 +4,7 @@ import {
   Search, Wrench, ScrollText, CheckCircle2, XCircle, AlertTriangle,
   LogOut, ArrowLeft, RefreshCw, Eye, EyeOff, Copy, Ban, UserCheck,
   KeyRound, Trash2, PhoneOff, Database, Cloud, Mail, Server, FileWarning,
+  BarChart3,
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { tierForProfile, TIER_LABELS, type PlanTier } from '../utils/tiers';
@@ -24,7 +25,7 @@ import { applyAccentColor, applyUiStyle, applyGlassOpacity, applyFont } from '..
 // ============================================================================
 
 type Section =
-  | 'overview' | 'users' | 'meetings' | 'config' | 'monitoring' | 'troubleshooting' | 'audit' | 'setup';
+  | 'overview' | 'users' | 'meetings' | 'config' | 'monitoring' | 'analytics' | 'reports' | 'troubleshooting' | 'audit' | 'setup';
 
 const NAV: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <Activity size={18} /> },
@@ -32,6 +33,8 @@ const NAV: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: 'meetings', label: 'Meetings', icon: <Video size={18} /> },
   { id: 'config', label: 'Configuration', icon: <SettingsIcon size={18} /> },
   { id: 'monitoring', label: 'Monitoring', icon: <Activity size={18} /> },
+  { id: 'analytics', label: 'Analytics', icon: <BarChart3 size={18} /> },
+  { id: 'reports', label: 'Reports', icon: <FileWarning size={18} /> },
   { id: 'troubleshooting', label: 'Troubleshooting', icon: <Wrench size={18} /> },
   { id: 'audit', label: 'Audit Log', icon: <ScrollText size={18} /> },
   { id: 'setup', label: 'Setup', icon: <Server size={18} /> },
@@ -67,7 +70,7 @@ function formatBytes(bytes: number): string {
 }
 
 function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
+  if (!iso) return '-';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
   return d.toLocaleString();
@@ -172,7 +175,7 @@ export const SuperadminPortal: React.FC = () => {
         localStorage.getItem('giin_font_body') || 'Inter'
       );
     } catch (e) {
-      /* theme is cosmetic — the portal works without it */
+      /* theme is cosmetic, the portal works without it */
     }
   }, []);
 
@@ -189,7 +192,7 @@ export const SuperadminPortal: React.FC = () => {
   const callAdmin = useCallback(
     async (path: string, body: Record<string, unknown> = {}): Promise<any> => {
       const token = await getToken();
-      if (!token) throw new Error('Your session has expired — sign in again.');
+      if (!token) throw new Error('Your session has expired, sign in again.');
       const res = await fetch(`/api/superadmin/${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -297,7 +300,7 @@ export const SuperadminPortal: React.FC = () => {
     setGateError('');
     setSigningIn(true);
     try {
-      try { sessionStorage.setItem('giin_superadmin_oauth_return', '1'); } catch (e) { /* storage unavailable — the primary redirect still works */ }
+      try { sessionStorage.setItem('giin_superadmin_oauth_return', '1'); } catch (e) { /* storage unavailable, the primary redirect still works */ }
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -314,7 +317,7 @@ export const SuperadminPortal: React.FC = () => {
       console.error('[Superadmin] Google sign-in failed:', err);
       try { sessionStorage.removeItem('giin_superadmin_oauth_return'); } catch (e) { /* ignore */ }
       setGateError(
-        err?.message || 'Google sign-in failed. Google may not be enabled for this project yet — use email sign-in instead.'
+        err?.message || 'Google sign-in failed. Google may not be enabled for this project yet, use email sign-in instead.'
       );
       setSigningIn(false);
     }
@@ -572,6 +575,8 @@ function PortalBody({ section, callAdmin, showToast, adminEmail }: {
     case 'meetings': return <MeetingsSection callAdmin={callAdmin} showToast={showToast} />;
     case 'config': return <ConfigSection callAdmin={callAdmin} showToast={showToast} />;
     case 'monitoring': return <MonitoringSection callAdmin={callAdmin} />;
+    case 'analytics': return <AnalyticsSection callAdmin={callAdmin} />;
+    case 'reports': return <ReportsSection callAdmin={callAdmin} showToast={showToast} />;
     case 'troubleshooting': return <TroubleshootingSection callAdmin={callAdmin} showToast={showToast} />;
     case 'audit': return <AuditSection callAdmin={callAdmin} />;
     case 'setup': return <SetupSection callAdmin={callAdmin} />;
@@ -606,10 +611,10 @@ function OverviewSection({ callAdmin }: { callAdmin: (path: string, body?: Recor
   const setup = data?.setup || {};
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <SectionTitle title="Overview" sub="The whole system at a glance — every number below is live." onRefresh={load} refreshing={loading} />
+      <SectionTitle title="Overview" sub="The whole system at a glance, every number below is live." onRefresh={load} refreshing={loading} />
       {!setup?.superadminSql?.ok && (
         <Notice kind="warn">
-          <strong>Setup incomplete:</strong> {setup?.superadminSql?.detail || 'giinmeet_superadmin.sql has not run yet.'} Until it runs, settings, the audit log and suspension are unavailable — the rest of this portal still works.
+          <strong>Setup incomplete:</strong> {setup?.superadminSql?.detail || 'giinmeet_superadmin.sql has not run yet.'} Until it runs, settings, the audit log and suspension are unavailable, the rest of this portal still works.
         </Notice>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
@@ -619,7 +624,7 @@ function OverviewSection({ callAdmin }: { callAdmin: (path: string, body?: Recor
         <StatCard label="Total meetings" value={String(s.totalMeetings ?? 0)} icon={<Video size={22} />} />
         <StatCard
           label="Participant-minutes this month"
-          value={s.participantMinutesThisMonth === null ? '—' : String(s.participantMinutesThisMonth)}
+          value={s.participantMinutesThisMonth === null ? '-' : String(s.participantMinutesThisMonth)}
           sub="Approximate, from room allocations"
           icon={<Activity size={22} />}
         />
@@ -641,7 +646,7 @@ function OverviewSection({ callAdmin }: { callAdmin: (path: string, body?: Recor
               {data.liveMeetingRows.map((m: any) => (
                 <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.9rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
                   <span style={{ fontWeight: 600 }}>{m.title}</span>
-                  <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{m.host || '—'} · {formatDateTime(m.time)}</span>
+                  <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{m.host || '-'} · {formatDateTime(m.time)}</span>
                 </div>
               ))}
             </div>
@@ -684,7 +689,7 @@ function OverviewSection({ callAdmin }: { callAdmin: (path: string, body?: Recor
           <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Recent superadmin activity</h3>
           {(data?.recentAudit || []).length === 0 ? (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>
-              {setup?.superadminSql?.ok ? 'No superadmin actions recorded yet.' : 'The audit log is not set up yet — run giinmeet_superadmin.sql.'}
+              {setup?.superadminSql?.ok ? 'No superadmin actions recorded yet.' : 'The audit log is not set up yet, run giinmeet_superadmin.sql.'}
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
@@ -784,7 +789,7 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
           <span>
             <strong>One-time temporary password for {tempPassword.email}:</strong>{' '}
             <code style={{ fontSize: '1rem', fontWeight: 700 }}>{tempPassword.password}</code>
-            {' '}— copy it now and share it with the user. It is shown once and never stored.
+            {' '}copy it now and share it with the user. It is shown once and never stored.
             <button
               onClick={() => { try { navigator.clipboard.writeText(tempPassword.password); showToast('Copied.'); } catch (e) { /* clipboard unavailable */ } }}
               style={{ ...btnGhost, marginLeft: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
@@ -828,7 +833,7 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
                     <tr key={u.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                       <td style={{ padding: '0.8rem 0.5rem' }}>
                         <div style={{ fontWeight: 700 }}>{u.name || 'Unnamed user'}</div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', wordBreak: 'break-all' }}>{u.email || '—'}</div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', wordBreak: 'break-all' }}>{u.email || '-'}</div>
                         <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{u.workspace_name || ''}</div>
                       </td>
                       <td style={{ padding: '0.8rem 0.5rem' }}>
@@ -856,13 +861,13 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
                       </td>
                       <td style={{ padding: '0.8rem 0.5rem' }}>
                         {u.is_suspended ? (
-                          <span style={{ color: '#DC2626', fontWeight: 700, fontSize: '0.85rem' }}>Suspended{u.suspended_reason ? ` — ${u.suspended_reason}` : ''}</span>
+                          <span style={{ color: '#DC2626', fontWeight: 700, fontSize: '0.85rem' }}>Suspended{u.suspended_reason ? `, ${u.suspended_reason}` : ''}</span>
                         ) : (
                           <span style={{ color: '#15803D', fontWeight: 600, fontSize: '0.85rem' }}>Active</span>
                         )}
                       </td>
                       <td style={{ padding: '0.8rem 0.5rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
+                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}
                         <div style={{ fontSize: '0.78rem' }}>Last sign-in: {u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleDateString() : 'never'}</div>
                       </td>
                       <td style={{ padding: '0.8rem 0.5rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -891,7 +896,7 @@ function UsersSection({ callAdmin, showToast, adminEmail }: {
         )}
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
-        There is no payment processor connected yet — tiers are assigned manually here, never automatically. Enterprise is assigned this way.
+        There is no payment processor connected yet, tiers are assigned manually here, never automatically. Enterprise is assigned this way.
       </p>
     </div>
   );
@@ -1005,7 +1010,7 @@ function MeetingsSection({ callAdmin, showToast }: {
                 {visible.map((m) => (
                   <tr key={m.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                     <td style={{ padding: '0.8rem 0.5rem', fontWeight: 600 }}>{m.title}</td>
-                    <td style={{ padding: '0.8rem 0.5rem' }}>{m.host_name || m.host || '—'}</td>
+                    <td style={{ padding: '0.8rem 0.5rem' }}>{m.host_name || m.host || '-'}</td>
                     <td style={{ padding: '0.8rem 0.5rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                       {formatDateTime(m.time)}
                       <div style={{ fontSize: '0.78rem' }}>{m.duration || ''}</div>
@@ -1029,7 +1034,7 @@ function MeetingsSection({ callAdmin, showToast }: {
                         onClick={() => act(m, 'delete')}
                         disabled={busyId === m.id || !isDeletable(m)}
                         style={btnGhost}
-                        title={isDeletable(m) ? 'Delete from history (soft delete, audited)' : 'Only completed meetings and expired scheduled meetings can be deleted — end a live meeting first, or cancel an upcoming one.'}
+                        title={isDeletable(m) ? 'Delete from history (soft delete, audited)' : 'Only completed meetings and expired scheduled meetings can be deleted, end a live meeting first, or cancel an upcoming one.'}
                       >
                         <Trash2 size={14} /> Delete
                       </button>
@@ -1123,7 +1128,7 @@ function ConfigSection({ callAdmin, showToast }: {
         delete next[key];
         return next;
       });
-      showToast('Setting cleared — the built-in default applies again.');
+      showToast('Setting cleared, the built-in default applies again.');
     } catch (e: any) {
       window.alert(e?.message || 'Could not clear the setting.');
     } finally {
@@ -1136,7 +1141,7 @@ function ConfigSection({ callAdmin, showToast }: {
     try {
       await callAdmin('brand', { action: 'set', brand: b });
       setBrand(b);
-      showToast('Brand saved — every user sees it on their next load.');
+      showToast('Brand saved, every user sees it on their next load.');
     } catch (e: any) {
       window.alert(e?.message || 'Could not save the brand.');
     } finally {
@@ -1177,7 +1182,7 @@ function ConfigSection({ callAdmin, showToast }: {
       <SectionTitle title="Configuration" sub="System-wide settings. Every change is written to the audit log." onRefresh={load} refreshing={loading} />
       {notSetUp && (
         <Notice kind="warn">
-          System settings are not set up yet — run <strong>giinmeet_superadmin.sql</strong> in the Supabase SQL Editor once. Until then these controls show the built-in defaults and cannot be saved.
+          System settings are not set up yet, run <strong>giinmeet_superadmin.sql</strong> in the Supabase SQL Editor once. Until then these controls show the built-in defaults and cannot be saved.
         </Notice>
       )}
 
@@ -1215,7 +1220,7 @@ function ConfigSection({ callAdmin, showToast }: {
         </div>
       </ConfigGroup>
 
-      <ConfigGroup title="Security" sub="Who can do what in meetings — enforced by the app and the video server.">
+      <ConfigGroup title="Security" sub="Who can do what in meetings, enforced by the app and the video server.">
         {/* Feature flags */}
         <div style={cardStyle}>
           <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Guest chat</h3>
@@ -1232,8 +1237,8 @@ function ConfigSection({ callAdmin, showToast }: {
               <strong>Guests may send chat</strong>
               <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.2rem' }}>
                 {guestsCanChat
-                  ? 'ON — guests without an account can send messages in a meeting.'
-                  : 'OFF — guests can read chat but cannot send messages (today’s behaviour). Turn it on to let guests write.'}
+                  ? 'ON, guests without an account can send messages in a meeting.'
+                  : 'OFF, guests can read chat but cannot send messages (today’s behaviour). Turn it on to let guests write.'}
               </span>
             </span>
           </label>
@@ -1255,21 +1260,21 @@ function ConfigSection({ callAdmin, showToast }: {
               <strong>Waiting room on for new meetings</strong>
               <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.2rem' }}>
                 {waitingRoomDefault
-                  ? 'ON — guests wait to be admitted. The host can still switch it off per meeting.'
-                  : 'OFF — guests join new meetings directly. The host can still switch the waiting room on per meeting.'}
+                  ? 'ON, guests wait to be admitted. The host can still switch it off per meeting.'
+                  : 'OFF, guests join new meetings directly. The host can still switch the waiting room on per meeting.'}
               </span>
             </span>
           </label>
         </div>
       </ConfigGroup>
 
-      <ConfigGroup title="Branding" sub="What every user sees — the shared brand, and the defaults a brand-new workspace starts with.">
+      <ConfigGroup title="Branding" sub="What every user sees, the shared brand, and the defaults a brand-new workspace starts with.">
         {/* Shared workspace brand */}
         <div style={cardStyle}>
           <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.25rem' }}>Shared workspace brand</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>The name, slogan, logo and accent every user sees — on the sign-in screen, in meetings and in the app header. Saved to the shared brand; the app loads it on start.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 1rem' }}>The name, slogan, logo and accent every user sees, on the sign-in screen, in meetings and in the app header. Saved to the shared brand; the app loads it on start.</p>
           {brandNotSetUp ? (
-            <Notice kind="warn">Shared branding is not set up yet — run <strong>giinmeet_phase3_brand.sql</strong> in the Supabase SQL Editor once.</Notice>
+            <Notice kind="warn">Shared branding is not set up yet, run <strong>giinmeet_phase3_brand.sql</strong> in the Supabase SQL Editor once.</Notice>
           ) : (
             <BrandForm brand={brand} disabled={notSetUp} saving={brandSaving} onSave={saveBrand} onReset={resetBrand} />
           )}
@@ -1387,13 +1392,13 @@ function DurationDefaultForm({ minutes, disabled, saving, onSave, onClear }: {
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <button onClick={() => { if (valid) void onSave(Math.round(n)); }} disabled={disabled || saving || !valid} style={btnPrimary}>Save default duration</button>
         {minutes !== null && (
-          <button onClick={() => void onClear()} disabled={disabled || saving} style={btnGhost}>Clear — use tier default</button>
+          <button onClick={() => void onClear()} disabled={disabled || saving} style={btnGhost}>Clear, use tier default</button>
         )}
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>
         {minutes === null
-          ? 'Not set — new meetings default to the tier default (Free 40 min, Pro / Enterprise 2 hours).'
-          : `Currently ${minutes} minutes — the dashboard pre-selects the matching duration for new meetings.`} 5–1440 minutes.
+          ? 'Not set, new meetings default to the tier default (Free 40 min, Pro / Enterprise 2 hours).'
+          : `Currently ${minutes} minutes, the dashboard pre-selects the matching duration for new meetings.`} 5-1440 minutes.
       </p>
     </div>
   );
@@ -1429,14 +1434,14 @@ function BannerForm({ banner, disabled, saving, onSave }: {
         disabled={disabled}
         maxLength={300}
         rows={3}
-        placeholder="e.g. Scheduled maintenance on Sunday 02:00–03:00 SAST — meetings may be briefly interrupted."
+        placeholder="e.g. Scheduled maintenance on Sunday 02:00-03:00 SAST, meetings may be briefly interrupted."
         onChange={(e) => setMessage(e.target.value)}
         style={{ ...inputStyle, height: 'auto', minHeight: '72px', padding: '0.6rem 0.75rem', resize: 'vertical' }}
       />
       <div>
         <button onClick={() => void onSave({ enabled, message })} disabled={disabled || saving || !dirty} style={btnPrimary}>Save banner</button>
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>The message saves with the button above — typing alone does not save it. 300 characters maximum.</p>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>The message saves with the button above, typing alone does not save it. 300 characters maximum.</p>
     </div>
   );
 }
@@ -1493,7 +1498,7 @@ function BrandForm({ brand, disabled, saving, onSave, onReset }: {
       return;
     }
     if (file.size > 1024 * 1024) {
-      setLogoError('That image is over 1 MB — pick a smaller one. The logo is stored in the database, so keep it small.');
+      setLogoError('That image is over 1 MB, pick a smaller one. The logo is stored in the database, so keep it small.');
       return;
     }
     const reader = new FileReader();
@@ -1560,19 +1565,21 @@ function BrandForm({ brand, disabled, saving, onSave, onReset }: {
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>
         {brand === null
-          ? 'No shared brand is set — everyone sees the default GiinMeet brand. Save one to change it.'
-          : 'Saved brands apply when each user next loads the app — sign-in screen, meetings and header included.'}
+          ? 'No shared brand is set, everyone sees the default GiinMeet brand. Save one to change it.'
+          : 'Saved brands apply when each user next loads the app, sign-in screen, meetings and header included.'}
       </p>
     </div>
   );
 }
 
 // ---- Monitoring ---------------------------------------------------------------
-function MonitoringSection({ callAdmin }: {
+// ---- Analytics (Phase D, 40) -------------------------------------------
+// Real numbers only, straight from the meetings, participants, profiles
+// and feedback tables. Anything not measurable yet shows as a dash.
+function AnalyticsSection({ callAdmin }: {
   callAdmin: (path: string, body?: Record<string, unknown>) => Promise<any>;
 }) {
-  const [overview, setOverview] = useState<any>(null);
-  const [rooms, setRooms] = useState<any[]>([]);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -1580,12 +1587,247 @@ function MonitoringSection({ callAdmin }: {
     setLoading(true);
     setError('');
     try {
-      const [o, lk] = await Promise.all([
+      const res = await callAdmin('analytics');
+      setData(res?.analytics || null);
+    } catch (e: any) {
+      setError(e?.message || 'Could not load analytics.');
+    } finally {
+      setLoading(false);
+    }
+  }, [callAdmin]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ color: 'var(--text-muted)' }}>Crunching the real numbers…</div>;
+
+  const a = data || {};
+  const perDay: { date: string; count: number }[] = a.meetingsPerDay || [];
+  const peak: { hour: number; count: number }[] = a.peakHours || [];
+  const plans: { tier: string; users: number }[] = a.planUsage || [];
+  const maxDay = Math.max(1, ...perDay.map((d) => d.count));
+  const maxPeak = Math.max(1, ...peak.map((d) => d.count));
+  const fb = a.feedback || null;
+  const fbMax = fb ? Math.max(1, ...fb.distribution) : 1;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <SectionTitle title="Analytics" sub="Real usage from the live tables. No invented numbers: anything not measurable yet shows as a dash." onRefresh={load} refreshing={loading} />
+      {error && <Notice kind="error">{error}</Notice>}
+      {a.generatedAt && (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>Generated {formatDateTime(a.generatedAt)}</p>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+        <StatCard label="Meetings, all time" value={String(a.totalMeetings ?? '-')} sub={`${a.completedMeetings ?? 0} completed · ${a.liveMeetings ?? 0} live now`} icon={<Video size={22} />} />
+        <StatCard label="Accounts" value={String(a.totalUsers ?? '-')} icon={<Users size={22} />} />
+        <StatCard label="Participant-minutes / month" value={a.participantMinutesThisMonth === null || a.participantMinutesThisMonth === undefined ? '-' : String(a.participantMinutesThisMonth)} sub="Approximate" icon={<Activity size={22} />} />
+        <StatCard label="Meeting rating" value={fb && fb.average !== null ? `${fb.average} / 5` : '-'} sub={fb ? `${fb.count} rating${fb.count === 1 ? '' : 's'} after meetings` : 'No ratings yet'} icon={<BarChart3 size={22} />} />
+        <StatCard label="Open abuse reports" value={a.reportsAvailable ? String(a.openReports ?? 0) : '-'} sub={a.reportsAvailable ? 'See the Reports section' : 'Needs the Phase D database setup'} icon={<FileWarning size={22} />} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
+        <div style={cardStyle}>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Meetings per day, last 30 days</h3>
+          {perDay.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No meetings in the last 30 days.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {perDay.map((d) => (
+                <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.85rem' }}>
+                  <span style={{ width: '86px', flexShrink: 0, color: 'var(--text-muted)' }}>{d.date.slice(5)}</span>
+                  <span style={{ flex: 1, height: '10px', background: 'var(--bg-app)', borderRadius: '5px', overflow: 'hidden' }}>
+                    <span style={{ display: 'block', height: '100%', width: `${(d.count / maxDay) * 100}%`, background: 'var(--color-accent, #3B82F6)' }} />
+                  </span>
+                  <span style={{ width: '28px', textAlign: 'right', fontWeight: 700 }}>{d.count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={cardStyle}>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Peak times (UTC hour)</h3>
+          {peak.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No meeting times to chart yet.</p>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '3px', height: '110px' }} title="Meetings per UTC hour">
+              {peak.map((h) => (
+                <div key={h.hour} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', height: '100%', justifyContent: 'flex-end' }}>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{h.count > 0 ? h.count : ''}</span>
+                  <span style={{ width: '100%', height: `${Math.max(h.count > 0 ? 6 : 2, (h.count / maxPeak) * 78)}px`, background: h.count === maxPeak && h.count > 0 ? '#FABD02' : 'var(--color-accent, #3B82F6)', borderRadius: '2px 2px 0 0' }} />
+                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{h.hour}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: '0.6rem 0 0' }}>Hours are UTC. Rwanda is UTC+2, so 07:00 here is 05:00 UTC.</p>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
+        <div style={cardStyle}>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Plan usage</h3>
+          {plans.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No plan data yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {plans.map((p) => (
+                <div key={p.tier} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.9rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                  <span style={{ fontWeight: 600 }}>{p.tier}</span>
+                  <span>{p.users} account{p.users === 1 ? '' : 's'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '1.25rem 0 0.75rem' }}>Top hosts</h3>
+          {(a.topHosts || []).length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No host data yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {(a.topHosts || []).map((h: any) => (
+                <div key={h.host} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.9rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                  <span style={{ fontWeight: 600, wordBreak: 'break-all' }}>{h.host}</span>
+                  <span style={{ whiteSpace: 'nowrap' }}>{h.meetings} meeting{h.meetings === 1 ? '' : 's'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={cardStyle}>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Feedback after meetings</h3>
+          {!fb ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>Ratings need the Phase D database setup first (run giinmeet_phaseD.sql).</p>
+          ) : fb.count === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No ratings yet. Ratings appear here once meetings end and people tap a star.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {[5, 4, 3, 2, 1].map((stars) => (
+                <div key={stars} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.85rem' }}>
+                  <span style={{ width: '34px', flexShrink: 0 }}>{stars} ★</span>
+                  <span style={{ flex: 1, height: '10px', background: 'var(--bg-app)', borderRadius: '5px', overflow: 'hidden' }}>
+                    <span style={{ display: 'block', height: '100%', width: `${(fb.distribution[stars - 1] / fbMax) * 100}%`, background: '#FABD02' }} />
+                  </span>
+                  <span style={{ width: '28px', textAlign: 'right', fontWeight: 700 }}>{fb.distribution[stars - 1]}</span>
+                </div>
+              ))}
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0.5rem 0 0' }}>Average {fb.average} out of 5 from {fb.count} rating{fb.count === 1 ? '' : 's'}.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Reports (Phase D, 39) ------------------------------------------------
+// Abuse and spam reports from meetings, with the two actions that matter:
+// mark a report handled, or block the meeting's host from the superadmin.
+function ReportsSection({ callAdmin, showToast }: {
+  callAdmin: (path: string, body?: Record<string, unknown>) => Promise<any>;
+  showToast: (msg: string) => void;
+}) {
+  const [reports, setReports] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await callAdmin('reports', { action: 'list' });
+      if (res?.ok === false) {
+        setError(res?.message || 'Reports need the Phase D database setup first (run giinmeet_phaseD.sql).');
+        setReports([]);
+      } else {
+        setReports(res?.reports || []);
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Could not load reports.');
+    } finally {
+      setLoading(false);
+    }
+  }, [callAdmin]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (reportId: string, action: string, status?: string) => {
+    setBusyId(reportId);
+    try {
+      await callAdmin('reports', { action, reportId, ...(status ? { status } : {}) });
+      showToast(action === 'block-host' ? 'Host blocked.' : 'Report updated.');
+      await load();
+    } catch (e: any) {
+      showToast(e?.message || 'That action failed.');
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  if (loading) return <div style={{ color: 'var(--text-muted)' }}>Loading reports…</div>;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <SectionTitle title="Reports" sub="Meetings people reported for abuse or spam. Review them here, and block the host when a report checks out." onRefresh={load} refreshing={loading} />
+      {error && <Notice kind="warn">{error}</Notice>}
+      {reports.length === 0 && !error ? (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>No reports. When someone reports a meeting, it lands here.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {reports.map((r: any) => (
+            <div key={r.id} style={{ ...cardStyle }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <strong style={{ fontSize: '0.95rem' }}>{r.meetingTitle || 'Meeting (deleted or unknown)'}</strong>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: r.status === 'open' ? '#DC2626' : r.status === 'resolved' ? '#059669' : '#64748B', textTransform: 'uppercase' }}>{r.status}</span>
+              </div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.4rem', lineHeight: 1.6 }}>
+                Host: {r.hostEmail || 'unknown'} · Reported by: {r.reporterEmail || 'anonymous'} · {formatDateTime(r.createdAt)}
+                {r.meetingTime && (<> · Meeting time: {formatDateTime(r.meetingTime)}</>)}
+              </div>
+              <p style={{ fontSize: '0.9rem', margin: '0.6rem 0 0' }}><strong>Reason:</strong> {r.reason}</p>
+              {r.detail && <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: '0.35rem 0 0' }}>{r.detail}</p>}
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                {r.status === 'open' && (
+                  <button style={btnGhost} disabled={busyId === r.id} onClick={() => void act(r.id, 'set-status', 'reviewed')}>Mark reviewed</button>
+                )}
+                {r.status !== 'resolved' && (
+                  <button style={btnGhost} disabled={busyId === r.id} onClick={() => void act(r.id, 'set-status', 'resolved')}>Mark resolved</button>
+                )}
+                {r.hostId && (
+                  <button style={{ ...btnGhost, borderColor: 'rgba(239,68,68,0.5)', color: '#DC2626' }} disabled={busyId === r.id} onClick={() => { if (window.confirm(`Block ${r.hostEmail || 'this host'} from your meetings? They will not be able to rejoin.`)) void act(r.id, 'block-host'); }}>
+                    <Ban size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} />Block host
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MonitoringSection({ callAdmin }: {
+  callAdmin: (path: string, body?: Record<string, unknown>) => Promise<any>;
+}) {
+  const [overview, setOverview] = useState<any>(null);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  // Phase D (43): health checks for LiveKit, Supabase and the site.
+  const [health, setHealth] = useState<any>(null);
+  const [checking, setChecking] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [o, lk, h] = await Promise.all([
         callAdmin('overview'),
         callAdmin('livekit').catch((e: any) => ({ ok: false, message: e?.message || 'LiveKit check failed.' })),
+        callAdmin('health', { action: 'list' }).catch(() => null),
       ]);
       setOverview(o);
       setRooms(lk?.rooms || []);
+      setHealth(h);
       if (lk && lk.ok === false) setError(lk.message || 'LiveKit is not configured.');
     } catch (e: any) {
       setError(e?.message || 'Could not load monitoring data.');
@@ -1594,6 +1836,18 @@ function MonitoringSection({ callAdmin }: {
     }
   }, [callAdmin]);
 
+  const runHealthCheck = async () => {
+    setChecking(true);
+    try {
+      await callAdmin('health', { action: 'check' });
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'The health check failed to run.');
+    } finally {
+      setChecking(false);
+    }
+  };
+
   useEffect(() => { load(); }, [load]);
 
   if (loading) return <div style={{ color: 'var(--text-muted)' }}>Checking the live systems…</div>;
@@ -1601,13 +1855,67 @@ function MonitoringSection({ callAdmin }: {
   const s = overview?.stats || {};
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Monitoring" sub="Live rooms on the video server, recent sign-ins, and system health — refreshed on demand." onRefresh={load} refreshing={loading} />
+      <SectionTitle title="Monitoring" sub="Live rooms on the video server, recent sign-ins, and system health, refreshed on demand." onRefresh={load} refreshing={loading} />
       {error && <Notice kind="warn">{error}</Notice>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
         <StatCard label="LiveKit rooms live" value={String(rooms.length)} sub={s.livekitConfigured ? 'Video server connected' : 'Video server not configured'} icon={<Cloud size={22} />} />
         <StatCard label="People in live rooms" value={String(rooms.reduce((n: number, r: any) => n + (r.participants?.length || 0), 0))} icon={<Users size={22} />} />
         <StatCard label="Meetings live now" value={String(s.liveMeetings ?? 0)} sub={`${s.meetingsToday ?? 0} scheduled today`} icon={<Video size={22} />} />
-        <StatCard label="Participant-minutes / month" value={s.participantMinutesThisMonth === null ? '—' : String(s.participantMinutesThisMonth)} sub="Approximate · LiveKit free tier: 5,000 / month" icon={<Activity size={22} />} />
+        <StatCard label="Participant-minutes / month" value={s.participantMinutesThisMonth === null ? '-' : String(s.participantMinutesThisMonth)} sub="Approximate · LiveKit free tier: 5,000 / month" icon={<Activity size={22} />} />
+      </div>
+
+      {/* Phase D (43): service health. The latest check per service,
+          open alerts, and a button to probe LiveKit, Supabase and the
+          site right now. A new outage also emails the superadmin. */}
+      <div style={{ ...cardStyle }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', margin: '0 0 0.75rem' }}>Service health</h3>
+          <button onClick={() => void runHealthCheck()} disabled={checking} style={{ ...btnPrimary, height: '36px', fontSize: '0.85rem' }}>
+            {checking ? 'Checking…' : 'Run health check'}
+          </button>
+        </div>
+        {!health?.available ? (
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>
+            Health monitoring needs the Phase D database setup first (run giinmeet_phaseD.sql). Once it is run, this card probes LiveKit, Supabase and the site.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+            {(() => {
+              const latest = new Map<string, any>();
+              for (const c of (health.checks || []) as any[]) {
+                if (!latest.has(c.service)) latest.set(c.service, c);
+              }
+              const services = ['supabase', 'livekit', 'site'];
+              return services.map((svc) => {
+                const c = latest.get(svc);
+                const up = c?.status === 'up';
+                return (
+                  <div key={svc} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.9rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                    <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{svc === 'site' ? 'This site' : svc}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{c ? c.detail : 'Not checked yet'}</span>
+                    <span style={{ fontWeight: 700, color: c ? (up ? '#059669' : '#DC2626') : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      {c ? (up ? 'Up' : c.status === 'down' ? 'Down' : 'Degraded') : '-'}
+                    </span>
+                  </div>
+                );
+              });
+            })()}
+            {(health.alerts || []).length > 0 && (
+              <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 'var(--radius-md)', padding: '0.75rem 1rem', marginTop: '0.5rem' }}>
+                <strong style={{ fontSize: '0.9rem', color: '#991B1B' }}>Open alerts ({health.alerts.length})</strong>
+                {(health.alerts || []).map((al: any) => (
+                  <div key={al.id} style={{ fontSize: '0.85rem', marginTop: '0.4rem', lineHeight: 1.5 }}>
+                    <strong style={{ textTransform: 'capitalize' }}>{al.service}</strong> is {al.status}: {al.message}
+                    <span style={{ color: 'var(--text-muted)' }}> · {formatDateTime(al.created_at)}{al.notified ? ' · superadmin emailed' : ' · email not sent'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(health.alerts || []).length === 0 && (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>No open alerts. When a service goes down, an alert appears here and the superadmin gets an email.</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={{ ...cardStyle }}>
@@ -1657,7 +1965,7 @@ function MonitoringSection({ callAdmin }: {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {(overview?.recentAudit || []).map((a: any, i: number) => (
                 <div key={`a${i}`} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.9rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                  <span><strong>{a.action}</strong> by {a.actor_email || '—'}</span>
+                  <span><strong>{a.action}</strong> by {a.actor_email || '-'}</span>
                   <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatDateTime(a.created_at)}</span>
                 </div>
               ))}
@@ -1748,9 +2056,9 @@ function TroubleshootingSection({ callAdmin, showToast }: {
               <div style={{ color: 'var(--text-muted)' }}>Last sign-in: {formatDateTime(lookup.user.last_sign_in_at)}</div>
               <div style={{ color: 'var(--text-muted)' }}>Email confirmed: {lookup.user.email_confirmed_at ? formatDateTime(lookup.user.email_confirmed_at) : 'not confirmed'}</div>
               <div style={{ color: 'var(--text-muted)' }}>Banned until: {lookup.user.banned_until ? formatDateTime(lookup.user.banned_until) : 'not banned'}</div>
-              <div>Tier: <strong>{lookup.user.profile ? TIER_LABELS[tierForProfile(lookup.user.profile)] : '—'}</strong> · Superadmin: <strong>{lookup.user.profile?.is_superadmin ? 'yes' : 'no'}</strong> · Suspended: <strong>{lookup.user.profile?.is_suspended ? 'yes' : 'no'}</strong></div>
+              <div>Tier: <strong>{lookup.user.profile ? TIER_LABELS[tierForProfile(lookup.user.profile)] : '-'}</strong> · Superadmin: <strong>{lookup.user.profile?.is_superadmin ? 'yes' : 'no'}</strong> · Suspended: <strong>{lookup.user.profile?.is_suspended ? 'yes' : 'no'}</strong></div>
               <div style={{ color: 'var(--text-muted)' }}>Meetings: {lookup.user.meetings_count} total, {lookup.user.live_meetings} live now</div>
-              {!lookup.user.profile && <Notice kind="warn">This auth account has no profile row — the self-healing profile creation will make one on next sign-in.</Notice>}
+              {!lookup.user.profile && <Notice kind="warn">This auth account has no profile row, the self-healing profile creation will make one on next sign-in.</Notice>}
             </div>
           )}
         </div>
@@ -1764,12 +2072,12 @@ function TroubleshootingSection({ callAdmin, showToast }: {
           </form>
           {diagnosis && (
             <div style={{ marginTop: '1rem', fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              <div><strong>{diagnosis.meeting.title}</strong> — {diagnosis.meeting.status}</div>
-              <div style={{ color: 'var(--text-muted)' }}>Scheduled: {formatDateTime(diagnosis.meeting.time)} · Duration: {diagnosis.meeting.duration || '—'}</div>
+              <div><strong>{diagnosis.meeting.title}</strong>, {diagnosis.meeting.status}</div>
+              <div style={{ color: 'var(--text-muted)' }}>Scheduled: {formatDateTime(diagnosis.meeting.time)} · Duration: {diagnosis.meeting.duration || '-'}</div>
               <div style={{ color: 'var(--text-muted)' }}>Waiting room: {diagnosis.meeting.require_waiting_room ? 'required' : 'not required'} · Locked: {diagnosis.meeting.is_locked ? 'yes' : 'no'}</div>
               <div>
                 Video room: {diagnosis.room ? (
-                  <><strong>{diagnosis.room.slug}</strong> — {diagnosis.room.is_active ? 'active' : 'inactive'}, capacity {diagnosis.room.max_capacity}, engine {diagnosis.room.current_engine}</>
+                  <><strong>{diagnosis.room.slug}</strong>, {diagnosis.room.is_active ? 'active' : 'inactive'}, capacity {diagnosis.room.max_capacity}, engine {diagnosis.room.current_engine}</>
                 ) : 'no room row exists yet'}
               </div>
               <div>
@@ -1784,7 +2092,7 @@ function TroubleshootingSection({ callAdmin, showToast }: {
                 ) : (
                   <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.2rem', color: 'var(--text-muted)' }}>
                     {diagnosis.participants.map((p: any) => (
-                      <li key={p.id}>{p.name} — {p.status} ({p.role})</li>
+                      <li key={p.id}>{p.name}, {p.status} ({p.role})</li>
                     ))}
                   </ul>
                 )}
@@ -1812,7 +2120,7 @@ function TroubleshootingSection({ callAdmin, showToast }: {
                   : c.status === 'not-applied' ? <XCircle size={17} color="#DC2626" style={{ flexShrink: 0, marginTop: '2px' }} />
                   : <FileWarning size={17} color="#D97706" style={{ flexShrink: 0, marginTop: '2px' }} />}
                 <div>
-                  <div><strong style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{c.file}</strong> — {c.what}</div>
+                  <div><strong style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{c.file}</strong>, {c.what}</div>
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{c.detail}</div>
                 </div>
               </div>
@@ -1853,10 +2161,10 @@ function AuditSection({ callAdmin }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <SectionTitle title="Audit Log" sub="Every superadmin action, with actor, action, target and time — plus the meeting-deletion trail." onRefresh={load} refreshing={loading} />
+      <SectionTitle title="Audit Log" sub="Every superadmin action, with actor, action, target and time, plus the meeting-deletion trail." onRefresh={load} refreshing={loading} />
       {error && <Notice kind="error">{error}</Notice>}
       {notSetUp && (
-        <Notice kind="warn">The audit log is not set up yet — run <strong>giinmeet_superadmin.sql</strong> in the Supabase SQL Editor once. Actions taken before then are not recorded.</Notice>
+        <Notice kind="warn">The audit log is not set up yet, run <strong>giinmeet_superadmin.sql</strong> in the Supabase SQL Editor once. Actions taken before then are not recorded.</Notice>
       )}
       {loading ? (
         <p style={{ color: 'var(--text-muted)' }}>Loading the audit log…</p>
@@ -1882,9 +2190,9 @@ function AuditSection({ callAdmin }: {
                     {entries.map((a: any) => (
                       <tr key={a.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                         <td style={{ padding: '0.7rem 0.5rem', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>{formatDateTime(a.created_at)}</td>
-                        <td style={{ padding: '0.7rem 0.5rem', wordBreak: 'break-all' }}>{a.actor_email || '—'}</td>
+                        <td style={{ padding: '0.7rem 0.5rem', wordBreak: 'break-all' }}>{a.actor_email || '-'}</td>
                         <td style={{ padding: '0.7rem 0.5rem', fontWeight: 700 }}>{a.action}</td>
-                        <td style={{ padding: '0.7rem 0.5rem' }}>{a.target_type ? `${a.target_type}: ` : ''}{a.target_id ? String(a.target_id).slice(0, 13) : '—'}</td>
+                        <td style={{ padding: '0.7rem 0.5rem' }}>{a.target_type ? `${a.target_type}: ` : ''}{a.target_id ? String(a.target_id).slice(0, 13) : '-'}</td>
                         <td style={{ padding: '0.7rem 0.5rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>{a.detail ? JSON.stringify(a.detail) : ''}</td>
                       </tr>
                     ))}
@@ -1970,10 +2278,10 @@ function SetupSection({ callAdmin }: {
         <ol style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.92rem', lineHeight: 1.7, color: 'var(--text-main)' }}>
           <li>Run <code>giinmeet_superadmin.sql</code> once in the Supabase SQL Editor (project <code>umeptngfntryekzxifvq</code>).</li>
           <li>Run any other SQL file the Troubleshooting → Migration status list shows as “Not applied”.</li>
-          <li>Sign in here with the superadmin account — the portal then unlocks Users, Meetings, Configuration, Monitoring and the Audit Log.</li>
+          <li>Sign in here with the superadmin account, the portal then unlocks Users, Meetings, Configuration, Monitoring and the Audit Log.</li>
         </ol>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0.75rem 0 0' }}>
-          The service-role key is still the original one shared in chat — rotation is a dashboard job, not a code job: follow the steps in <code>KEY_ROTATION_STEPS.md</code> in the repo root (create a new key in Supabase, update the Vercel env var, redeploy, verify, then revoke the old key). The code already reads the key from the environment only, so no code change is needed.
+          The service-role key is still the original one shared in chat, rotation is a dashboard job, not a code job: follow the steps in <code>KEY_ROTATION_STEPS.md</code> in the repo root (create a new key in Supabase, update the Vercel env var, redeploy, verify, then revoke the old key). The code already reads the key from the environment only, so no code change is needed.
         </p>
       </div>
     </div>

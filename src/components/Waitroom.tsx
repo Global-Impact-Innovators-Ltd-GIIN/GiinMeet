@@ -10,7 +10,7 @@ interface WaitroomProps {
   // no second name store, no re-typing for guests who already gave it.
   initialDisplayName?: string;
   user: { id: string; name: string; email: string } | null;
-  onAdmitted: (meetingTitle: string, participantId: string, displayName: string) => void;
+  onAdmitted: (meetingTitle: string, participantId: string, displayName: string, passcode?: string) => void;
   onDeclined: () => void;
   onBack: () => void;
   // Phase 3 (Feature 4), shared workspace brand, passed from App.
@@ -51,6 +51,42 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   // Round 9 (9A/9B/9C): a hard stop shown instead of the join form ,
   // removed by the host, link expired, or meeting ended.
   const [blocked, setBlocked] = useState<null | 'removed' | 'expired' | 'ended'>(null);
+
+  // Phase D (38): branded waiting room, agenda preview and countdown,
+  // knock, and messages from the host while waiting.
+  const [preview, setPreview] = useState<{
+    title: string; time: string | null; status: string | null;
+    agenda: { id: string; text: string; startTime?: string; endTime?: string; durationMinutes?: number }[];
+    e2eeEnabled: boolean; requireWaitingRoom: boolean;
+    brand: { name: string; logoUrl: string | null; accent: string | null; slogan: string | null } | null;
+  } | null>(null);
+  const [knockMessage, setKnockMessage] = useState('');
+  const [knockSent, setKnockSent] = useState(false);
+  const [knockError, setKnockError] = useState('');
+  const [lobbyMessage, setLobbyMessage] = useState('');
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [regularChecked, setRegularChecked] = useState(false);
+
+  // Countdown clock: re-renders once a minute while waiting.
+  useEffect(() => {
+    if (waitingStatus !== 'Waiting') return;
+    const id = setInterval(() => setNowMs(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, [waitingStatus]);
+
+  // Phase D (38): load the waiting-room preview (brand, agenda, start
+  // time). Best-effort: a missing Phase D setup leaves the plain
+  // waiting room, never a failure.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const p = await giinApi.getWaitingRoomPreview(meetingId);
+        if (active) setPreview(p);
+      } catch (e) { /* plain waiting room stands */ }
+    })();
+    return () => { active = false; };
+  }, [meetingId]);
 
   // Round 9 (9B/9C): an ended meeting or an expired link stops here,
   // with a plain message, before any join is attempted. Both reads
@@ -242,6 +278,12 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     });
     
     waitChannel
+      .on('broadcast', { event: 'waitroom-message' }, (payload: any) => {
+        const data = payload.payload;
+        if (data && data.server && (data.targetKey === guestKey || (participantId && data.targetKey === participantId)) && typeof data.message === 'string') {
+          setLobbyMessage(data.message);
+        }
+      })
       .on('broadcast', { event: 'waitroom-response' }, (payload: any) => {
         const data = payload.payload;
         if (data.targetKey === guestKey || (participantId && data.targetKey === participantId)) {
@@ -319,6 +361,27 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   const joinWaitingRoom = async (name: string, _pcode?: string, org?: string) => {
     if (!name.trim()) return;
     setLoading(true);
+    // Phase D (38): regulars bypass the lobby. The check is
+    // server-side (the host's list); the token route is the final
+    // gate, so a bypass here never admits someone the server refuses.
+    if (user?.id && !regularChecked) {
+      setRegularChecked(true);
+      try {
+        if (await giinApi.checkRegularBypass(meetingId)) {
+          const data = await giinApi.joinMeetingRoom(meetingId, name, user.id, 'Participant', 'Admitted', org || organisation || undefined);
+          if (data) {
+            setParticipantId(data.id);
+            try { localStorage.setItem(`giin_participant_row_${meetingId}`, data.id); } catch (e) {}
+          }
+          setWaitingStatus('Admitted');
+          localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
+          localStorage.setItem(`admitted_meeting_title_${meetingId}`, meetingDetails?.title || 'GIIN MEET Call');
+          localStorage.setItem(`admitted_meeting_name_${meetingId}`, name);
+          onAdmitted(meetingDetails?.title || 'GIIN MEET Call', user.id, name, passcode || initialPasscode || undefined);
+          return;
+        }
+      } catch (e) { /* not a regular: fall through to the lobby */ }
+    }
     try {
       // Fix Round 7 (#6): a locked meeting does NOT auto-admit.
       const isLockedForJoin = meetingDetails?.require_waiting_room === false ? await giinApi.getMeetingLock(meetingId) : false;
@@ -342,7 +405,7 @@ export const Waitroom: React.FC<WaitroomProps> = ({
         localStorage.setItem(`admitted_meeting_${meetingId}`, 'true');
         localStorage.setItem(`admitted_meeting_title_${meetingId}`, meetingDetails.title || 'GIIN MEET Call');
         localStorage.setItem(`admitted_meeting_name_${meetingId}`, name);
-        onAdmitted(meetingDetails.title || 'GIIN MEET Call', user?.id || guestKey, name);
+        onAdmitted(meetingDetails.title || 'GIIN MEET Call', user?.id || guestKey, name, passcode || initialPasscode || undefined);
         return;
       }
 
@@ -376,6 +439,18 @@ export const Waitroom: React.FC<WaitroomProps> = ({
       joinWaitingRoom(effectiveName, undefined);
     }
   }, [passcodeValidated, waitingStatus, meetingDetails, user, displayName]);
+
+  // Phase D (38c): knock, one line to the host, while waiting.
+  const sendKnock = async () => {
+    if (!knockMessage.trim() || !participantId) return;
+    setKnockError('');
+    try {
+      await giinApi.knockWaitingRoom(meetingId, participantId, knockMessage.trim());
+      setKnockSent(true);
+    } catch (e: any) {
+      setKnockError(e?.message || 'Could not send your knock. Try again.');
+    }
+  };
 
   const handleNameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -450,29 +525,80 @@ export const Waitroom: React.FC<WaitroomProps> = ({
     );
   }
 
+  // Phase D (38a + 47): the waiting room carries the host's or
+  // organisation's brand when one is set, with a small powered-by
+  // mark when it is not GiinMeet itself.
+  const displayBrandName = preview?.brand?.name || brandName;
+  const displayLogoUrl = preview?.brand?.logoUrl || logoUrl;
+  const displayAccent = preview?.brand?.accent || undefined;
+  const isWhiteLabel = !!preview?.brand && preview.brand.name !== 'GiinMeet';
+  const startTimeMs = preview?.time ? new Date(preview.time).getTime() : NaN;
+  const countdownText = (() => {
+    if (!Number.isFinite(startTimeMs)) return '';
+    const diffMin = Math.round((startTimeMs - nowMs) / 60000);
+    if (diffMin > 60) return `Starts in ${Math.floor(diffMin / 60)}h ${diffMin % 60}m`;
+    if (diffMin > 0) return `Starts in ${diffMin} min`;
+    if (diffMin === 0) return 'Starting now';
+    const agoMin = -diffMin;
+    if (agoMin < 60) return `Started ${agoMin} min ago`;
+    return `Started at ${new Date(startTimeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  })();
+
   return (
     <div className="flex-center" style={{ minHeight: '80vh', padding: '2rem' }}>
-      <div className="glass-panel" style={{ maxWidth: '450px', width: '100%', padding: '2.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-        
+      <div className="glass-panel" style={{ maxWidth: '450px', width: '100%', padding: '2.5rem', display: 'flex', flexDirection: 'column', gap: '2rem', ...(displayAccent ? { borderTop: `3px solid ${displayAccent}` } : {}) }}>
+
         {/* Header Title details, workspace brand, then the meeting */}
         <div style={{ textAlign: 'center' }}>
           <img
-            src={logoUrl}
-            alt={`${brandName} logo`}
+            src={displayLogoUrl}
+            alt={`${displayBrandName} logo`}
             style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '8px', margin: '0 auto 0.5rem', display: 'block' }}
           />
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>{brandName}</div>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>{displayBrandName}</div>
+          {preview?.brand?.slogan && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>{preview.brand.slogan}</div>
+          )}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: 700, color: displayAccent || 'var(--color-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
             <Sparkles size={12} />
-            <span>{brandName} Security waitroom</span>
+            <span>{displayBrandName} Security waitroom</span>
           </span>
           <h2 style={{ fontSize: '1.6rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)' }}>
-            {meetingDetails?.title || 'Active Video Call'}
+            {meetingDetails?.title || preview?.title || 'Active Video Call'}
           </h2>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: {meetingId.slice(0, 8)}...</span>
+          {isWhiteLabel && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>powered by GiinMeet</div>
+          )}
         </div>
 
         <hr style={{ border: 'none', borderBottom: '1px solid var(--border-color)', margin: 0 }} />
+
+        {/* Phase D (38b): agenda preview and countdown, so guests see
+            what the meeting is about instead of a blank screen. */}
+        {(preview && (preview.agenda.length > 0 || countdownText)) && waitingStatus !== 'Waiting' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.9rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)' }}>
+            {countdownText && (
+              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: displayAccent || 'var(--text-main)' }}>{countdownText}</span>
+            )}
+            {preview.agenda.length > 0 && (
+              <>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Agenda</span>
+                <ol style={{ margin: 0, paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.45 }}>
+                  {preview.agenda.slice(0, 5).map((item) => (
+                    <li key={item.id}>{item.startTime && item.endTime ? `${item.startTime} to ${item.endTime} · ` : ''}{item.text}</li>
+                  ))}
+                </ol>
+                {preview.agenda.length > 5 && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Plus {preview.agenda.length - 5} more items.</span>
+                )}
+              </>
+            )}
+            {preview.e2eeEnabled && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>End-to-end encrypted media: audio and video are encrypted between participants with the meeting passcode as the key. Chat and files are not covered.</span>
+            )}
+          </div>
+        )}
 
         {/* Step 1: Passcode Verification */}
         {!passcodeValidated && (
@@ -589,6 +715,59 @@ export const Waitroom: React.FC<WaitroomProps> = ({
 
             <div style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               Connected as <strong style={{ color: 'var(--text-main)' }}>{displayName}</strong>
+            </div>
+
+            {countdownText && (
+              <div style={{ width: '100%', fontSize: '0.85rem', fontWeight: 700, color: displayAccent || 'var(--text-main)' }}>{countdownText}</div>
+            )}
+
+            {preview && preview.agenda.length > 0 && (
+              <div style={{ width: '100%', textAlign: 'left', padding: '0.9rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Agenda</span>
+                <ol style={{ margin: '0.4rem 0 0 0', paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.45 }}>
+                  {preview.agenda.slice(0, 5).map((item) => (
+                    <li key={item.id}>{item.startTime && item.endTime ? `${item.startTime} to ${item.endTime} · ` : ''}{item.text}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {lobbyMessage && (
+              <div style={{ width: '100%', textAlign: 'left', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--color-accent)', backgroundColor: 'rgba(59, 130, 246, 0.08)', fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.45 }}>
+                <strong>Message from the host:</strong> {lobbyMessage}
+              </div>
+            )}
+
+            {/* Phase D (38c): knock, one line to the host. */}
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {knockSent ? (
+                <span style={{ fontSize: '0.8rem', color: '#10B981', fontWeight: 600 }}>Knock sent. The host can see your message.</span>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      value={knockMessage}
+                      onChange={(e) => setKnockMessage(e.target.value)}
+                      maxLength={140}
+                      placeholder="Knock: one line, for example I am here for the interview"
+                      className="premium-input"
+                      style={{ flex: 1, height: '40px', fontSize: '0.85rem' }}
+                    />
+                    <button
+                      onClick={sendKnock}
+                      disabled={!knockMessage.trim()}
+                      className="premium-btn premium-btn-secondary"
+                      style={{ height: '40px', padding: '0 0.9rem', fontSize: '0.85rem', fontWeight: 700, cursor: knockMessage.trim() ? 'pointer' : 'not-allowed', opacity: knockMessage.trim() ? 1 : 0.5 }}
+                    >
+                      Knock
+                    </button>
+                  </div>
+                  {knockError && (
+                    <span style={{ fontSize: '0.75rem', color: '#EF4444' }}>{knockError}</span>
+                  )}
+                </>
+              )}
             </div>
 
             <button onClick={onBack} className="premium-btn premium-btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>

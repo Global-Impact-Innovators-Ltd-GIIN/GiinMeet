@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { tierForProfile, TIER_LIMITS, TIER_LABELS } from '../../../../src/utils/tiers';
 import { checkRateLimit, readJsonBody } from '../../_lib/security';
+import { isUserBlocked } from '../../_lib/phaseD';
 
 // Admit or decline a waiting-room participant, server-side. (Fix
 // Round 7, finding #4: admission used to be a direct client-side row
@@ -226,6 +227,34 @@ export async function POST(req: NextRequest) {
           message: `This meeting is full for the host's ${TIER_LABELS[hostTier]} plan. Maximum capacity is ${maxCapacity} participants.`,
           maxCapacity,
           tier: hostTier,
+        }, { status: 403 });
+      }
+    }
+
+    // Phase D (39): a blocked person is never admitted, even by
+    // mistake. The host unblocks them first (block list, in the room
+    // or in Settings), then admits them.
+    if (status === 'Admitted') {
+      const { data: targetRow } = await admin
+        .from('meeting_participants')
+        .select('user_id, name')
+        .eq('id', participantId)
+        .eq('meeting_id', meetingId)
+        .maybeSingle();
+      let targetEmail: string | null = null;
+      if ((targetRow as any)?.user_id) {
+        const { data: targetProfile } = await admin
+          .from('profiles')
+          .select('email')
+          .eq('id', (targetRow as any).user_id)
+          .maybeSingle();
+        targetEmail = (targetProfile as any)?.email || null;
+      }
+      const hostId = meeting.admin_id || meeting.user_id;
+      if (await isUserBlocked(admin, hostId, (targetRow as any)?.user_id || null, targetEmail)) {
+        return NextResponse.json({
+          error: 'BLOCKED',
+          message: 'This person is on your block list. Unblock them first, then admit them.',
         }, { status: 403 });
       }
     }

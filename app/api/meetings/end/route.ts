@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { checkRateLimit, readJsonBody } from '../../_lib/security';
+import { deliverMeetingEvent } from '../../_lib/phaseD';
 
 // End a meeting, server-side, for real. The old client-side end only set
 // the meeting status (and overwrote its notes with a canned string). This
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
     }
     const { data: meeting } = await admin
       .from('meetings')
-      .select('id, admin_id, user_id')
+      .select('id, admin_id, user_id, title, time')
       .eq('id', meetingId)
       .maybeSingle();
     if (!meeting || !isCurrentHost(meeting, user.id)) {
@@ -165,6 +166,14 @@ export async function POST(req: NextRequest) {
     }
       console.error('[End Meeting API] Could not delete meeting chat files:', e?.message || e);
     }
+
+    // Phase D (42): the meeting.ended webhook, best-effort, after the
+    // meeting is already ended, so a dead receiver never blocks an end.
+    await deliverMeetingEvent(admin, (meeting as any).admin_id || (meeting as any).user_id, 'meeting.ended', {
+      id: meetingId,
+      title: (meeting as any).title || null,
+      time: (meeting as any).time || null,
+    });
 
     return NextResponse.json({ ok: true, livekitRoomDeleted, chatFilesDeleted, ...(livekitWarning ? { livekitWarning } : {}) });
   } catch (err: any) {

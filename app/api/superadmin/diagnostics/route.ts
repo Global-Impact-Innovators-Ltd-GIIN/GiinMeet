@@ -209,6 +209,19 @@ export async function POST(req: NextRequest) {
     await add('giinmeet_stale_rows_cleanup.sql', 'Stale-rows cleanup', async () => 'manual',
       'One-off cleanup SQL — verify in the SQL Editor history.'
     );
+    await add('giinmeet_phaseD.sql', 'Phase D: E2EE flag, waiting-room knock, regulars, blocks, reports, feedback, organisations, API keys, webhooks, health checks, team branding', async () => {
+      const e2ee = await probe(admin as any, 'meetings', 'e2ee_enabled');
+      const orgs = await probe(admin as any, 'organisations', 'id');
+      const keys = await probe(admin as any, 'api_keys', 'id');
+      const hooks = await probe(admin as any, 'webhooks', 'id');
+      const feedback = await probe(admin as any, 'meeting_feedback', 'id');
+      const reports = await probe(admin as any, 'meeting_reports', 'id');
+      const blocks = await probe(admin as any, 'user_blocks', 'id');
+      const regulars = await probe(admin as any, 'host_regulars', 'id');
+      const health = await probe(admin as any, 'health_checks', 'id');
+      const knock = await probe(admin as any, 'meeting_participants', 'knock_message');
+      return e2ee && orgs && keys && hooks && feedback && reports && blocks && regulars && health && knock ? 'applied' : 'not-applied';
+    });
     await add('giinmeet_superadmin.sql', 'Superadmin portal: system_settings, audit log, suspension', async () => {
       const settings = await probe(admin as any, 'system_settings', 'key');
       const audit = await probe(admin as any, 'superadmin_audit_log', 'id');
