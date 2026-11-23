@@ -677,12 +677,12 @@ function App() {
               return prev;
             }
 
-            return prev.map(t => {
-              if (t.id === newMsg.thread_id) {
-                if (t.messages.some((m: any) => m.id === mappedMsg.id)) return t;
+            return prev.map(thread => {
+              if (thread.id === newMsg.thread_id) {
+                if (thread.messages.some((m: any) => m.id === mappedMsg.id)) return thread;
 
-                const isCurrent = t.id === activeThreadIdRef.current && currentViewRef.current === 'chats';
-                const unreadCount = !isCurrent && newMsg.user_id !== user.id ? (t.unreadCount || 0) + 1 : 0;
+                const isCurrent = thread.id === activeThreadIdRef.current && currentViewRef.current === 'chats';
+                const unreadCount = !isCurrent && newMsg.user_id !== user.id ? (thread.unreadCount || 0) + 1 : 0;
 
                 if (!isCurrent && newMsg.user_id !== user.id) {
                   if (isGroup) {
@@ -690,17 +690,17 @@ function App() {
                       triggerInAppNotification(t('app.mentioned_you', { v1: newMsg.sender_name }), text);
                     }
                   } else {
-                    triggerInAppNotification(t.name, text);
+                    triggerInAppNotification(thread.name, text);
                   }
                 }
 
                 return {
-                  ...t,
+                  ...thread,
                   unreadCount,
-                  messages: [...t.messages, mappedMsg]
+                  messages: [...thread.messages, mappedMsg]
                 };
               }
-              return t;
+              return thread;
             });
           });
         }

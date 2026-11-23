@@ -1342,20 +1342,20 @@ function TierLimitsForm({ limits, durations, disabled, saving, onSave }: {
   useEffect(() => { setL({ ...limits }); setD({ ...durations }); }, [limits, durations]);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-      {(['free', 'pro', 'enterprise'] as const).map((t) => (
-        <div key={t} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.9rem' }}>
-          <span style={{ width: '92px', fontWeight: 700, textTransform: 'capitalize' }}>{t}</span>
+      {(['free', 'pro', 'enterprise'] as const).map((tier) => (
+        <div key={tier} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.9rem' }}>
+          <span style={{ width: '92px', fontWeight: 700, textTransform: 'capitalize' }}>{tier}</span>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)' }}>
             <input
-              type="number" min={1} max={10000} value={l[t]} disabled={disabled}
-              onChange={(e) => setL((prev) => ({ ...prev, [t]: Number(e.target.value) || 1 }))}
+              type="number" min={1} max={10000} value={l[tier]} disabled={disabled}
+              onChange={(e) => setL((prev) => ({ ...prev, [tier]: Number(e.target.value) || 1 }))}
               style={{ ...inputStyle, width: '84px', height: '36px' }}
             /> people
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)' }}>
             <input
-              type="number" min={1} max={1440} value={d[t]} disabled={disabled}
-              onChange={(e) => setD((prev) => ({ ...prev, [t]: Number(e.target.value) || 1 }))}
+              type="number" min={1} max={1440} value={d[tier]} disabled={disabled}
+              onChange={(e) => setD((prev) => ({ ...prev, [tier]: Number(e.target.value) || 1 }))}
               style={{ ...inputStyle, width: '84px', height: '36px' }}
             /> {t('admin.min_max')}
           </label>

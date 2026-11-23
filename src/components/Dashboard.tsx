@@ -329,6 +329,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
     | { kind: 'representative'; key: string; meeting: Meeting; seriesId: string; size: number; rule: string }
     | { kind: 'groupbar'; key: string; seriesId: string; title: string; size: number; rule: string }
     | { kind: 'occurrence'; key: string; meeting: Meeting; seriesId: string; groupIndex: number };
+  // ONE history list: server history plus local recents (guest joins
+  // never reach the server history, so without this merge a guest
+  // rejoin would vanish from the dashboard). Deduped by id, newest first.
+  const historyWithLocal = useMemo(() => {
+    const byId = new Map<string, Meeting>();
+    (meetingHistory || []).forEach((m) => byId.set(m.id, m));
+    readRecentMeetings().forEach((m) => {
+      if (!byId.has(m.id)) {
+        byId.set(m.id, { id: m.id, title: m.title, time: m.time, host: m.host || '', status: 'Completed', duration: '' });
+      }
+    });
+    return [...byId.values()].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  }, [meetingHistory]);
+
   const historyEntries = useMemo((): HistoryEntry[] => {
     const groups: { seriesId: string; title: string; rule: string; meetings: Meeting[] }[] = [];
     const byId = new Map<string, (typeof groups)[number]>();
@@ -362,20 +376,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyWithLocal, expandedSeries]);
-
-  // ONE history list: server history plus local recents (guest joins
-  // never reach the server history, so without this merge a guest
-  // rejoin would vanish from the dashboard). Deduped by id, newest first.
-  const historyWithLocal = useMemo(() => {
-    const byId = new Map<string, Meeting>();
-    (meetingHistory || []).forEach((m) => byId.set(m.id, m));
-    readRecentMeetings().forEach((m) => {
-      if (!byId.has(m.id)) {
-        byId.set(m.id, { id: m.id, title: m.title, time: m.time, host: m.host || '', status: 'Completed', duration: '' });
-      }
-    });
-    return [...byId.values()].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
-  }, [meetingHistory]);
   // Top-level entries for the history count: one per series plus one per
   // single meeting, so the header reads "3 entries · 23 total meetings"
   // instead of pretending 23 separate meetings were scheduled.

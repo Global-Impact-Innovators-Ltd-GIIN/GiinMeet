@@ -3,7 +3,7 @@ import {
   User, Bell, Video, Shield, Globe, Moon, Sun, Save, Check, 
   Terminal, Volume2, Camera, Sliders, RefreshCw, 
   Smartphone, Activity, Database, Zap, Download, Keyboard,
-  Image as ImageIcon, Trash2, Cpu, Type, Palette
+  Image as ImageIcon, Trash2, Cpu, Type, Palette, Building2, Code
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { applyAccentColor, applyBorderRadius, applyFont, applyGlassOpacity, applyUiStyle } from '../utils/theme';
@@ -1047,7 +1047,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('set.tiktok_profile_url')}</label>
-                  <input type="url" placeholder="https://tiktok.com/@username" value={tiktok} onChange={(e) => setTikTok(e.target.value)} className="premium-input" />
+                  <input type="url" placeholder="https://tiktok.com/@username" value={tiktok} onChange={(e) => setTiktok(e.target.value)} className="premium-input" />
                 </div>
               </div>
               </SectionCard>

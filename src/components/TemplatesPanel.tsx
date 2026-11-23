@@ -203,26 +203,26 @@ export const TemplatesPanel: React.FC<Props> = ({
       ) : (
         <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {note && <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{note}</p>}
-          {templates.map((t) => (
+          {templates.map((tpl) => (
             <div
-              key={t.id}
+              key={tpl.id}
               style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', padding: '0.6rem 0', borderBottom: '1px solid var(--border-color)' }}
             >
               <span style={{ flex: '1 1 160px', minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: '0.9rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {t.name}
+                  {tpl.name}
                 </span>
                 <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  {t.title} · {durationLabel(t.duration_minutes)}
-                  {t.require_waiting_room ? ' · waiting room' : ' · open entry'}
-                  {t.passcode ? ' · passcode' : ''}
+                  {tpl.title} · {durationLabel(tpl.duration_minutes)}
+                  {tpl.require_waiting_room ? ' · waiting room' : ' · open entry'}
+                  {tpl.passcode ? ' · passcode' : ''}
                 </span>
               </span>
               <button
                 type="button"
                 className="premium-btn premium-btn-primary"
                 style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
-                onClick={() => onStartTemplate(t)}
+                onClick={() => onStartTemplate(tpl)}
               >
                 <Play size={13} /> {t('tpl.start_now')}
               </button>
@@ -230,7 +230,7 @@ export const TemplatesPanel: React.FC<Props> = ({
                 type="button"
                 className="premium-btn premium-btn-secondary"
                 style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
-                onClick={() => onScheduleTemplate(t)}
+                onClick={() => onScheduleTemplate(tpl)}
               >
                 <CalendarPlus size={13} /> {t('schedule.title')}
               </button>
@@ -238,9 +238,9 @@ export const TemplatesPanel: React.FC<Props> = ({
                 type="button"
                 className="premium-btn premium-btn-secondary"
                 style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem', color: '#EF4444' }}
-                disabled={deletingId === t.id}
+                disabled={deletingId === tpl.id}
                 title={t('tpl.delete_this_template')}
-                onClick={() => void handleDelete(t.id)}
+                onClick={() => void handleDelete(tpl.id)}
               >
                 <Trash2 size={14} />
               </button>

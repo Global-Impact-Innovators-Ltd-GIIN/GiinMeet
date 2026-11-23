@@ -4861,7 +4861,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       })
       .on('broadcast', { event: 'spotlight-clear' }, () => {
         setSpotlightKey(null);
-        setSpotlightName(null);
       })
       .on('broadcast', { event: 'signal' }, (payload: any) => {
         const data = payload.payload;
@@ -5275,7 +5274,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       const success = await startScreenShare();
       if (success) {
         setIsScreenSharing(true);
-        setIsColleagueSharing(false);
       }
     } else {
       screenShareStoppedByUserRef.current = true;
@@ -5830,9 +5828,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         new Promise<never>((_, reject) =>
           window.setTimeout(() => reject(Object.assign(new Error('Microphone timed out'), { name: 'TimeoutError' })), 15000)),
       ]);
-      const t = s.getAudioTracks()[0];
-      if (!t) throw new Error(t('room.no_audio_track_acquired'));
-      return t;
+      const track = s.getAudioTracks()[0];
+      if (!track) throw new Error(t('room.no_audio_track_acquired'));
+      return track;
     };
     const publish = async (audioTrack: MediaStreamTrack): Promise<boolean> => {
       if (!roomMountedRef.current) { try { audioTrack.stop(); } catch (e) {} micAcquiringRef.current = false; return false; }
@@ -5949,9 +5947,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               videoStream.getTracks().forEach(t => t.stop());
               throw new Error(t('room.component_unmounted'));
             }
-            const t = videoStream.getVideoTracks()[0];
-            if (!t) throw new Error(t('room.no_video_track_acquired'));
-            return t;
+            const track = videoStream.getVideoTracks()[0];
+            if (!track) throw new Error(t('room.no_video_track_acquired'));
+            return track;
           };
           const attachAcquiredVideo = (videoTrack: MediaStreamTrack) => {
             videoTrack.enabled = true;
