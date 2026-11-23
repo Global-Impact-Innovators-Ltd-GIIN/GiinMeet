@@ -14,6 +14,7 @@ import { getParticipantInitials } from '../utils/getParticipantInitials';
 import { sortHandRaiseQueue, nextLayoutMode, layoutModeLabel, layoutModeHint } from '../utils/phaseB';
 import { startBackgroundFx, type BackgroundFxMode } from '../utils/backgroundFx';
 import { getLocalBrandName } from '../utils/brand';
+import { recordRecentMeeting } from '../utils/recent';
 import { isNoiseSuppressionSupported, loadRnnoiseBinary, readNoiseSuppressionPreference, saveNoiseSuppressionPreference, NOISE_SUPPRESSION_WORKLET_URL, type NoiseSuppressionStatus } from '../utils/noiseSuppression';
 
 // Web Audio API Synthesized sound effects
@@ -2107,6 +2108,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }, 5000);
     return () => clearInterval(id);
   }, [isMediaInitialized]);
+
+  // Phase C1 (26) — recent meetings: record this join on this device so
+  // the dashboard can offer one-tap rejoin. Local only, no passcode.
+  useEffect(() => {
+    recordRecentMeeting({
+      id: meetingId,
+      title: meetingTitle,
+      time: new Date().toISOString(),
+      host: currentUser?.name || '',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId]);
 
   // Attendance: who joined, when, and how long they stayed. Recorded
   // locally in this browser (localStorage, per meeting) from the

@@ -4,6 +4,7 @@ import { buildJoinLink, buildShortPersonalRoomLink, generateMeetingPasscode, get
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
 import { CalendarSyncPanel } from './CalendarSyncPanel';
 import { TemplatesPanel, type MeetingTemplate } from './TemplatesPanel';
+import { RecentMeetings } from './RecentMeetings';
 import { DEFAULT_DURATION_FOR_TIER, DURATION_OPTIONS_FOR_TIER, TIER_LABELS, clampDurationToTier, filterDurationOptionsByMax, parseDurationMinutes, type PlanTier } from '../utils/tiers';
 
 interface Meeting {
@@ -721,6 +722,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         onStartTemplate={handleStartTemplate}
         onScheduleTemplate={handleScheduleTemplate}
       />
+
+      {/* Phase C1 (26) — recent meetings, one-tap rejoin. */}
+      <RecentMeetings meetings={meetingHistory} />
 
       {/* Quick Action Grid */}
       <div style={{
