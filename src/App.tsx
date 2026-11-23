@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { 
   Home, MessageSquare, Users, Settings as SettingsIcon, HelpCircle, 
   CreditCard, Bell, LogOut, Sun, Moon, CheckCircle2, ChevronDown, User, Shield,
-  Phone, PhoneOff, ChevronLeft, ChevronRight
+  Phone, PhoneOff, ChevronLeft, ChevronRight, Library, CalendarDays
 } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { Teams } from './components/Teams';
@@ -14,7 +14,10 @@ import { Settings } from './components/Settings';
 import { Billing } from './components/Billing';
 import { HelpCenter } from './components/HelpCenter';
 import { Auth } from './components/Auth';
-import { PrivateSpace } from './components/PrivateSpace';
+import { LibrarySection } from './components/LibrarySection';
+import { ScheduleSection } from './components/ScheduleSection';
+import { LanguageSwitcher } from './components/LanguageSwitcher';
+import { t, useUiLanguage } from './i18n';
 import { Waitroom } from './components/Waitroom';
 import { PreJoinCheck } from './components/PreJoinCheck';
 import { MeetingLobby } from './components/MeetingLobby';
@@ -38,7 +41,7 @@ interface Meeting {
   passcode?: string;
   link_expires_at?: string | null;
   link_expiry_mode?: string | null;
-  // Phase 1 — all optional: the columns only exist once
+  // Phase 1, all optional: the columns only exist once
   // giinmeet_phase1.sql runs, so every reader must tolerate absence.
   reminder_enabled?: boolean;
   reminder_minutes_before?: number;
@@ -46,7 +49,7 @@ interface Meeting {
   recurrence_rule?: string | null;
   recurrence_count?: number | null;
   personal_room_slug?: string | null;
-  // Phase 3 (Feature 3) — team workspaces: a meeting scheduled inside
+  // Phase 3 (Feature 3), team workspaces: a meeting scheduled inside
   // a team carries its team_id (and the team name for the badge).
   team_id?: string | null;
   team_name?: string | null;
@@ -74,7 +77,7 @@ function App() {
   });
 
   const [joinMeetingData, setJoinMeetingData] = useState<{ meetingId: string; passcode: string } | null>(null);
-  // Phase 1 — personal room: while a #/room/<slug> link resolves to its
+  // Phase 1, personal room: while a #/room/<slug> link resolves to its
   // session meeting, the app shows an "Opening your room…" card instead
   // of the dashboard. resolvingRoomRef guards against resolving the same
   // slug twice (the hash listener runs on mount and on every change).
@@ -84,7 +87,7 @@ function App() {
   // opens the reset link from their email. While this is set, the Auth
   // screen shows the new-password form instead of the dashboard.
   // type=recovery: a valid reset link. error_code=otp_expired /
-  // error=access_denied: an expired or already-used reset link — the Auth
+  // error=access_denied: an expired or already-used reset link, the Auth
   // screen shows the "link expired" card with a way to request a new one
   // instead of silently landing on sign-in (or the dashboard, if already
   // signed in).
@@ -121,7 +124,7 @@ function App() {
     }
     if (hash.startsWith('#/')) {
       const view = hash.substring(2).split('?')[0];
-      if (['dashboard', 'chats', 'contacts', 'private', 'help', 'settings', 'billing', 'teams'].includes(view)) {
+      if (['dashboard', 'chats', 'contacts', 'library', 'schedule', 'help', 'settings', 'billing', 'teams'].includes(view)) {
         return view;
       }
     }
@@ -129,13 +132,16 @@ function App() {
     // lobby data and the live meeting state are not persisted, so the
     // lobby would render a blank panel. Fall back to the dashboard.
     const storedView = localStorage.getItem('giin_view');
-    // 'superadmin' is no longer a dashboard view — the portal lives
+    // 'superadmin' is no longer a dashboard view, the portal lives
     // at /superadmin, so a stale stored view falls back to dashboard.
-    return storedView && !['lobby', 'meeting', 'superadmin'].includes(storedView) ? storedView : 'dashboard';
+    const knownViews = ['dashboard', 'chats', 'contacts', 'library', 'schedule', 'help', 'settings', 'billing', 'teams'];
+    return storedView && knownViews.includes(storedView) ? storedView : 'dashboard';
   });
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('giin_theme') === 'dark';
   });
+  // Phase C2a (3): re-render the shell when the UI language changes.
+  useUiLanguage();
   const [isPremium, setIsPremium] = useState<boolean>(() => {
     return localStorage.getItem('giin_premium') === 'true';
   });
@@ -228,7 +234,7 @@ function App() {
     };
   }, []);
 
-  // Phase 3 (Feature 4) — shared workspace brand: load the brand the
+  // Phase 3 (Feature 4), shared workspace brand: load the brand the
   // workspace admin published (if any) and sync it into the same
   // localStorage keys + events above, so this device shows the same
   // brand as everyone else. Runs for guests too: the sign-in screen,
@@ -743,7 +749,7 @@ function App() {
     const handleHashChange = async () => {
       const hash = window.location.hash;
       if (!hash.startsWith('#/room/')) resolvingRoomRef.current = null;
-      // Phase 1 — personal room link (#/room/<slug>): resolve the slug to
+      // Phase 1, personal room link (#/room/<slug>): resolve the slug to
       // its session meeting server-side, then hand over to the normal
       // #/join flow (host bypass for the signed-in host, passcode gate +
       // waiting room for everyone else). The hash is rewritten, so this
@@ -815,7 +821,7 @@ function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
     // Fix Round 8 (#2): re-run when the signed-in user becomes known.
     // On a cold page load the session restores asynchronously, so the
-    // first run can see no user and skip the host bypass — the host
+    // first run can see no user and skip the host bypass, the host
     // then lands in the join gate instead of straight into the room.
     // The handler is idempotent for every other case.
   }, [user]);
@@ -864,7 +870,7 @@ function App() {
         // Superadmin is a DB role (profiles.is_superadmin), never an
         // email check: the portal at /superadmin is the single source
         // of truth, seeded by giinmeet_superadmin.sql. No auto-grant
-        // and no auto-reset here — only a superadmin (via the portal)
+        // and no auto-reset here, only a superadmin (via the portal)
         // may change the flag.
         const isSuperadmin = profile?.is_superadmin === true;
 
@@ -894,7 +900,7 @@ function App() {
         localStorage.setItem('giin_name', authenticatedUser.name);
         localStorage.setItem('giin_email', authenticatedUser.email);
 
-        // The old in-dashboard superadmin view is gone — the portal
+        // The old in-dashboard superadmin view is gone, the portal
         // lives at /superadmin. A stale stored view still points
         // there, so reset it to the dashboard.
         if (localStorage.getItem('giin_view') === 'superadmin') {
@@ -903,7 +909,7 @@ function App() {
         }
       } else {
         // No live Supabase session: the cached giin_user (if any) is
-        // stale — it was restored into state on load and would present
+        // stale, it was restored into state on load and would present
         // a signed-out (or different-account) user as signed in, so
         // every write checked against auth.uid() (e.g. scheduling a
         // meeting) fails RLS. Clear it so the app shows the sign-in
@@ -980,7 +986,7 @@ function App() {
         // Superadmin is a DB role (profiles.is_superadmin), never an
         // email check: the portal at /superadmin is the single source
         // of truth, seeded by giinmeet_superadmin.sql. No auto-grant
-        // and no auto-reset here — only a superadmin (via the portal)
+        // and no auto-reset here, only a superadmin (via the portal)
         // may change the flag.
         const isSuperadmin = profile?.is_superadmin === true;
 
@@ -1010,7 +1016,7 @@ function App() {
         localStorage.setItem('giin_name', authenticatedUser.name);
         localStorage.setItem('giin_email', authenticatedUser.email);
 
-        // The old in-dashboard superadmin view is gone — the portal
+        // The old in-dashboard superadmin view is gone, the portal
         // lives at /superadmin. A stale stored view still points
         // there, so reset it to the dashboard.
         if (localStorage.getItem('giin_view') === 'superadmin') {
@@ -1047,7 +1053,7 @@ function App() {
           let data = await giinApi.getMeetingsForUser(user.id, user.email);
 
           // Phase 3 (Feature 3): team meetings other members scheduled
-          // are not in the personal list — merge them in, team row wins
+          // are not in the personal list, merge them in, team row wins
           // on a duplicate id so the team badge survives.
           let teamData: any[] = [];
           try { teamData = await giinApi.getMyTeamMeetings(); } catch (e) { teamData = []; }
@@ -1058,7 +1064,7 @@ function App() {
 
           if (data && data.length > 0) {
             // Soft-deleted rows come back with deleted_at set (the
-            // history queries read it best-effort) — hide them here,
+            // history queries read it best-effort), hide them here,
             // and keep them out of the local-cache merge below so a
             // deleted meeting cannot come back from this browser's
             // cache on the next load.
@@ -1073,7 +1079,7 @@ function App() {
               passcode: m.passcode,
               // Recurring-series link, so the dashboard can group a series
               // into one row without a re-read (the columns only exist
-              // once giinmeet_phase1.sql runs — hence the null fallback).
+              // once giinmeet_phase1.sql runs, hence the null fallback).
               series_id: (m as any).series_id ?? null,
               recurrence_rule: (m as any).recurrence_rule ?? null,
               recurrence_count: (m as any).recurrence_count ?? null,
@@ -1106,7 +1112,7 @@ function App() {
   }, [user]);
 
   // Fix Round 8 (Evidence 2): a dashboard tab left open never
-  // refetched its history — an ended meeting stayed "IN PROGRESS"
+  // refetched its history, an ended meeting stayed "IN PROGRESS"
   // with a Join Now button until a manual reload. Refetch on focus,
   // on becoming visible, and every 60 s while the tab is open, using
   // the same server-first merge as the startup load.
@@ -1194,7 +1200,7 @@ function App() {
   // Announcement banner (Superadmin portal): the stored banner
   // (system_settings.announcement_banner) shows at the top of the
   // dashboard while enabled. Missing table (SQL not run) means no
-  // banner — the app behaves exactly as before.
+  // banner, the app behaves exactly as before.
   const [announcementBanner, setAnnouncementBanner] = useState<{ enabled: boolean; message: string } | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -1204,7 +1210,7 @@ function App() {
 
   // Effect to apply custom accent colors, glassmorphism, fonts, border-radii & UI styles dynamically
   useEffect(() => {
-    // 1. Accent color — the shared applier sets the primary AND accent
+    // 1. Accent color, the shared applier sets the primary AND accent
     // variable families, so the saved colour re-themes the whole platform
     // (buttons, links, highlights, active states), not just a few spots.
     const savedAccent = localStorage.getItem('giin_accent_color');
@@ -1226,7 +1232,7 @@ function App() {
       document.documentElement.style.removeProperty('--sidebar-deeper');
     }
 
-    // 2. UI Style — the shared applier re-applies the SAVED glass level
+    // 2. UI Style, the shared applier re-applies the SAVED glass level
     // AFTER clearing inline glass vars. (The old effect applied the glass
     // level BEFORE this call, which removed the vars and clobbered the
     // saved blur on every reload.)
@@ -1359,7 +1365,7 @@ function App() {
         if (existingMeetingId) {
           // Joining an existing meeting: the input may be a full invite
           // link (.../#/join?id=<uuid>&passcode=<code>), a bare meeting
-          // UUID, or — the old bug — a 6-character passcode or anything
+          // UUID, or, the old bug, a 6-character passcode or anything
           // else. A passcode alone cannot identify a meeting, and an
           // unparseable input must fail loudly instead of silently
           // creating a brand-new meeting the user never asked for.
@@ -1375,19 +1381,19 @@ function App() {
             joinId = rawInput;
           }
           if (!joinId) {
-            window.alert('That meeting code or link was not recognised. Paste the full invite link or the meeting ID (the long code with dashes) — a 6-character passcode alone is not enough to find a meeting.');
+            window.alert('That meeting code or link was not recognised. Paste the full invite link or the meeting ID (the long code with dashes), a 6-character passcode alone is not enough to find a meeting.');
             return;
           }
           // Fetch existing meeting details
           const { data } = await giinApi.getMeetingDetails(joinId);
           if (!data) {
-            window.alert('That meeting could not be found. It may have been deleted — check the link or code and try again.');
+            window.alert('That meeting could not be found. It may have been deleted, check the link or code and try again.');
             return;
           }
           // Only the meeting's creator / admin may (re)start it as host.
           // Anyone else goes through the waiting room like any other
           // joiner: passcode + host admission. Never register a joiner
-          // as Admin — the old code did, which bypassed both.
+          // as Admin, the old code did, which bypassed both.
           const isCallerHost = await isMeetingHostForUser(data, user);
           if (!isCallerHost) {
             const joinHash = `#/join?id=${joinId}` + (joinPasscode ? `&passcode=${joinPasscode}` : '');
@@ -1533,7 +1539,7 @@ function App() {
     } else {
       // Guests cannot start meetings: hosting needs a signed-in account so the
       // meeting, its passcode and its video room can be stored. Never invent a
-      // local-only meeting — it could never connect.
+      // local-only meeting, it could never connect.
       console.warn('[GiinMeet] A guest tried to start a meeting. Sign-in is required to host a meeting.');
       window.alert('Sign in to start a meeting. Guests can join a meeting from an invite link.');
       return;
@@ -1566,7 +1572,7 @@ function App() {
       // so do not end it twice. Otherwise the host ends it here.
       // Fix Round 6 (Phase 6): there is NO client-side fallback that
       // marks the meeting Completed when the server end fails. That
-      // fallback was a silent partial end — the database said ended
+      // fallback was a silent partial end, the database said ended
       // while everyone was still connected.
       if (isLeaverHost && !skipServerEnd) {
         try {
@@ -1583,7 +1589,7 @@ function App() {
       }
       // Round 9 (9A): leaving a LIVE meeting (not ending it) leaves a
       // marker so the dashboard shows "Rejoin" instead of "Join Now".
-      // Ending it clears the marker — an ended meeting shows no join
+      // Ending it clears the marker, an ended meeting shows no join
       // action at all.
       try {
         if (isLeaverHost && !skipServerEnd) localStorage.removeItem(`giin_left_meeting_${endedId}`);
@@ -1620,7 +1626,7 @@ function App() {
   // Leave-call screen Rejoin: the room is still mounted showing the
   // leave screen, so startCall with the same id would be a no-op (it
   // early-returns when the meeting is already active). Unmount the room
-  // first, then go through the normal #/join flow — the hash router
+  // first, then go through the normal #/join flow, the hash router
   // sends the host straight back in and everyone else through the
   // pre-join check / waiting room as usual.
   const handleRejoinMeeting = (meetingId: string) => {
@@ -1630,7 +1636,7 @@ function App() {
   };
 
   // Round 9 (9B): live-sync the dashboard history when any meeting row
-  // changes — another tab ended it, the host admitted someone, the last
+  // changes, another tab ended it, the host admitted someone, the last
   // person left and the leave route completed it. Realtime only fires
   // when the table is in the publication; the focus/visibility/60s
   // refetch from Round 8 is the fallback, so a missing publication
@@ -1778,7 +1784,7 @@ function App() {
     if (!window.confirm(`Cancel "${title}"? Guests with the link will no longer be able to join.`)) return;
     const { error } = await giinApi.updateMeetingStatus(meetingId, 'Cancelled');
     if (error) {
-      window.alert('Could not cancel the meeting — please try again.');
+      window.alert('Could not cancel the meeting, please try again.');
       return;
     }
     setMeetingHistory(prev => prev.filter(m => m.id !== meetingId));
@@ -1787,21 +1793,21 @@ function App() {
   // Delete from history (soft delete, owner only): a Completed meeting,
   // or a Scheduled meeting whose start time has passed, can be removed
   // from Meeting Logs & History. The server marks the row deleted_at
-  // and writes the audit row — nothing else is deleted. In Progress
+  // and writes the audit row, nothing else is deleted. In Progress
   // and upcoming Scheduled meetings are refused by the server (cancel
   // an upcoming meeting instead).
   const handleDeleteMeeting = async (meetingId: string, title: string) => {
-    if (!window.confirm(`Delete "${title}" from your history? It will no longer appear in Meeting Logs & History. The meeting record is kept for audit — nothing else is deleted.`)) return;
+    if (!window.confirm(`Delete "${title}" from your history? It will no longer appear in Meeting Logs & History. The meeting record is kept for audit, nothing else is deleted.`)) return;
     try {
       await giinApi.deleteMeetingFromHistory(meetingId);
     } catch (e: any) {
-      window.alert(e?.message || 'Could not delete the meeting from your history — please try again.');
+      window.alert(e?.message || 'Could not delete the meeting from your history, please try again.');
       return;
     }
     setMeetingHistory(prev => prev.filter(m => m.id !== meetingId));
   };
 
-  // Phase 1 — cancel a whole recurring series: every still-Scheduled
+  // Phase 1, cancel a whole recurring series: every still-Scheduled
   // instance in the series becomes Cancelled (past/completed instances
   // are untouched). The server path (giinApi.cancelSeries) only works
   // once giinmeet_phase1.sql has run; until then the series lives in
@@ -1815,17 +1821,17 @@ function App() {
     if (!window.confirm(`Cancel the whole series "${title}"? ${seriesMeetings.length} upcoming meeting${seriesMeetings.length === 1 ? '' : 's'} will be cancelled.`)) return;
     const { count, error } = await giinApi.cancelSeries(seriesId);
     if (error) {
-      // No series columns yet — cancel the known instances one by one.
+      // No series columns yet, cancel the known instances one by one.
       let failed = 0;
       for (const m of seriesMeetings) {
         const { error: oneError } = await giinApi.updateMeetingStatus(m.id, 'Cancelled');
         if (oneError) failed++;
       }
       if (failed > 0) {
-        window.alert(`Could not cancel ${failed} of the ${seriesMeetings.length} meetings — please try again.`);
+        window.alert(`Could not cancel ${failed} of the ${seriesMeetings.length} meetings, please try again.`);
       }
     } else if (count === 0) {
-      // The server found nothing (columns missing or rows already gone) —
+      // The server found nothing (columns missing or rows already gone) ,
       // fall back to the instances we know about.
       for (const m of seriesMeetings) {
         await giinApi.updateMeetingStatus(m.id, 'Cancelled');
@@ -1857,7 +1863,7 @@ function App() {
         return null;
       }
     } catch (e) {
-      // If the session check itself fails, fall through to the save —
+      // If the session check itself fails, fall through to the save ,
       // the save will fail honestly and the catch below translates it.
     }
     try {
@@ -1879,13 +1885,13 @@ function App() {
         newDbMeet.link_expiry_mode = meet.linkExpiry.mode;
         newDbMeet.link_expires_at = meet.linkExpiry.expiresAt;
       }
-      // Phase 1 — the reminder setting travels the same way (createMeeting
+      // Phase 1, the reminder setting travels the same way (createMeeting
       // probe-gates the reminder columns, localStorage until then).
       if (meet.reminder) {
         newDbMeet.reminder_enabled = meet.reminder.enabled;
         newDbMeet.reminder_minutes_before = meet.reminder.minutesBefore;
       }
-      // Phase 1 — the recurring-series link travels the same way.
+      // Phase 1, the recurring-series link travels the same way.
       if (meet.series) {
         newDbMeet.series_id = meet.series.id;
         newDbMeet.recurrence_rule = meet.series.rule;
@@ -1893,7 +1899,7 @@ function App() {
       }
       // Phase 3 (Feature 3): a team meeting goes through
       // createTeamMeeting, which enforces the team's who-can-start
-      // rule and applies its defaults — the meeting itself is still
+      // rule and applies its defaults, the meeting itself is still
       // created by the same createMeeting engine.
       const savedMeet = meet.teamId
         ? await giinApi.createTeamMeeting(meet.teamId, newDbMeet)
@@ -1909,16 +1915,16 @@ function App() {
         passcode: savedMeet.passcode,
         link_expires_at: savedMeet.link_expires_at || meet.linkExpiry?.expiresAt || null,
         link_expiry_mode: savedMeet.link_expiry_mode || meet.linkExpiry?.mode || 'on-end',
-        // Phase 1 — reminder setting, so the dashboard can show it without
-        // a re-read (the columns may not exist yet — see createMeeting).
+        // Phase 1, reminder setting, so the dashboard can show it without
+        // a re-read (the columns may not exist yet, see createMeeting).
         reminder_enabled: (savedMeet as any).reminder_enabled ?? meet.reminder?.enabled ?? true,
         reminder_minutes_before: (savedMeet as any).reminder_minutes_before ?? meet.reminder?.minutesBefore ?? 15,
-        // Phase 1 — series link, so the dashboard can badge and cancel the
+        // Phase 1, series link, so the dashboard can badge and cancel the
         // series without a re-read.
         series_id: (savedMeet as any).series_id ?? meet.series?.id ?? null,
         recurrence_rule: (savedMeet as any).recurrence_rule ?? meet.series?.rule ?? null,
         recurrence_count: (savedMeet as any).recurrence_count ?? meet.series?.count ?? null,
-        // Phase 3 (Feature 3) — team link, so the dashboard can badge
+        // Phase 3 (Feature 3), team link, so the dashboard can badge
         // the meeting with its team without waiting for a refresh.
         team_id: (savedMeet as any).team_id ?? meet.teamId ?? null,
         team_name: (savedMeet as any).team_name ?? meet.teamName ?? null
@@ -1949,7 +1955,7 @@ function App() {
     }
   };
 
-  // Phase 3 (Feature 3) — the Teams view schedules through this: the
+  // Phase 3 (Feature 3), the Teams view schedules through this: the
   // team id/name ride along so the new row is badged immediately.
   // handleAddMeeting already alerts on failure, so false here just
   // means "the user was already told".
@@ -2079,7 +2085,7 @@ function App() {
 
   const unreadNotifCount = notifications.filter(n => !n.read).length;
 
-  // Phase 1 — personal room link resolving: show an opening card instead
+  // Phase 1, personal room link resolving: show an opening card instead
   // of the dashboard while the slug is resolved to its session meeting.
   if (resolvingPersonalRoom) {
     return (
@@ -2190,19 +2196,19 @@ function App() {
       background: 'var(--bg-app)'
     }}>
       
-      {/* Sidebar Navigation — only in the left-docked layout; the
+      {/* Sidebar Navigation, only in the left-docked layout; the
           header-only layout renders the top navbar below instead. */}
       {currentView !== 'meeting' && layoutStyle === 'left-docked' && (
         <aside className="sidebar-desktop app-sidebar" style={{
         width: isSidebarCollapsed ? '72px' : '260px',
-        /* Fix 9 — the sidebar itself follows the selected accent: a deep
+        /* Fix 9, the sidebar itself follows the selected accent: a deep
            gradient of the derived shades (theme.ts deriveSidebarShades,
            applied by applyAccentColor). The old
            backgroundColor: 'var(--bg-sidebar)' painted flat navy and
            silently overrode the .app-sidebar class gradient. The var()
            fallbacks keep the old navy when no accent is saved. (Themes
-           that force their own sidebar background with !important —
-           minimalism white, maximalism violet — still win, by design.) */
+           that force their own sidebar background with !important ,
+           minimalism white, maximalism violet, still win, by design.) */
         background: 'linear-gradient(180deg, var(--sidebar-deep, var(--bg-sidebar)), var(--sidebar-deeper, var(--bg-sidebar)))',
         display: 'flex',
         flexDirection: 'column',
@@ -2345,7 +2351,7 @@ function App() {
               title="Dashboard"
             >
               <Home size={18} />
-              {!isSidebarCollapsed && <span>Dashboard</span>}
+              {!isSidebarCollapsed && <span>{t('nav.dashboard')}</span>}
             </button>
 
             {/* Teams Link */}
@@ -2370,7 +2376,7 @@ function App() {
               title="Team Workspaces"
             >
               <Users size={18} />
-              {!isSidebarCollapsed && <span>Teams</span>}
+              {!isSidebarCollapsed && <span>{t('nav.teams')}</span>}
             </button>
 
             {/* Chats Link */}
@@ -2395,7 +2401,7 @@ function App() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: isSidebarCollapsed ? '0' : '0.75rem', position: 'relative' }}>
                 <MessageSquare size={18} />
-                {!isSidebarCollapsed && <span>Chat Center</span>}
+                {!isSidebarCollapsed && <span>{t('nav.chats')}</span>}
                 {isSidebarCollapsed && totalUnreadMessages > 0 && (
                   <span style={{
                     position: 'absolute',
@@ -2452,13 +2458,13 @@ function App() {
               title="Contacts"
             >
               <Users size={18} />
-              {!isSidebarCollapsed && <span>Contacts</span>}
+              {!isSidebarCollapsed && <span>{t('nav.contacts')}</span>}
             </button>
 
-            {/* Private Space Link */}
-            <button 
-              onClick={() => setCurrentView('private')}
-              className={`sidebar-btn ${currentView === 'private' ? 'active' : ''}`}
+            {/* Phase C2a (9): Library, the side-panel home for everything a meeting produces. */}
+            <button
+              onClick={() => setCurrentView('library')}
+              className={`sidebar-btn ${currentView === 'library' ? 'active' : ''}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -2469,15 +2475,40 @@ function App() {
                 border: 'none',
                 cursor: 'pointer',
                 textAlign: 'left',
-                fontWeight: currentView === 'private' ? 600 : 400,
+                fontWeight: currentView === 'library' ? 600 : 400,
                 fontSize: '0.95rem',
                 width: '100%',
                 transition: 'all var(--transition-fast)'
               }}
-              title="Private Vault"
+              title={t('nav.library')}
             >
-              <Shield size={18} />
-              {!isSidebarCollapsed && <span>Private Vault</span>}
+              <Library size={18} />
+              {!isSidebarCollapsed && <span>{t('nav.library')}</span>}
+            </button>
+
+            {/* Phase C2a (10): Schedule, all meetings past and coming in one view. */}
+            <button
+              onClick={() => setCurrentView('schedule')}
+              className={`sidebar-btn ${currentView === 'schedule' ? 'active' : ''}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                gap: isSidebarCollapsed ? '0' : '0.75rem',
+                padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
+                borderRadius: 'var(--radius-md)',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontWeight: currentView === 'schedule' ? 600 : 400,
+                fontSize: '0.95rem',
+                width: '100%',
+                transition: 'all var(--transition-fast)'
+              }}
+              title={t('nav.schedule')}
+            >
+              <CalendarDays size={18} />
+              {!isSidebarCollapsed && <span>{t('nav.schedule')}</span>}
             </button>
 
             {/* Help Center Link */}
@@ -2502,7 +2533,7 @@ function App() {
               title="Help & Support"
             >
               <HelpCircle size={18} />
-              {!isSidebarCollapsed && <span>Help & Support</span>}
+              {!isSidebarCollapsed && <span>{t('nav.help')}</span>}
             </button>
 
             {/* Superadmin Portal Link */}
@@ -2555,7 +2586,7 @@ function App() {
               title="Settings"
             >
               <SettingsIcon size={18} />
-              {!isSidebarCollapsed && <span>Settings</span>}
+              {!isSidebarCollapsed && <span>{t('nav.settings')}</span>}
             </button>
           </nav>
         </div>
@@ -2626,7 +2657,7 @@ function App() {
         overflow: 'hidden'
       }}>
         
-        {/* Top Navbar Menu — the header-only layout: the same navigation
+        {/* Top Navbar Menu, the header-only layout: the same navigation
             items as the left sidebar, rendered as a horizontal bar. */}
         {currentView !== 'meeting' && layoutStyle === 'header-only' && (
           <nav className="top-navbar" aria-label="Main navigation">
@@ -2636,22 +2667,25 @@ function App() {
             </div>
             <div className="top-navbar-links">
               <button onClick={() => setCurrentView('dashboard')} className={`top-navbar-btn ${currentView === 'dashboard' ? 'active' : ''}`}>
-                <Home size={16} /> Dashboard
+                <Home size={16} /> {t('nav.dashboard')}
               </button>
               <button onClick={() => setCurrentView('teams')} className={`top-navbar-btn ${currentView === 'teams' ? 'active' : ''}`}>
-                <Users size={16} /> Teams
+                <Users size={16} /> {t('nav.teams')}
               </button>
               <button onClick={() => setCurrentView('chats')} className={`top-navbar-btn ${currentView === 'chats' ? 'active' : ''}`}>
-                <MessageSquare size={16} /> Chat Center
+                <MessageSquare size={16} /> {t('nav.chats')}
               </button>
               <button onClick={() => setCurrentView('contacts')} className={`top-navbar-btn ${currentView === 'contacts' ? 'active' : ''}`}>
-                <Users size={16} /> Contacts
+                <Users size={16} /> {t('nav.contacts')}
               </button>
-              <button onClick={() => setCurrentView('private')} className={`top-navbar-btn ${currentView === 'private' ? 'active' : ''}`}>
-                <Shield size={16} /> Private Vault
+              <button onClick={() => setCurrentView('library')} className={`top-navbar-btn ${currentView === 'library' ? 'active' : ''}`}>
+                <Library size={16} /> {t('nav.library')}
+              </button>
+              <button onClick={() => setCurrentView('schedule')} className={`top-navbar-btn ${currentView === 'schedule' ? 'active' : ''}`}>
+                <CalendarDays size={16} /> {t('nav.schedule')}
               </button>
               <button onClick={() => setCurrentView('help')} className={`top-navbar-btn ${currentView === 'help' ? 'active' : ''}`}>
-                <HelpCircle size={16} /> Help &amp; Support
+                <HelpCircle size={16} /> {t('nav.help')}
               </button>
               {user?.is_superadmin && (
                 <button onClick={() => { window.location.href = '/superadmin'; }} className="top-navbar-btn">
@@ -2659,7 +2693,7 @@ function App() {
                 </button>
               )}
               <button onClick={() => setCurrentView('settings')} className={`top-navbar-btn ${currentView === 'settings' ? 'active' : ''}`}>
-                <SettingsIcon size={16} /> Settings
+                <SettingsIcon size={16} /> {t('nav.settings')}
               </button>
             </div>
           </nav>
@@ -2715,7 +2749,7 @@ function App() {
               </div>
 
               <h2 className="header-title" style={{ fontWeight: 700, textTransform: 'capitalize', fontFamily: 'var(--font-heading)' }}>
-                {currentView === 'help' ? 'Help Center & Support' : currentView === 'chats' ? 'Chat Center' : currentView === 'meeting' ? 'Active Call Room' : currentView}
+                {currentView === 'help' ? 'Help Center & Support' : currentView === 'chats' ? 'Chat Center' : currentView === 'meeting' ? 'Active Call Room' : currentView === 'library' ? t('nav.library') : currentView === 'schedule' ? t('nav.schedule') : currentView}
               </h2>
             </div>
 
@@ -2730,6 +2764,9 @@ function App() {
                   Start Instant Meeting
                 </button>
               )}
+
+              {/* Phase C2a (3): language switch, English, French, Kinyarwanda. */}
+              <LanguageSwitcher />
 
               {/* Theme quick toggler */}
               <button 
@@ -3065,13 +3102,12 @@ function App() {
             />
           )}
 
-          {currentView === 'private' && (
-            <PrivateSpace 
-              viewerName={userName}
-              viewerEmail={userEmail}
-              meetingTitle="Confidential Board Alignment"
-              onExit={() => setCurrentView('dashboard')}
-            />
+          {currentView === 'library' && (
+            <LibrarySection />
+          )}
+
+          {currentView === 'schedule' && (
+            <ScheduleSection meetings={meetingHistory} />
           )}
 
           {currentView === 'contacts' && (
@@ -3181,7 +3217,7 @@ function App() {
             fontWeight: currentView === 'dashboard' ? 700 : 500,
             color: currentView === 'dashboard' ? 'var(--color-active-nav)' : 'var(--text-muted)',
             fontFamily: 'var(--font-heading)'
-          }}>Home</span>
+          }}>{t('nav.dashboard')}</span>
         </button>
 
         <button 
@@ -3205,7 +3241,7 @@ function App() {
             fontWeight: currentView === 'teams' ? 700 : 500,
             color: currentView === 'teams' ? 'var(--color-active-nav)' : 'var(--text-muted)',
             fontFamily: 'var(--font-heading)'
-          }}>Teams</span>
+          }}>{t('nav.teams')}</span>
         </button>
 
         <button 
@@ -3250,7 +3286,7 @@ function App() {
             fontWeight: currentView === 'chats' ? 700 : 500,
             color: currentView === 'chats' ? 'var(--color-active-nav)' : 'var(--text-muted)',
             fontFamily: 'var(--font-heading)'
-          }}>Chats</span>
+          }}>{t('nav.chats')}</span>
         </button>
 
         <button 
@@ -3274,11 +3310,11 @@ function App() {
             fontWeight: currentView === 'contacts' ? 700 : 500,
             color: currentView === 'contacts' ? 'var(--color-active-nav)' : 'var(--text-muted)',
             fontFamily: 'var(--font-heading)'
-          }}>Contacts</span>
+          }}>{t('nav.contacts')}</span>
         </button>
 
-        <button 
-          onClick={() => setCurrentView('private')}
+        <button
+          onClick={() => setCurrentView('library')}
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -3292,13 +3328,37 @@ function App() {
             flex: 1
           }}
         >
-          <Shield size={20} color={currentView === 'private' ? '#EF4444' : 'var(--text-muted)'} style={{ color: currentView === 'private' ? '#EF4444' : 'var(--text-muted)' }} />
+          <Library size={20} color={currentView === 'library' ? 'var(--color-active-nav)' : 'var(--text-muted)'} style={{ color: currentView === 'library' ? 'var(--color-active-nav)' : 'var(--text-muted)' }} />
           <span style={{
             fontSize: '0.65rem',
-            fontWeight: currentView === 'private' ? 700 : 500,
-            color: currentView === 'private' ? '#EF4444' : 'var(--text-muted)',
+            fontWeight: currentView === 'library' ? 700 : 500,
+            color: currentView === 'library' ? 'var(--color-active-nav)' : 'var(--text-muted)',
             fontFamily: 'var(--font-heading)'
-          }}>Vault</span>
+          }}>{t('nav.library')}</span>
+        </button>
+
+        <button
+          onClick={() => setCurrentView('schedule')}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'none',
+            border: 'none',
+            gap: '4px',
+            cursor: 'pointer',
+            padding: '0.25rem',
+            flex: 1
+          }}
+        >
+          <CalendarDays size={20} color={currentView === 'schedule' ? 'var(--color-active-nav)' : 'var(--text-muted)'} style={{ color: currentView === 'schedule' ? 'var(--color-active-nav)' : 'var(--text-muted)' }} />
+          <span style={{
+            fontSize: '0.65rem',
+            fontWeight: currentView === 'schedule' ? 700 : 500,
+            color: currentView === 'schedule' ? 'var(--color-active-nav)' : 'var(--text-muted)',
+            fontFamily: 'var(--font-heading)'
+          }}>{t('nav.schedule')}</span>
         </button>
 
         <button 
@@ -3322,7 +3382,7 @@ function App() {
             fontWeight: currentView === 'settings' ? 700 : 500,
             color: currentView === 'settings' ? 'var(--color-active-nav)' : 'var(--text-muted)',
             fontFamily: 'var(--font-heading)'
-          }}>Settings</span>
+          }}>{t('nav.settings')}</span>
         </button>
       </div>
 
