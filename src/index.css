@@ -888,6 +888,20 @@ h1, h2, h3, h4, h5, h6 {
   display: none;
 }
 
+/* Mobile navigation drawer controls: hidden on desktop, shown on a
+   phone by the media query below. */
+.mobile-menu-btn {
+  display: none;
+}
+
+.mobile-nav-close {
+  display: none;
+}
+
+.mobile-nav-overlay {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .mobile-brand-container {
     display: flex !important;
@@ -898,8 +912,52 @@ h1, h2, h3, h4, h5, h6 {
     height: auto !important;
   }
   
+  /* Mobile navigation drawer: the left sidebar becomes a slide-over
+     panel on phones, opened by the hamburger button in the header.
+     Closed it sits off-canvas and invisible, so it never takes space
+     or focus. Open it slides in above the overlay and the bottom nav.
+     The desktop collapse toggle is hidden here because the drawer has
+     its own X button. */
   .sidebar-desktop {
+    display: flex !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    height: 100dvh !important;
+    width: 280px !important;
+    max-width: 85vw !important;
+    z-index: 120 !important;
+    transform: translateX(-110%);
+    visibility: hidden;
+    transition: transform 0.25s ease, visibility 0s linear 0.25s !important;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebar-desktop.sidebar-mobile-open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 0.25s ease, visibility 0s !important;
+  }
+
+  .sidebar-collapse-btn {
     display: none !important;
+  }
+
+  .mobile-menu-btn {
+    display: flex !important;
+  }
+
+  .mobile-nav-close {
+    display: flex !important;
+  }
+
+  .mobile-nav-overlay {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 110;
   }
   
   .bottom-nav-mobile {

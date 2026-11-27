@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { 
   Home, MessageSquare, Users, Settings as SettingsIcon, HelpCircle, 
   CreditCard, Bell, LogOut, Sun, Moon, CheckCircle2, ChevronDown, User, Shield,
-  Phone, PhoneOff, ChevronLeft, ChevronRight, Library, CalendarDays
+  Phone, PhoneOff, ChevronLeft, ChevronRight, Library, CalendarDays, Menu, X, Briefcase
 } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { Teams } from './components/Teams';
@@ -200,6 +200,19 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     return localStorage.getItem('giin_sidebar_collapsed') === 'true';
   });
+
+  // Mobile navigation drawer: on a phone the left sidebar is hidden, so
+  // a hamburger button in the header opens it as a slide-over drawer.
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  useEffect(() => {
+    // A drawer opened on a phone must not linger as a docked sidebar
+    // if the window grows past phone width.
+    const closeOnDesktopWidth = () => {
+      if (window.innerWidth > 768) setIsMobileNavOpen(false);
+    };
+    window.addEventListener('resize', closeOnDesktopWidth);
+    return () => window.removeEventListener('resize', closeOnDesktopWidth);
+  }, []);
 
   // Navbar scaffolding layout (Branding & Layout > Navbar Scaffolding):
   // 'left-docked' renders the left sidebar, 'header-only' renders a
@@ -2424,9 +2437,11 @@ function App() {
     }}>
       
       {/* Sidebar Navigation, only in the left-docked layout; the
-          header-only layout renders the top navbar below instead. */}
-      {currentView !== 'meeting' && layoutStyle === 'left-docked' && (
-        <aside className="sidebar-desktop app-sidebar" style={{
+          header-only layout renders the top navbar below instead.
+          The mobile drawer also renders it when opened from the
+          hamburger button, in either layout. */}
+      {currentView !== 'meeting' && (layoutStyle === 'left-docked' || isMobileNavOpen) && (
+        <aside className={`sidebar-desktop app-sidebar${isMobileNavOpen ? ' sidebar-mobile-open' : ''}`} style={{
         width: isSidebarCollapsed ? '72px' : '260px',
         /* Fix 9, the sidebar itself follows the selected accent: a deep
            gradient of the derived shades (theme.ts deriveSidebarShades,
@@ -2450,8 +2465,10 @@ function App() {
         position: 'relative',
         transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
       }}>
-        {/* Collapse/Expand Toggle Button */}
-        <button 
+        {/* Collapse/Expand Toggle Button, desktop only; on a phone
+            the drawer has its own close button instead. */}
+        <button
+          className="sidebar-collapse-btn"
           onClick={() => {
             const next = !isSidebarCollapsed;
             setIsSidebarCollapsed(next);
@@ -2482,6 +2499,32 @@ function App() {
           {isSidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
 
+        {/* Mobile drawer close button, only visible on a phone. */}
+        <button
+          type="button"
+          className="mobile-nav-close"
+          onClick={() => setIsMobileNavOpen(false)}
+          aria-label={t('app.close_menu')}
+          title={t('app.close_menu')}
+          style={{
+            position: 'absolute',
+            top: '12px',
+            right: '12px',
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            border: 'none',
+            background: 'rgba(255, 255, 255, 0.12)',
+            color: '#ffffff',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            zIndex: 101
+          }}
+        >
+          <X size={20} />
+        </button>
+
         {/* Sidebar scroll region: logo + nav + tier card together are
             taller than short viewports, so this wrapper is the scroll
             container (flex:1 + minHeight:0 + overflow-y:auto). */}
@@ -2501,6 +2544,7 @@ function App() {
             onClick={() => {
               setTargetContactId(null);
               setCurrentView('dashboard');
+              setIsMobileNavOpen(false);
             }}
             style={{
               display: 'flex',
@@ -2551,8 +2595,9 @@ function App() {
             )}
           </div>
 
-          {/* Navigation Links */}
-          <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {/* Navigation Links. Tapping any link also closes the mobile
+              drawer, so the chosen view opens straight away. */}
+          <nav onClick={() => setIsMobileNavOpen(false)} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {/* Dashboard Link */}
             <button 
               onClick={() => {
@@ -2738,6 +2783,33 @@ function App() {
               {!isSidebarCollapsed && <span>{t('nav.schedule')}</span>}
             </button>
 
+            {/* Live Interview Mode: Interviews, beside Schedule, so a
+                signed-in host can reach the interviews list from the
+                side panel instead of only from the dashboard card. */}
+            <button
+              onClick={() => setCurrentView('interviews')}
+              className={`sidebar-btn ${currentView === 'interviews' ? 'active' : ''}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                gap: isSidebarCollapsed ? '0' : '0.75rem',
+                padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 1rem',
+                borderRadius: 'var(--radius-md)',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontWeight: currentView === 'interviews' ? 600 : 400,
+                fontSize: '0.95rem',
+                width: '100%',
+                transition: 'all var(--transition-fast)'
+              }}
+              title={t('interview.interviews')}
+            >
+              <Briefcase size={18} />
+              {!isSidebarCollapsed && <span>{t('interview.interviews')}</span>}
+            </button>
+
             {/* Help Center Link */}
             <button 
               onClick={() => setCurrentView('help')}
@@ -2818,8 +2890,9 @@ function App() {
           </nav>
         </div>
 
-        {/* Lower Sidebar: Upgrade details & logout */}
-        <div>
+        {/* Lower Sidebar: Upgrade details & logout. Tapping the plan
+            card or logout also closes the mobile drawer. */}
+        <div onClick={() => setIsMobileNavOpen(false)}>
           {/* Plan badge */}
           {isSidebarCollapsed ? (
             <div 
@@ -2876,6 +2949,11 @@ function App() {
       </aside>
       )}
 
+      {/* Mobile navigation overlay: tapping outside the drawer closes it. */}
+      {isMobileNavOpen && currentView !== 'meeting' && (
+        <div className="mobile-nav-overlay" onClick={() => setIsMobileNavOpen(false)} aria-hidden="true" />
+      )}
+
       {/* Main Framework Container */}
       <div style={{
         flex: 1,
@@ -2911,6 +2989,9 @@ function App() {
               <button onClick={() => setCurrentView('schedule')} className={`top-navbar-btn ${currentView === 'schedule' ? 'active' : ''}`}>
                 <CalendarDays size={16} /> {t('nav.schedule')}
               </button>
+              <button onClick={() => setCurrentView('interviews')} className={`top-navbar-btn ${currentView === 'interviews' ? 'active' : ''}`}>
+                <Briefcase size={16} /> {t('interview.interviews')}
+              </button>
               <button onClick={() => setCurrentView('help')} className={`top-navbar-btn ${currentView === 'help' ? 'active' : ''}`}>
                 <HelpCircle size={16} /> {t('nav.help')}
               </button>
@@ -2940,6 +3021,35 @@ function App() {
             zIndex: 40
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              {/* Mobile menu button: opens the side panel as a drawer.
+                  Hidden on desktop, shown on a phone. It also expands
+                  the sidebar, so the drawer shows full labels. */}
+              <button
+                type="button"
+                className="mobile-menu-btn"
+                onClick={() => {
+                  setIsSidebarCollapsed(false);
+                  localStorage.setItem('giin_sidebar_collapsed', 'false');
+                  setIsMobileNavOpen(true);
+                }}
+                aria-label={t('app.open_menu')}
+                title={t('app.open_menu')}
+                style={{
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text-main)',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                <Menu size={22} />
+              </button>
+
               {/* Mobile Branding Header */}
               <div 
                 className="mobile-brand-container" 
