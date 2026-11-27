@@ -20,6 +20,8 @@ import { recordRecentMeeting } from '../utils/recent';
 import TranslatedCaption from './TranslatedCaption';
 import { LiveNotesPad, DocumentViewerPanel, InterpretationPanel, RemoteControlPanel, OrgBadge, VoiceNoteButton, TranslatedChatText, PrivateNote, LANG_LABEL, type InterpretationState, type RemoteControlStatus } from './C2bTools';
 import { isNoiseSuppressionSupported, loadRnnoiseBinary, readNoiseSuppressionPreference, saveNoiseSuppressionPreference, NOISE_SUPPRESSION_WORKLET_URL, type NoiseSuppressionStatus } from '../utils/noiseSuppression';
+import { useInterviewMonitor, type InterviewFlagEvent } from '../hooks/useInterviewMonitor';
+import { InterviewPanel } from './InterviewPanel';
 
 // Web Audio API Synthesized sound effects
 let audioCtx: AudioContext | null = null;
@@ -335,6 +337,22 @@ const agendaItemStatus = (item: { startTime?: string; endTime?: string; duration
   return 'upcoming';
 };
 
+// Live Interview Mode: the context a room joins with when the meeting
+// is an interview. The candidate gets it from their verified invite
+// token (App), the host and interviewers from a for-meeting lookup
+// (App). token is null for signed-in users, whose API calls use their
+// session token instead. candidateRowId is the candidate's
+// meeting_participants row id, which is also their LiveKit identity, so
+// the lead can find the candidate's remote tracks to record them.
+export interface InterviewRoomContext {
+  interviewId: string;
+  role: 'candidate' | 'interviewer' | 'lead';
+  token: string | null;
+  candidateName: string;
+  candidateRowId: string | null;
+  meetingId: string;
+}
+
 interface MeetingRoomProps {
   meetingId: string;
   meetingTitle: string;
@@ -352,6 +370,10 @@ interface MeetingRoomProps {
   isHost?: boolean;
   isMinimized?: boolean;
   onMinimizeToggle?: (minimized: boolean) => void;
+  // Live Interview Mode: the interview context (absent for a normal
+  // meeting). Send-to-waiting is an overlay inside the room, so the
+  // room stays mounted and no return-to-waiting-room prop is needed.
+  interview?: InterviewRoomContext;
 }
 
 export const MeetingRoom: React.FC<MeetingRoomProps> = ({ 
@@ -367,7 +389,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   isP2PCall = false,
   isHost = false,
   isMinimized = false,
-  onMinimizeToggle
+  onMinimizeToggle,
+  interview
 }) => {
   const sigChannelRef = useRef<any>(null);
   // Fix Round 7 (#1): set once our own participant row has been seen
@@ -495,7 +518,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isAnnotating, setIsAnnotating] = useState(false);
-  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings' | 'polls' | 'filters' | 'soundboard' | 'info' | 'transcript'>('none');
+  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'workspace' | 'host-settings' | 'polls' | 'filters' | 'soundboard' | 'info' | 'transcript' | 'interview'>('none');
   const [copiedInfo, setCopiedInfo] = useState<'link' | 'details' | null>(null);
   // In-room invite by email: no mail provider is configured, so this
   // opens the user's own mail app with the invitation pre-filled (a real
@@ -557,7 +580,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // meeting twice or fight the reconnect logic.
   // Round 9 (9A): 'removed' is a kicked participant; durationSeconds /
   // attendeeCount are captured when the room ends, for the ended screen.
-  const [endedState, setEndedState] = useState<{ reason: 'host-ended' | 'you-ended' | 'removed'; detail?: string; durationSeconds?: number; attendeeCount?: number } | null>(null);
+  const [endedState, setEndedState] = useState<{ reason: 'host-ended' | 'you-ended' | 'removed' | 'interview-ended'; detail?: string; durationSeconds?: number; attendeeCount?: number } | null>(null);
   const [endError, setEndError] = useState<string>('');
   const [endingInProgress, setEndingInProgress] = useState(false);
   const endedRef = useRef(false);
@@ -838,7 +861,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     pcsRef.current = {};
   }, []);
 
-  const enterEndedState = useCallback((reason: 'host-ended' | 'you-ended' | 'removed', detail?: string) => {
+  const enterEndedState = useCallback((reason: 'host-ended' | 'you-ended' | 'removed' | 'interview-ended', detail?: string) => {
     if (endedRef.current) return;
     endedRef.current = true;
     // Round 9 (9A): capture the meeting length and headcount now, the
@@ -1434,6 +1457,372 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [myParticipantRowId] = useState<string | null>(() => {
     try { return localStorage.getItem(`giin_participant_row_${meetingId}`); } catch (e) { return null; }
   });
+
+  // ------------------------------------------------------------------
+  // Live Interview Mode (all of this is a no-op when `interview` is
+  // absent, so a normal meeting is untouched).
+  // ------------------------------------------------------------------
+  // The candidate's LiveKit identity is their meeting_participants row
+  // id: the token route registers the candidate by that row, and the
+  // interview row stores it as candidate_row_id. The lead uses it to
+  // find the candidate's remote tracks for recording.
+  const interviewCandidateRowId = interview?.candidateRowId || null;
+  const interviewRole = interview?.role || null;
+  // The LiveKit data handler closes over the first render, so the
+  // interview context (which can arrive after the room connects, from
+  // the for-meeting lookup) is mirrored into a ref for it to read.
+  const interviewRef = useRef<InterviewRoomContext | undefined>(interview);
+  useEffect(() => { interviewRef.current = interview; }, [interview]);
+  const isInterviewCandidate = interviewRole === 'candidate';
+  const isInterviewViewer = interviewRole === 'interviewer' || interviewRole === 'lead';
+  const isInterviewLead = interviewRole === 'lead';
+  // Session token for interview API calls made from this room: the
+  // candidate's invite token, or the signed-in user's session token.
+  const interviewSessionTokenRef = useRef<string | null>(interview?.token || null);
+  useEffect(() => {
+    if (interviewSessionTokenRef.current) return;
+    let active = true;
+    void giinApi.interviewSessionToken().then((tok) => { if (active && tok) interviewSessionTokenRef.current = tok; });
+    return () => { active = false; };
+  }, []);
+  // Live flags received from the candidate over the LiveKit data
+  // channel (and the matching question / code / control messages).
+  // The feed shows newest first and is only ever rendered for
+  // interviewers, never for the candidate.
+  // Live flags, in the hook's shape (clientId / type / occurredAt),
+  // which is what the InterviewPanel reads. Live arrivals come over
+  // the data channel; the 5 second poll below merges the durable
+  // timeline, so a flag is never lost when the data channel drops.
+  const [interviewFlags, setInterviewFlags] = useState<InterviewFlagEvent[]>([]);
+  // The question the interviewers are currently asking the candidate.
+  // The panel's shape (timeLimitSeconds / startedAt): the countdown
+  // reads it, the candidate banner reads it, the panel reads it.
+  const [interviewCurrentQuestion, setInterviewCurrentQuestion] = useState<{ id: string; text: string; timeLimitSeconds: number | null; startedAt: number } | null>(null);
+  // Ticks once a second while a question is live, so the candidate's
+  // countdown moves. Pauses when there is no question.
+  const [interviewQuestionNow, setInterviewQuestionNow] = useState(Date.now());
+  useEffect(() => {
+    if (!interviewCurrentQuestion) return;
+    const id = window.setInterval(() => setInterviewQuestionNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [interviewCurrentQuestion?.id]);
+  // The shared code pad content (interviewers and the candidate see the
+  // same text; the candidate can edit it too, it is a shared pad).
+  const [interviewCode, setInterviewCode] = useState('');
+  const [interviewCodeUpdatedBy, setInterviewCodeUpdatedBy] = useState('');
+  // Waiting-room message text the lead typed (shown to the candidate
+  // while they wait, after being sent back).
+  const [interviewWaitingMessage, setInterviewWaitingMessage] = useState('');
+  // Candidate-side overlays: paused by the lead, or sent back to the
+  // waiting room. The room stays mounted behind the overlay so the
+  // candidate can come straight back.
+  const [interviewPaused, setInterviewPaused] = useState(false);
+  // How many times the candidate has left full screen (from the
+  // monitor). The rejoin notice gets firmer with each exit.
+  const [interviewFullscreenExits, setInterviewFullscreenExits] = useState(0);
+  const [interviewSentToWaiting, setInterviewSentToWaiting] = useState(false);
+  // Feedback the candidate leaves on the ended screen.
+  const [interviewFeedbackRating, setInterviewFeedbackRating] = useState<number | null>(null);
+  const [interviewFeedbackComment, setInterviewFeedbackComment] = useState('');
+  const [interviewFeedbackSent, setInterviewFeedbackSent] = useState(false);
+  // Shared code pad: whether it is open on this side, and the last
+  // Run output (the output is broadcast so both sides see it).
+  const [interviewCodeOpen, setInterviewCodeOpen] = useState(false);
+  const [interviewCodeOutput, setInterviewCodeOutput] = useState('');
+  // Candidate recording (lead only): the MediaRecorder for the
+  // candidate's remote tracks, and the resulting file.
+  const interviewRecorderRef = useRef<MediaRecorder | null>(null);
+  // The candidate sees a clear Recording indicator while the lead
+  // records them (the lead broadcasts interview-recording on the data
+  // channel when they start or stop).
+  const [interviewBeingRecorded, setInterviewBeingRecorded] = useState(false);
+  const interviewRecordingChunksRef = useRef<Blob[]>([]);
+  const [interviewRecordingOn, setInterviewRecordingOn] = useState(false);
+  // Recording clock for the lead's candidate recording.
+  const [interviewRecordingSeconds, setInterviewRecordingSeconds] = useState(0);
+  useEffect(() => {
+    if (!interviewRecordingOn) return;
+    const timer = window.setInterval(() => setInterviewRecordingSeconds((v) => v + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [interviewRecordingOn]);
+  const [interviewRecordingPath, setInterviewRecordingPath] = useState<string | null>(null);
+  const [interviewRecordingError, setInterviewRecordingError] = useState('');
+  // One connection drop is one flag, even though LiveKit fires both
+  // Disconnected and Reconnecting for the same drop.
+  const interviewConnectionLostRef = useRef(false);
+  // Candidate joined (once): tells the server the candidate is in the
+  // room so interviews.candidate_row_id is set and the lead can record.
+  const interviewCandidateJoinedRef = useRef(false);
+  useEffect(() => {
+    if (!interview || !isInterviewCandidate || interviewCandidateJoinedRef.current) return;
+    interviewCandidateJoinedRef.current = true;
+    void (async () => {
+      try {
+        await giinApi.interviewPost('candidate-joined', { interviewId: interview.interviewId, token: interview.token });
+      } catch (e) { /* the interview still runs, the lead sees the candidate in the room */ }
+    })();
+  }, [interview?.interviewId, isInterviewCandidate]);
+
+  // Live Interview Mode: one full screen attempt when the candidate
+  // joins. It may fail without a fresh user gesture (the admission tap
+  // is already behind us); the rejoin notice below then offers the
+  // one-tap button, which always works because the tap is the gesture.
+  useEffect(() => {
+    if (!interview || interview.role !== 'candidate') return;
+    if (document.fullscreenElement) return;
+    try {
+      const el = meetingRoomRef.current;
+      if (el && typeof el.requestFullscreen === 'function') {
+        const p: any = el.requestFullscreen();
+        if (p && typeof p.catch === 'function') p.catch(() => { /* the notice offers the button instead */ });
+      }
+    } catch (e) { /* the notice offers the button instead */ }
+    // Runs once on mount: the interview context is fixed for this room.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Live Interview Mode: the candidate's live monitor. Detection only,
+  // never prevention: the browser cannot stop a tab switch, it can only
+  // notice it and flag it. Flags go two ways at once: over the LiveKit
+  // data channel to the interviewers in this room (fast), and by API
+  // post to the timeline log (durable, queued offline with the original
+  // times kept). The monitor is a no-op unless this room is an
+  // interview and this user is the candidate.
+  const interviewPublishLive = useCallback((event: InterviewFlagEvent) => {
+    const room = livekitRoomRef.current;
+    if (!room) return;
+    try {
+      const data = new TextEncoder().encode(JSON.stringify({ kind: 'interview-flag', event }));
+      room.localParticipant.publishData(data, { reliable: true });
+    } catch (e) { /* the API post in the hook is the durable path */ }
+  }, []);
+  const interviewMonitor = useInterviewMonitor({
+    enabled: !!interview && isInterviewCandidate,
+    interviewId: interview?.interviewId || null,
+    token: interview?.token || null,
+    publishLive: interviewPublishLive,
+    onFullscreenExit: (count) => {
+      // The hook already flagged the exit (live + timeline). The 2nd
+      // exit shows a firmer warning on the candidate's screen and the
+      // 3rd gives the interviewers a pause/end choice in their panel;
+      // the interview is never ended automatically.
+      setInterviewFullscreenExits(count);
+    },
+  });
+
+  // Live Interview Mode: record the CANDIDATE's remote tracks (lead
+  // only). This is a local capture in the lead's browser, not cloud
+  // recording: there is no LiveKit recording switched on, and GiinMeet
+  // does not pay for one. The candidate's LiveKit identity is their
+  // participant row id, so their remote stream is
+  // livekitRemoteStreams[candidateRowId]. The file is uploaded to the
+  // private interview-recordings bucket when the recording stops; if
+  // the upload fails, the lead's browser downloads it instead, so the
+  // recording is never silently lost.
+  const interviewBroadcastRecording = (on: boolean) => {
+    const room = livekitRoomRef.current;
+    if (!room) return;
+    try {
+      const data = new TextEncoder().encode(JSON.stringify({ kind: 'interview-recording', on }));
+      room.localParticipant.publishData(data, { reliable: true });
+    } catch (e) { /* the candidate's indicator is a courtesy, not the record */ }
+  };
+  const startInterviewRecording = () => {
+    if (!interview || !isInterviewLead || interviewRecordingOn) return;
+    setInterviewRecordingError('');
+    const stream = interviewCandidateRowId ? livekitRemoteStreams[interviewCandidateRowId] : undefined;
+    const liveTracks = stream ? stream.getTracks().filter((tr) => tr.readyState === 'live') : [];
+    if (!stream || liveTracks.length === 0) {
+      setInterviewRecordingError(t('interview.candidate_video_is_not_available_yet'));
+      return;
+    }
+    if (typeof MediaRecorder === 'undefined') {
+      setInterviewRecordingError(t('interview.recording_is_not_supported_in_this_browser'));
+      return;
+    }
+    try {
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+      const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 1000000 });
+      interviewRecordingChunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) interviewRecordingChunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        void (async () => {
+          try {
+            const blob = new Blob(interviewRecordingChunksRef.current, { type: 'video/webm' });
+            if (blob.size === 0) { setInterviewRecordingError(t('interview.the_recording_is_empty')); return; }
+            const uploaded = await giinApi.uploadInterviewRecording(interview.interviewId, blob);
+            setInterviewRecordingPath(uploaded.path);
+          } catch (e) {
+            // Upload failed: save locally so the recording is not lost.
+            try {
+              const blob = new Blob(interviewRecordingChunksRef.current, { type: 'video/webm' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'interview-recording-' + interview.interviewId + '.webm';
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 5000);
+              setInterviewRecordingError(t('interview.could_not_upload_the_recording_so_it_was_saved_to_your_downloads'));
+            } catch (e2) {
+              setInterviewRecordingError(t('interview.could_not_save_the_recording'));
+            }
+          }
+        })();
+      };
+      rec.start(1000);
+      interviewRecorderRef.current = rec;
+      setInterviewRecordingOn(true);
+      interviewBroadcastRecording(true);
+    } catch (e) {
+      setInterviewRecordingError(t('interview.recording_could_not_start'));
+    }
+  };
+  const stopInterviewRecording = () => {
+    const rec = interviewRecorderRef.current;
+    if (!rec) return;
+    try { if (rec.state !== 'inactive') rec.stop(); } catch (e) { /* already stopped */ }
+    interviewRecorderRef.current = null;
+    setInterviewRecordingOn(false);
+    interviewBroadcastRecording(false);
+  };
+
+  // Live Interview Mode: timeline poll for interviewers. The live
+  // feed arrives over the data channel, but a dropped channel must not
+  // lose a flag: every 5 seconds the durable timeline is merged in
+  // (deduped by client id, newest first, capped at 200). The candidate
+  // never runs this poll and never sees the feed.
+  useEffect(() => {
+    if (!interview || !isInterviewViewer) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const res = await giinApi.getInterviewEvents(interview.interviewId, interview.token || undefined);
+        if (!active || !Array.isArray(res?.events)) return;
+        const mapped: InterviewFlagEvent[] = (res.events as any[]).map((e) => ({
+          clientId: e.client_id || e.clientId || `api-${e.id || Date.now()}`,
+          type: e.event_type || e.type || '',
+          detail: e.detail || '',
+          severity: e.severity === 'high' || e.severity === 'medium' ? e.severity : 'low',
+          occurredAt: e.occurred_at || e.occurredAt || new Date().toISOString(),
+          awaySeconds: typeof e.away_seconds === 'number' ? e.away_seconds : (typeof e.awaySeconds === 'number' ? e.awaySeconds : null),
+        }));
+        setInterviewFlags((prev) => {
+          const seen = new Set(prev.map((f) => f.clientId));
+          const fresh = mapped.filter((f) => !seen.has(f.clientId));
+          if (fresh.length === 0) return prev;
+          return [...fresh, ...prev].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, 200);
+        });
+      } catch (e) { /* the live feed keeps running; the next poll retries */ }
+    };
+    void poll();
+    const id = window.setInterval(() => { void poll(); }, 5000);
+    return () => { active = false; window.clearInterval(id); };
+  }, [interview?.interviewId, isInterviewViewer]);
+
+  // Live Interview Mode: the lead's controls, sent to the candidate
+  // over the LiveKit data channel and persisted by API where there is
+  // a record to keep. The candidate's room reacts in the DataReceived
+  // handler above. The token for API calls is the invite token for a
+  // guest interviewer, or the signed-in session token for the host.
+  // Credentials for interview API calls, each in its own field: the
+  // invite token for a guest interviewer, the session token for a
+  // signed-in user. The route tries the session first, then the token.
+  const interviewApiAuth = useCallback(async (): Promise<{ accessToken?: string; token?: string }> => {
+    if (interview?.token) return { token: interview.token };
+    if (interviewSessionTokenRef.current) return { accessToken: interviewSessionTokenRef.current };
+    const tok = await giinApi.interviewSessionToken();
+    if (tok) interviewSessionTokenRef.current = tok;
+    return tok ? { accessToken: tok } : {};
+  }, [interview?.token]);
+  const interviewSendData = useCallback((msg: Record<string, unknown>) => {
+    const room = livekitRoomRef.current;
+    if (!room) return;
+    try {
+      room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(msg)), { reliable: true });
+    } catch (e) { /* the API call is the durable path where one exists */ }
+  }, []);
+  const interviewPause = (paused: boolean) => {
+    if (!interview || !isInterviewLead) return;
+    setInterviewPaused(paused);
+    interviewSendData({ kind: paused ? 'interview-pause' : 'interview-resume' });
+    void (async () => {
+      const auth = await interviewApiAuth();
+      try { await giinApi.interviewPost('pause', { interviewId: interview.interviewId, paused, ...auth }); } catch (e) { /* the room state already changed; the API retry is the panel's */ }
+    })();
+  };
+  const interviewEnd = () => {
+    if (!interview || !isInterviewLead) return;
+    // The candidate is told first (live data channel), then the end is
+    // persisted, and only then does the lead leave: leaving unmounts
+    // the room, so an un-awaited API call might never land and the
+    // interview would stay 'live' in the database.
+    interviewSendData({ kind: 'interview-end' });
+    void (async () => {
+      const auth = await interviewApiAuth();
+      try { await giinApi.interviewPost('end', { interviewId: interview.interviewId, ...auth }); } catch (e) { /* the candidate already left; the report still lists the interview */ }
+      // The lead leaves too: the interview is over. Ending the meeting
+      // for everyone is the host's act and stays with onEndMeeting.
+      onEndMeeting();
+    })();
+  };
+  const interviewSendToWaiting = () => {
+    if (!interview || !isInterviewLead) return;
+    if (interviewSentToWaiting) {
+      setInterviewSentToWaiting(false);
+      interviewSendData({ kind: 'interview-return-to-room' });
+    } else {
+      setInterviewSentToWaiting(true);
+      interviewSendData({ kind: 'interview-send-to-waiting', message: interviewWaitingMessage || undefined });
+    }
+  };
+  const interviewMuteCandidate = () => {
+    if (!interview || !isInterviewLead) return;
+    interviewSendData({ kind: 'interview-mute-request' });
+  };
+  const interviewAskQuestion = (q: { id: string; question_text: string; time_limit_seconds?: number | null }) => {
+    if (!interview) return;
+    const asked = { id: q.id, text: q.question_text, timeLimitSeconds: q.time_limit_seconds ?? null, startedAt: Date.now() };
+    setInterviewCurrentQuestion(asked);
+    interviewSendData({ kind: 'interview-question', question: { id: asked.id, text: asked.text, time_limit_seconds: asked.timeLimitSeconds, asked_at: new Date(asked.startedAt).toISOString() } });
+    void (async () => {
+      const auth = await interviewApiAuth();
+      try { await giinApi.interviewPost('ask-question', { interviewId: interview.interviewId, questionId: q.id, ...auth }); } catch (e) { /* the question still shows; the timeline retry is the panel's */ }
+    })();
+  };
+  const interviewCodeChange = (v: string) => {
+    setInterviewCode(v);
+    interviewSendData({ kind: 'interview-code', code: v, by: currentUser?.name || '' });
+  };
+  const interviewToggleCode = (open: boolean) => {
+    setInterviewCodeOpen(open);
+    interviewSendData({ kind: 'interview-code-open', open });
+  };
+  const interviewRunCode = () => {
+    // v1 code pad: run the shared text as JavaScript in this browser
+    // and show what it prints. The code is the interviewer's or the
+    // candidate's own typing, never a stranger's, and it runs only in
+    // this tab, nowhere else. console.log lines and the return value
+    // are captured; errors are shown as errors, never swallowed.
+    const lines: string[] = [];
+    try {
+      const log = (...args: unknown[]) => { lines.push(args.map((a) => { try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (e) { return String(a); } }).join(' ')); };
+      const fn = new Function('console', `"use strict";
+${interviewCode}`);
+      const returned = fn({ log });
+      if (typeof returned !== 'undefined') lines.push(`=> ${(() => { try { return JSON.stringify(returned); } catch (e) { return String(returned); } })()}`);
+      const output = lines.length > 0 ? lines.join('\n') : t('interview.code_ran_with_no_output');
+      setInterviewCodeOutput(output);
+      interviewSendData({ kind: 'interview-code-output', output });
+    } catch (e: any) {
+      const output = `Error: ${e?.message || 'The code could not run.'}`;
+      setInterviewCodeOutput(output);
+      interviewSendData({ kind: 'interview-code-output', output });
+    }
+  };
+  const interviewSendWaitingMessage = (message: string) => {
+    setInterviewWaitingMessage(message);
+    interviewSendData({ kind: 'interview-waiting-message', message });
+  };
   // Co-host / moderator keys (user ids and participant row ids) granted
   // by the host. Derived AFTER myKey/myParticipantRowId exist (TDZ:
   // these consts are read during render, so they must sit below those
@@ -2060,6 +2449,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               if ((data as any)?.status === 'Completed') { enterEndedState('host-ended'); return; }
             } catch (e) { /* status check failed: fall through to quiet retry */ }
             if (!active) return;
+            // Live Interview Mode: the drop is flagged with its exact
+            // time (the monitor queues it offline if the post fails).
+            // The SDK heals the drop itself; the flag is only a record.
+            if (interviewRef.current?.role === 'candidate' && !interviewConnectionLostRef.current) {
+              interviewConnectionLostRef.current = true;
+              interviewMonitor.reportConnectionEvent(true);
+            }
             setIsLivekitReconnecting(true);
             if (livekitReconnectTimerRef.current) clearTimeout(livekitReconnectTimerRef.current);
             livekitReconnectTimerRef.current = setTimeout(() => {
@@ -2085,10 +2481,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // never a banner, never a toast.
         room.on(RoomEvent.Reconnecting, () => {
           if (!active) return;
+          if (interviewRef.current?.role === 'candidate' && !interviewConnectionLostRef.current) {
+            interviewConnectionLostRef.current = true;
+            interviewMonitor.reportConnectionEvent(true);
+          }
           setIsLivekitReconnecting(true);
         });
         room.on(RoomEvent.Reconnected, () => {
           if (!active) return;
+          if (interviewRef.current?.role === 'candidate' && interviewConnectionLostRef.current) {
+            interviewConnectionLostRef.current = false;
+            interviewMonitor.reportConnectionEvent(false);
+          }
           setIsLivekitReconnecting(false);
           if (livekitReconnectTimerRef.current) { clearTimeout(livekitReconnectTimerRef.current); livekitReconnectTimerRef.current = null; }
         });
@@ -2101,13 +2505,102 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         // is ignored outright.
         room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant: any) => {
           if (!active) return;
+          let msg: any = null;
+          try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (e) { return; }
+          if (!msg || typeof msg.kind !== 'string') return;
+          // Live Interview Mode: interview messages travel on the same
+          // data channel. Flags go candidate -> interviewers, controls
+          // and questions go lead -> candidate. A message is only
+          // honoured when this room is an interview and the sender is
+          // the expected side: flags must come from the candidate's
+          // LiveKit identity (their participant row id); controls only
+          // from the lead or the host. The context is read from a ref
+          // because this handler closes over the first render.
+          if (msg.kind.startsWith('interview-')) {
+            const iv = interviewRef.current;
+            if (!iv) return;
+            if (msg.kind === 'interview-flag') {
+              const role = iv.role;
+              if (role !== 'interviewer' && role !== 'lead') return;
+              if (participant?.identity !== iv.candidateRowId) return;
+              const ev = msg.event;
+              if (!ev || typeof ev.event_type !== 'string') return;
+              setInterviewFlags((prev) => {
+                const clientId = typeof ev.clientId === 'string' && ev.clientId ? ev.clientId : `live-${Date.now()}`;
+                if (prev.some((f) => f.clientId === clientId)) return prev;
+                return [{ clientId, type: ev.event_type, detail: typeof ev.detail === 'string' ? ev.detail : '', severity: ev.severity === 'high' || ev.severity === 'medium' ? ev.severity : 'low', occurredAt: ev.occurredAt || new Date().toISOString(), awaySeconds: typeof ev.awaySeconds === 'number' ? ev.awaySeconds : null }, ...prev].slice(0, 200);
+              });
+              return;
+            }
+            // Everything below is for the candidate only.
+            if (iv.role !== 'candidate') return;
+            if (msg.kind === 'interview-question') {
+              if (!msg.question || typeof msg.question.text !== 'string') return;
+              setInterviewCurrentQuestion({ id: String(msg.question.id || ''), text: msg.question.text, timeLimitSeconds: typeof msg.question.time_limit_seconds === 'number' ? msg.question.time_limit_seconds : null, startedAt: msg.question.asked_at ? new Date(msg.question.asked_at).getTime() : Date.now() });
+              return;
+            }
+            if (msg.kind === 'interview-code') {
+              if (typeof msg.code !== 'string') return;
+              setInterviewCode(msg.code);
+              setInterviewCodeUpdatedBy(typeof msg.by === 'string' ? msg.by : '');
+              return;
+            }
+            if (msg.kind === 'interview-send-to-waiting') {
+              setInterviewSentToWaiting(true);
+              if (typeof msg.message === 'string') setInterviewWaitingMessage(msg.message);
+              return;
+            }
+            if (msg.kind === 'interview-pause') {
+              setInterviewPaused(true);
+              return;
+            }
+            if (msg.kind === 'interview-resume') {
+              setInterviewPaused(false);
+              return;
+            }
+            if (msg.kind === 'interview-end') {
+              // The lead ended the interview: the room's ended state
+              // shows the interview-ended screen with the feedback
+              // form (see the ended screen below). Media is
+              // disconnected by enterEndedState, as for any end.
+              enterEndedState('interview-ended');
+              return;
+            }
+            if (msg.kind === 'interview-mute-request') {
+              if (!isMutedRef.current) {
+                setIsMuted(true);
+                if (localAudioTrackRef.current) localAudioTrackRef.current.enabled = false;
+                broadcastMediaState({ isMuted: true });
+              }
+              return;
+            }
+            if (msg.kind === 'interview-waiting-message') {
+              if (typeof msg.message === 'string') setInterviewWaitingMessage(msg.message);
+              return;
+            }
+            if (msg.kind === 'interview-recording') {
+              setInterviewBeingRecorded(msg.on === true);
+              return;
+            }
+            if (msg.kind === 'interview-code-open') {
+              setInterviewCodeOpen(msg.open === true);
+              return;
+            }
+            if (msg.kind === 'interview-code-output') {
+              if (typeof msg.output === 'string') setInterviewCodeOutput(msg.output);
+              return;
+            }
+            if (msg.kind === 'interview-return-to-room') {
+              setInterviewSentToWaiting(false);
+              return;
+            }
+            return;
+          }
           const grant = remoteGrantRef.current;
           if (!grant || grant.sharerKey !== myKey) return;
           if (!participant || participant.identity !== grant.controllerKey) return;
           if (!livekitScreenTrackRef.current) return;
-          let msg: any = null;
-          try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (e) { return; }
-          if (!msg || msg.kind !== 'remote-control') return;
+          if (msg.kind !== 'remote-control') return;
           const controllerName = (participant as any).name || 'Controller';
           if (msg.type === 'pointer' && typeof msg.x === 'number' && typeof msg.y === 'number') {
             setRemoteCursor({ x: Math.min(1, Math.max(0, msg.x)), y: Math.min(1, Math.max(0, msg.y)), name: controllerName });
@@ -5384,6 +5877,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     // A second tap while the picker is still opening must not start a
     // second capture: the first tap already owns the picker.
     if (screenShareStarting || screenShareStartingRef.current) return;
+    // Live Interview Mode: the candidate cannot share their screen, in
+    // an interview the interviewer shares and the candidate watches.
+    // The attempt is flagged (the monitor's reportScreenShareAttempt)
+    // instead of opening the picker.
+    if (isInterviewCandidate) {
+      interviewMonitor.reportScreenShareAttempt();
+      return;
+    }
     if (isScreenShareBlockedForGuests && !isAdmin) {
       alert(t('room.screen_sharing_is_blocked_by'));
       return;
@@ -7679,6 +8180,35 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // is already disconnected by enterEndedState; this screen only
   // explains what happened and sends the user back to the dashboard.
   // onEndMeeting(true) skips the server end, it already happened.
+  // Live Interview Mode: what the interviewer panel shows about the
+  // candidate, in plain words. Presence comes from LiveKit (the
+  // candidate's identity is their participant row id); video and audio
+  // from the peer state; connection from whether their tracks are
+  // actually flowing. Nothing here is guessed.
+  const interviewCandidatePresent = interviewCandidateRowId ? livekitParticipantIds.has(interviewCandidateRowId) : false;
+  const interviewCandidateStream = interviewCandidateRowId ? livekitRemoteStreams[interviewCandidateRowId] : undefined;
+  const interviewCandidateStatus = !interviewCandidateRowId
+    ? t('interview.candidate_not_joined_yet')
+    : interviewCandidatePresent
+      ? t('interview.candidate_is_in_the_room')
+      : t('interview.candidate_has_left_the_room');
+  const interviewCandidateVideoOn = interviewCandidateRowId ? (peerStates[interviewCandidateRowId]?.isVideoOn !== false) : false;
+  const interviewCandidateAudioOn = interviewCandidateRowId ? (peerStates[interviewCandidateRowId]?.isMuted !== true) : false;
+  const interviewCandidateConnection = !interviewCandidatePresent
+    ? t('interview.not_connected')
+    : (interviewCandidateStream && interviewCandidateStream.getTracks().some((tr) => tr.readyState === 'live')
+      ? t('interview.connected')
+      : t('interview.connected_no_camera'));
+  // The id the server knows this interviewer by: the interview
+  // participant row for a token join, the account id for a signed-in
+  // join (the server stores notes and scores under the same id).
+  const interviewMyId = interview?.token ? (myParticipantRowId || myKey) : myKey;
+  // Seconds left on the candidate's current question, null when there
+  // is no question or no time limit.
+  const interviewQuestionSecondsLeft = interviewCurrentQuestion && interviewCurrentQuestion.timeLimitSeconds !== null
+    ? Math.max(0, interviewCurrentQuestion.timeLimitSeconds - Math.floor((interviewQuestionNow - interviewCurrentQuestion.startedAt) / 1000))
+    : null;
+
   if (endedState) {
     return (
       <div style={{
@@ -7697,10 +8227,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <PhoneOff size={28} color="#EF4444" />
         </div>
-        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>{endedState.reason === 'removed' ? 'You were removed from this meeting' : 'This meeting has ended'}</h2>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>{endedState.reason === 'removed' ? 'You were removed from this meeting' : endedState.reason === 'interview-ended' ? t('interview.the_interview_has_ended') : 'This meeting has ended'}</h2>
         <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px', lineHeight: 1.5 }}>
           {endedState.reason === 'removed'
             ? 'The host removed you from this meeting. You can\'t rejoin with this link unless the host invites you back.'
+            : endedState.reason === 'interview-ended'
+            ? t('interview.thank_you_for_your_time_the_interviewers_will_be_in_touch')
             : endedState.reason === 'you-ended'
             ? 'You ended the meeting for everyone. All participants have been disconnected and the invite link no longer works.'
             : 'The host has ended this meeting. You have been disconnected and the invite link no longer works.'}
@@ -7714,8 +8246,50 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         {endedState.detail && (
           <p style={{ margin: 0, fontSize: '0.85rem', color: '#FCA5A5', maxWidth: '420px', lineHeight: 1.5 }}>{endedState.detail}</p>
         )}
-        {endedState.reason !== 'removed' && (
+        {endedState.reason !== 'removed' && endedState.reason !== 'interview-ended' && (
           <MeetingFeedback meetingId={meetingId} guestName={currentUser?.name} />
+        )}
+        {/* Live Interview Mode: candidate feedback on the ended screen.
+            The lead ended the interview; the candidate rates it here.
+            One submission only, then a thank you. */}
+        {endedState.reason === 'interview-ended' && interview && isInterviewCandidate && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', width: '100%', maxWidth: '420px', padding: '1.25rem', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
+            {interviewFeedbackSent ? (
+              <span style={{ fontSize: '0.9rem', color: '#86EFAC' }}>{t('interview.feedback_sent_thank_you')}</span>
+            ) : (
+              <>
+                <span style={{ fontSize: '0.95rem', fontWeight: 700 }}>{t('interview.how_was_your_interview')}</span>
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button key={n} type="button" onClick={() => setInterviewFeedbackRating(n)} aria-label={`${n} / 5`} style={{ width: '44px', height: '44px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: interviewFeedbackRating === n ? 'var(--color-accent)' : 'transparent', color: interviewFeedbackRating === n ? 'black' : 'white', fontWeight: 700, fontSize: '1rem', cursor: 'pointer' }}>{n}</button>
+                  ))}
+                </div>
+                <textarea
+                  value={interviewFeedbackComment}
+                  onChange={(e) => setInterviewFeedbackComment(e.target.value)}
+                  maxLength={1000}
+                  placeholder={t('interview.feedback_placeholder')}
+                  className="premium-input"
+                  style={{ width: '100%', minHeight: '64px', fontSize: '0.85rem', resize: 'vertical' }}
+                />
+                <button
+                  type="button"
+                  disabled={interviewFeedbackRating === null}
+                  onClick={async () => {
+                    if (interviewFeedbackRating === null) return;
+                    try {
+                      await giinApi.interviewPost('feedback-submit', { interviewId: interview.interviewId, rating: interviewFeedbackRating, comment: interviewFeedbackComment.trim(), token: interview.token || undefined });
+                      setInterviewFeedbackSent(true);
+                    } catch (e) { /* the form stays so they can try again */ }
+                  }}
+                  className="premium-btn premium-btn-primary"
+                  style={{ height: '44px', padding: '0 1.25rem' }}
+                >
+                  {t('interview.send_feedback')}
+                </button>
+              </>
+            )}
+          </div>
         )}
         {endedState.reason !== 'removed' && !reportSent && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', width: '100%', maxWidth: '420px' }}>
@@ -8098,6 +8672,81 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       border: isFullscreen ? 'none' : '1px solid var(--border-color)',
       animation: 'pop-in var(--transition-normal)'
     }}>
+      {/* Live Interview Mode: candidate banners. One stacked pill
+          column, so the full screen notice, the Recording indicator and
+          the current question never cover each other. Interviewers never
+          see these; the candidate never sees the flags feed. */}
+      {interview && isInterviewCandidate && (
+        <div style={{ position: 'absolute', top: '80px', left: '50%', transform: 'translateX(-50%)', zIndex: 99, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', width: 'min(92vw, 560px)' }}>
+          {!isFullscreen && (
+            <div style={{ backgroundColor: 'rgba(245, 158, 11, 0.95)', color: '#111827', padding: '8px 12px', borderRadius: '12px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 4px 12px rgba(0,0,0,0.25)', width: '100%' }}>
+              <span style={{ flex: 1 }}>{interviewFullscreenExits === 0 ? t('interview.please_stay_in_full_screen') : interviewFullscreenExits === 1 ? t('interview.you_left_full_screen_once') : t('interview.you_left_full_screen_again')}</span>
+              <button type="button" onClick={toggleFullscreen} style={{ padding: '0.4rem 0.9rem', minHeight: '40px', borderRadius: '8px', border: 'none', backgroundColor: '#111827', color: 'white', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>{t('interview.enter_full_screen')}</button>
+            </div>
+          )}
+          {interviewBeingRecorded && (
+            <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.95)', color: 'white', padding: '6px 14px', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.25)' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'white', animation: 'pulse-red 1.5s infinite' }} />
+              {t('interview.you_are_being_recorded')}
+            </div>
+          )}
+          {interviewCurrentQuestion && (
+            <div style={{ backgroundColor: 'rgba(11, 15, 25, 0.95)', color: 'white', padding: '10px 14px', borderRadius: '12px', fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '2px', boxShadow: '0 4px 12px rgba(0,0,0,0.25)', width: '100%', border: '1px solid #1E293B' }}>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('interview.current_question')}</span>
+              <span style={{ lineHeight: 1.4 }}>{interviewCurrentQuestion.text}</span>
+              {interviewQuestionSecondsLeft !== null && (
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: interviewQuestionSecondsLeft <= 30 ? '#FCA5A5' : 'var(--text-muted)', fontFamily: 'monospace' }}>
+                  {interviewQuestionSecondsLeft > 0
+                    ? t('interview.time_left', { v1: `${Math.floor(interviewQuestionSecondsLeft / 60)}:${String(interviewQuestionSecondsLeft % 60).padStart(2, '0')}` })
+                    : t('interview.time_is_up')}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Live Interview Mode: paused overlay (candidate only). The room
+          stays mounted behind it; Leave still works from here. */}
+      {interview && isInterviewCandidate && interviewPaused && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 120, backgroundColor: 'rgba(7, 9, 14, 0.92)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', padding: '2rem', textAlign: 'center', color: 'white' }}>
+          <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 800 }}>{t('interview.the_interview_is_paused')}</h2>
+          <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px', lineHeight: 1.5 }}>{t('interview.please_wait_the_interviewer_will_continue')}</p>
+          <button type="button" onClick={() => leaveToLeaveScreen()} className="premium-btn premium-btn-secondary" style={{ height: '44px', padding: '0 1.25rem' }}>{t('interview.leave_the_interview')}</button>
+        </div>
+      )}
+      {/* Live Interview Mode: sent back to the waiting room (candidate
+          only). The lead brings the candidate back; the message the lead
+          typed shows here. Leave still works from here. */}
+      {interview && isInterviewCandidate && interviewSentToWaiting && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 120, backgroundColor: 'rgba(7, 9, 14, 0.92)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', padding: '2rem', textAlign: 'center', color: 'white' }}>
+          <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 800 }}>{t('interview.you_have_been_sent_back_to_the_waiting_room')}</h2>
+          {interviewWaitingMessage && (<p style={{ margin: 0, fontSize: '0.95rem', color: 'white', maxWidth: '420px', lineHeight: 1.5 }}>{interviewWaitingMessage}</p>)}
+          <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '420px', lineHeight: 1.5 }}>{t('interview.the_interviewer_will_bring_you_back_shortly')}</p>
+          <button type="button" onClick={() => leaveToLeaveScreen()} className="premium-btn premium-btn-secondary" style={{ height: '44px', padding: '0 1.25rem' }}>{t('interview.leave_the_interview')}</button>
+        </div>
+      )}
+      {/* Live Interview Mode: shared code pad (candidate only; the
+          interviewers use the Code tab in their panel). Plain text
+          area with a Run button, as specified for v1. */}
+      {interview && isInterviewCandidate && interviewCodeOpen && (
+        <div style={{ position: 'absolute', left: '12px', right: '12px', bottom: '84px', height: 'min(45%, 320px)', zIndex: 60, backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-color)', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.6rem 0.9rem', borderBottom: '1px solid var(--border-color)' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{t('interview.shared_code')}</span>
+            <button type="button" onClick={() => interviewToggleCode(false)} className="panel-close-btn" aria-label={t('room.close_panel')}><X size={16} /></button>
+          </div>
+          <textarea
+            value={interviewCode}
+            onChange={(e) => interviewCodeChange(e.target.value)}
+            placeholder={t('interview.write_code_here')}
+            style={{ flex: 1, minHeight: 0, resize: 'none', border: 'none', outline: 'none', backgroundColor: 'transparent', color: 'var(--text-main)', fontFamily: 'monospace', fontSize: '0.85rem', padding: '0.75rem 0.9rem' }}
+          />
+          {interviewCodeOutput && (<pre style={{ margin: 0, padding: '0.6rem 0.9rem', borderTop: '1px solid var(--border-color)', fontSize: '0.8rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '90px', overflowY: 'auto', backgroundColor: 'rgba(255,255,255,0.04)' }}>{interviewCodeOutput}</pre>)}
+          <div style={{ display: 'flex', gap: '0.5rem', padding: '0.6rem 0.9rem', borderTop: '1px solid var(--border-color)' }}>
+            <button type="button" onClick={interviewRunCode} className="premium-btn premium-btn-primary" style={{ height: '38px', padding: '0 1rem' }}>{t('interview.run_code')}</button>
+            {interviewCodeUpdatedBy && (<span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', alignSelf: 'center' }}>{t('interview.last_edited_by', { v1: interviewCodeUpdatedBy })}</span>)}
+          </div>
+        </div>
+      )}
       {/* Breakout Room Status Banner */}
       {breakoutRoom !== null && (
         <div style={{
@@ -9949,6 +10598,68 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </div>
         )}
 
+        {/* Live Interview Mode: interviewer dashboard. Only ever
+            rendered for interviewers; the candidate never sees notes,
+            scores or the flags feed. */}
+        {activePanel === 'interview' && interview && isInterviewViewer && (
+          <div className="meeting-side-panel" style={{
+            width: '360px',
+            borderLeft: '1px solid #1E293B',
+            backgroundColor: 'rgba(11, 15, 25, 0.95)',
+            display: 'flex',
+            minHeight: 0,
+            flexDirection: 'column',
+            animation: 'slide-in 0.2s ease',
+            zIndex: 5
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0.6rem 0.75rem 0' }}>
+              <button onClick={() => setActivePanel('none')} className="panel-close-btn" aria-label={t('room.close_panel')}><X size={16} /></button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, padding: '0 1rem 1rem', display: 'flex', flexDirection: 'column' }}>
+              <InterviewPanel
+                interviewId={interview.interviewId}
+                interviewTitle={meetingTitle}
+                meetingId={meetingId}
+                myRole={isInterviewLead ? 'lead' : 'interviewer'}
+                myId={interviewMyId}
+                myName={currentUser?.name || ''}
+                token={interview.token}
+                candidateName={interview.candidateName}
+                candidateRowId={interviewCandidateRowId}
+                candidateStatus={interviewCandidateStatus}
+                candidateVideoOn={interviewCandidateVideoOn}
+                candidateAudioOn={interviewCandidateAudioOn}
+                connectionQuality={interviewCandidateConnection}
+                events={interviewFlags}
+                isPaused={interviewPaused}
+                candidateInWaiting={interviewSentToWaiting}
+                isRecordingCandidate={interviewRecordingOn}
+                recordingSeconds={interviewRecordingSeconds}
+                codeOpen={interviewCodeOpen}
+                codeValue={interviewCode}
+                codeOutput={interviewCodeOutput}
+                currentQuestion={interviewCurrentQuestion}
+                onPause={interviewPause}
+                onEnd={interviewEnd}
+                onSendToWaiting={interviewSendToWaiting}
+                onMuteCandidate={interviewMuteCandidate}
+                onStartCandidateRecording={startInterviewRecording}
+                onStopCandidateRecording={stopInterviewRecording}
+                onAskQuestion={interviewAskQuestion}
+                onCodeChange={interviewCodeChange}
+                onToggleCode={interviewToggleCode}
+                onRunCode={interviewRunCode}
+                onSendWaitingMessage={interviewSendWaitingMessage}
+              />
+              {interviewRecordingError && (
+                <span style={{ fontSize: '0.8rem', color: '#FCA5A5', marginTop: '0.5rem' }}>{interviewRecordingError}</span>
+              )}
+              {interviewRecordingPath && (
+                <span style={{ fontSize: '0.8rem', color: '#86EFAC', marginTop: '0.5rem' }}>{t('interview.recording_saved')}</span>
+              )}
+            </div>
+          </div>
+        )}
         {activePanel === 'participants' && (
           <div className="meeting-side-panel" style={{
             width: '300px',
@@ -12338,7 +13049,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             </button>
           </div>
 
-          {/* Toggle Screen Share */}
+          {/* Toggle Screen Share: hidden for the interview candidate,
+              who cannot share their screen in an interview. */}
           <button
             disabled={screenShareStarting}
             onClick={handleToggleScreenShare}
@@ -12348,7 +13060,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               borderRadius: '14px',
               backgroundColor: isScreenSharing ? 'var(--color-accent)' : 'rgba(255, 255, 255, 0.1)',
               border: 'none',
-              display: 'flex',
+              display: isInterviewCandidate ? 'none' : 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
@@ -12463,6 +13175,52 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           >
             <Maximize2 size={20} />
           </button>
+
+          {/* Live Interview Mode: interviewer dashboard. Only for
+              interviewers; the badge is the live flag count. */}
+          {interview && isInterviewViewer && (
+            <button
+              onClick={() => setActivePanel(activePanel === 'interview' ? 'none' : 'interview')}
+              style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '14px',
+                backgroundColor: activePanel === 'interview' ? 'var(--color-primary)' : 'rgba(255, 255, 255, 0.1)',
+                border: 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '2px',
+                color: 'white',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                position: 'relative'
+              }}
+              title={t('interview.interview_dashboard')}
+            >
+              <ListChecks size={18} />
+              <span style={{ fontSize: '0.55rem', fontWeight: 600 }}>{t('interview.interview_short')}</span>
+              {interviewFlags.length > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '-4px',
+                  right: '-4px',
+                  minWidth: '18px',
+                  height: '18px',
+                  borderRadius: '9px',
+                  backgroundColor: '#EF4444',
+                  color: 'white',
+                  fontSize: '0.65rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 4px'
+                }}>{interviewFlags.length > 99 ? '99+' : interviewFlags.length}</span>
+              )}
+            </button>
+          )}
 
           {/* Toggle Chat Panel */}
           <button 
@@ -12836,7 +13594,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               </button>
             </div>
 
-            {/* Screen Share */}
+            {/* Screen Share: hidden for the interview candidate,
+                who cannot share their screen in an interview. */}
             <button
               className="toolbar-control-btn"
               disabled={screenShareStarting}
@@ -12847,7 +13606,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 borderRadius: '50%',
                 backgroundColor: isScreenSharing ? 'var(--color-accent)' : '#1E293B',
                 border: 'none',
-                display: 'flex',
+                display: isInterviewCandidate ? 'none' : 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: isScreenSharing ? 'black' : 'white',
@@ -13668,6 +14427,31 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <Users size={16} />
               <span className="hide-mobile-text">{t('room.participants')}</span>
             </button>
+
+            {interview && isInterviewViewer && (
+              <button
+                onClick={() => setActivePanel(activePanel === 'interview' ? 'none' : 'interview')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  backgroundColor: activePanel === 'interview' ? 'rgba(112, 130, 190, 0.2)' : 'transparent',
+                  border: '1px solid #1E293B',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: 'var(--radius-sm)',
+                  color: activePanel === 'interview' ? 'var(--color-accent)' : 'var(--text-main)',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  height: '36px'
+                }}
+              >
+                <ListChecks size={16} />
+                <span className="hide-mobile-text">{t('interview.interview_short')}</span>
+                {interviewFlags.length > 0 && (
+                  <span style={{ minWidth: '18px', height: '18px', borderRadius: '9px', backgroundColor: '#EF4444', color: 'white', fontSize: '0.65rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{interviewFlags.length > 99 ? '99+' : interviewFlags.length}</span>
+                )}
+              </button>
+            )}
 
             <button 
               onClick={() => setActivePanel(activePanel === 'chat' ? 'none' : 'chat')}

@@ -2101,6 +2101,90 @@ export const giinApi = {
     return data as { hasPasscode: boolean; valid: boolean };
   },
 
+  // ---- Live Interview Mode -------------------------------------------
+  // All interview data lives behind the service-role API routes in
+  // app/api/interviews (the interview tables have no public policy),
+  // so every call below goes through fetch, never a direct table read.
+  // The candidate's invite token is the credential for token calls;
+  // signed-in calls carry the Supabase access token.
+  interviewPost: async (action: string, payload: Record<string, unknown> = {}) => {
+    const res = await fetch('/api/interviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'The interview request failed. Please check your connection and try again.');
+    }
+    return data;
+  },
+
+  interviewSessionToken: async (): Promise<string | undefined> => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token;
+    } catch (e) {
+      return undefined;
+    }
+  },
+
+  verifyInterviewToken: async (interviewId: string, token: string) => {
+    const res = await fetch('/api/interviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'verify-token', interviewId, token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error || !data.ok) {
+      throw new Error(data.message || data.error || 'That interview link is not valid.');
+    }
+    return data as {
+      ok: boolean; role: string; name: string; meetingParticipantId: string | null;
+      interview: { id: string; meetingId: string; title: string; roleTitle: string; description: string; durationMinutes: number; scheduledAt: string | null; status: string };
+      emailConfigured: boolean; identityConfirmed: boolean;
+    };
+  },
+
+  interviewStatus: async (interviewId: string, token: string) => {
+    const res = await fetch('/api/interviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'status', interviewId, token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) return null;
+    return data.status as string | null;
+  },
+
+  getInterviewEvents: async (interviewId: string, token?: string) => {
+    const params = new URLSearchParams({ interviewId });
+    const sessionToken = await giinApi.interviewSessionToken();
+    if (sessionToken) params.set('accessToken', sessionToken);
+    else if (token) params.set('token', token);
+    const res = await fetch(`/api/interviews/events?${params.toString()}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'Could not load the interview timeline.');
+    }
+    return data as { ok: boolean; events: any[]; counts: { byType: Record<string, number>; bySeverity: Record<string, number>; total: number; longestAwaySeconds: number } };
+  },
+
+  uploadInterviewRecording: async (interviewId: string, blob: Blob) => {
+    const sessionToken = await giinApi.interviewSessionToken();
+    if (!sessionToken) throw new Error('Sign in to upload the recording.');
+    const form = new FormData();
+    form.append('interviewId', interviewId);
+    form.append('accessToken', sessionToken);
+    form.append('file', blob, 'interview-recording.webm');
+    const res = await fetch('/api/interviews/recording', { method: 'POST', body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.message || data.error || 'The recording could not be uploaded.');
+    }
+    return data as { ok: boolean; path: string; size: number };
+  },
+
   // Fetch a meeting's passcode, host only, server-verified. Used for the
   // in-room invite panel and the dashboard Copy Link, now that the
   // passcode column is hidden from anon reads.

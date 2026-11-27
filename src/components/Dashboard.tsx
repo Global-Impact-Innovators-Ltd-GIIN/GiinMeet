@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2, Download } from 'lucide-react';
+import { Video, UserPlus, Calendar, ArrowRight, Clock, CheckCircle2, Play, AlertCircle, Copy, Check, RefreshCw, Link2, Trash2, Download, ListChecks } from 'lucide-react';
 import { buildJoinLink, buildShortPersonalRoomLink, generateMeetingPasscode, getSystemSettings, downloadICS, giinApi, isDeletableFromHistory, LINK_EXPIRY_OPTIONS, computeLinkExpiry, formatLinkExpiry, buildWhatsAppInviteUrl, buildGoogleCalendarUrl, supabase } from '../supabaseClient';
 import { readRecentMeetings } from '../utils/recent';
 import { getLocalBrandName, getLocalBrandSlogan, getLocalLogoUrl } from '../utils/brand';
@@ -877,6 +877,48 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <h3 style={{ fontSize: '1rem', margin: 0, fontFamily: 'var(--font-heading)' }}>{t('schedule.title')}</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: 0 }}>{t('dash.pick_a_time')}</p>
+          </div>
+        </div>
+
+        {/* Live Interview Mode: one compact card beside the top actions,
+            per the dashboard cleanup mandate (no extra text). */}
+        <div
+          onClick={() => onNavigate('interviews')}
+          className="glass-panel"
+          style={{
+            padding: '0.9rem 1rem',
+            cursor: 'pointer',
+            transition: 'all var(--transition-fast)',
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: '0.75rem'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-4px)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+          }}
+        >
+          <div
+            className="dashboard-card-icon"
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '10px',
+              flexShrink: 0,
+              backgroundColor: 'rgba(16, 185, 129, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <ListChecks size={20} color="#10B981" />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '1rem', margin: 0, fontFamily: 'var(--font-heading)' }}>{t('interview.interviews')}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: 0 }}>{t('interview.set_up_a_live_interview')}</p>
           </div>
         </div>
       </div>

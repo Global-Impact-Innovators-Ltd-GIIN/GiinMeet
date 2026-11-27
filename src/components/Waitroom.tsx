@@ -17,6 +17,11 @@ interface WaitroomProps {
   // Phase 3 (Feature 4), shared workspace brand, passed from App.
   brandName?: string;
   logoUrl?: string;
+  // Live Interview Mode: a verified interview token is the credential,
+  // so the passcode gate is skipped. The token was verified server-side
+  // before this screen mounted, and the participant row it created is
+  // already in localStorage.
+  bypassPasscode?: boolean;
 }
 
 export const Waitroom: React.FC<WaitroomProps> = ({
@@ -28,7 +33,8 @@ export const Waitroom: React.FC<WaitroomProps> = ({
   onDeclined,
   onBack,
   brandName = 'GiinMeet',
-  logoUrl = '/logo.png'
+  logoUrl = '/logo.png',
+  bypassPasscode = false
 }) => {
   const [meetingDetails, setMeetingDetails] = useState<{ title: string; passcode: string; require_waiting_room?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -191,22 +197,28 @@ export const Waitroom: React.FC<WaitroomProps> = ({
             return;
           }
           // Passcode: verified SERVER-side (see giinApi.verifyPasscode).
-          // The passcode is never compared in this component any more ,
-          // the meetings table is publicly readable, so a client-side
+          // The passcode is never compared in this component, the
+          // meetings table is publicly readable, so a client-side
           // comparison was only ever a UI gate, not a secret. A code that
           // arrived in the invite link is verified the same way; a meeting
           // with no passcode at all skips the form.
-          try {
-            const verdict = await giinApi.verifyPasscode(meetingId, initialPasscode);
-            if (verdict.valid) {
-              setPasscodeValidated(true);
-            } else if (!verdict.hasPasscode) {
-              setPasscodeValidated(true);
+          // Live Interview Mode: a verified interview token is the
+          // credential, so the passcode gate is skipped entirely.
+          if (bypassPasscode) {
+            setPasscodeValidated(true);
+          } else {
+            try {
+              const verdict = await giinApi.verifyPasscode(meetingId, initialPasscode);
+              if (verdict.valid) {
+                setPasscodeValidated(true);
+              } else if (!verdict.hasPasscode) {
+                setPasscodeValidated(true);
+              }
+              // Otherwise the form stays up with the link's code prefilled
+              // so the user can correct it.
+            } catch (e: any) {
+              setPasscodeError(e?.message || 'Could not verify the passcode. Please check your connection and try again.');
             }
-            // Otherwise the form stays up with the link's code prefilled
-            // so the user can correct it.
-          } catch (e: any) {
-            setPasscodeError(e?.message || 'Could not verify the passcode. Please check your connection and try again.');
           }
         }
       } catch (err) {

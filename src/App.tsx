@@ -22,6 +22,10 @@ import { useClickOutside } from './hooks/useClickOutside';
 import { Waitroom } from './components/Waitroom';
 import { PreJoinCheck } from './components/PreJoinCheck';
 import { MeetingLobby } from './components/MeetingLobby';
+import { InterviewConsent, type InterviewConsentInfo } from './components/InterviewConsent';
+import { InterviewList } from './components/InterviewList';
+import { InterviewSetup } from './components/InterviewSetup';
+import { InterviewReport } from './components/InterviewReport';
 import { giinApi, supabase, getTransparentLogo, getSystemSettings, isMeetingHost, isMeetingHostForUser } from './supabaseClient';
 import { applyAccentColor, applyBorderRadius, applyFont, applyUiStyle } from './utils/theme';
 import { loadAndApplySharedBrand } from './utils/brand';
@@ -56,6 +60,20 @@ interface Meeting {
   team_name?: string | null;
 }
 
+// Live Interview Mode: a verified invite token, as returned by
+// POST /api/interviews action verify-token. The role comes from the
+// server, never from the link text.
+interface InterviewAccess {
+  interviewId: string;
+  token: string;
+  role: 'candidate' | 'interviewer' | 'lead';
+  name: string;
+  interview: InterviewConsentInfo;
+  emailConfigured: boolean;
+  identityConfirmed: boolean;
+  meetingParticipantId: string | null;
+}
+
 function App() {
   // Authentication & Directory Discovery
   const [user, setUser] = useState<{ 
@@ -77,7 +95,25 @@ function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [joinMeetingData, setJoinMeetingData] = useState<{ meetingId: string; passcode: string } | null>(null);
+  const [joinMeetingData, setJoinMeetingData] = useState<{ meetingId: string; passcode: string; interviewId?: string; token?: string } | null>(null);
+  // Live Interview Mode: a verified invite token (candidate or
+  // interviewer). The token is the credential; the role comes from the
+  // server, never from the link text. Null when the join is not an
+  // interview, or when the token did not verify (see
+  // interviewAccessError, which offers the normal guest join).
+  const [interviewAccess, setInterviewAccess] = useState<InterviewAccess | null>(null);
+  const [interviewAccessError, setInterviewAccessError] = useState('');
+  const [interviewJoinAsGuest, setInterviewJoinAsGuest] = useState(false);
+  const [interviewConsentDone, setInterviewConsentDone] = useState(false);
+  // Interview context for a signed-in host or interviewer entering the
+  // room: looked up by meeting id (for-meeting), no token needed.
+  const [interviewContext, setInterviewContext] = useState<{
+    interviewId: string; role: 'candidate' | 'interviewer' | 'lead'; token: string | null;
+    candidateName: string; candidateRowId: string | null; meetingId: string;
+  } | null>(null);
+  const [interviewView, setInterviewView] = useState<'list' | 'new' | 'report'>('list');
+  const [reportInterviewId, setReportInterviewId] = useState<string | null>(null);
+  const interviewVerifyKeyRef = useRef('');
   // Phase 1, personal room: while a #/room/<slug> link resolves to its
   // session meeting, the app shows an "Opening your room…" card instead
   // of the dashboard. resolvingRoomRef guards against resolving the same
@@ -110,12 +146,20 @@ function App() {
     setPreJoinName('');
     setPreJoinVideoOn(true);
     setPreJoinAudioOn(true);
+    // Live Interview Mode: a new join starts with no interview state;
+    // the hash router fills interviewAccess when the link carries a
+    // verified token.
+    setInterviewConsentDone(false);
+    setInterviewAccessError('');
+    setInterviewJoinAsGuest(false);
+    setInterviewContext(null);
     let active = true;
     giinApi.getMeetingDetails(joinMeetingData.meetingId).then(({ data }) => {
       if (active && data?.title) setJoinMeetingTitle(data.title);
     }).catch(() => {});
     return () => { active = false; };
   }, [joinMeetingData?.meetingId]);
+
 
   // Navigation & Theme
   const [currentView, setCurrentView] = useState<string>(() => {
@@ -125,7 +169,7 @@ function App() {
     }
     if (hash.startsWith('#/')) {
       const view = hash.substring(2).split('?')[0];
-      if (['dashboard', 'chats', 'contacts', 'library', 'schedule', 'help', 'settings', 'billing', 'teams'].includes(view)) {
+      if (['dashboard', 'chats', 'contacts', 'library', 'schedule', 'help', 'settings', 'billing', 'teams', 'interviews'].includes(view)) {
         return view;
       }
     }
@@ -135,7 +179,7 @@ function App() {
     const storedView = localStorage.getItem('giin_view');
     // 'superadmin' is no longer a dashboard view, the portal lives
     // at /superadmin, so a stale stored view falls back to dashboard.
-    const knownViews = ['dashboard', 'chats', 'contacts', 'library', 'schedule', 'help', 'settings', 'billing', 'teams'];
+    const knownViews = ['dashboard', 'chats', 'contacts', 'library', 'schedule', 'help', 'settings', 'billing', 'teams', 'interviews'];
     return storedView && knownViews.includes(storedView) ? storedView : 'dashboard';
   });
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -198,6 +242,35 @@ function App() {
     }
   });
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+
+  // Live Interview Mode: a signed-in host or interviewer entering the
+  // room gets their interview context by meeting id (no token needed;
+  // the session token is the credential). Guests use the token from
+  // their link instead (see the hash router above). A meeting that is
+  // not an interview, or a user who is not on the interview, gets no
+  // context and the room behaves exactly as before.
+  useEffect(() => {
+    if (currentView !== 'meeting' || !activeMeetingId || !user || interviewContext) return;
+    let active = true;
+    void (async () => {
+      try {
+        const accessToken = await giinApi.interviewSessionToken();
+        if (!accessToken || !active) return;
+        const res = await giinApi.interviewPost('for-meeting', { accessToken, meetingId: activeMeetingId });
+        if (!active || !res?.interview) return;
+        const iv = res.interview;
+        setInterviewContext({
+          interviewId: iv.id,
+          role: iv.role === 'lead' ? 'lead' : iv.role === 'candidate' ? 'candidate' : 'interviewer',
+          token: null,
+          candidateName: iv.candidateName || '',
+          candidateRowId: iv.candidateRowId || null,
+          meetingId: activeMeetingId,
+        });
+      } catch (e) { /* not an interview meeting: no context, normal room */ }
+    })();
+    return () => { active = false; };
+  }, [currentView, activeMeetingId, user]);
   const [lobbyMeetingData, setLobbyMeetingData] = useState<{
     id: string;
     title: string;
@@ -777,6 +850,41 @@ function App() {
         const urlParams = new URLSearchParams(hash.split('?')[1]);
         const id = urlParams.get('id') || '';
         const passcode = urlParams.get('passcode') || '';
+        const interviewIdParam = urlParams.get('interview') || '';
+        const interviewToken = urlParams.get('token') || '';
+        // Live Interview Mode: an interview link carries no meeting id,
+        // the meeting comes from the verified token. The token is
+        // verified server-side; the role comes from the server, never
+        // from the link text. While it verifies, the join view shows a
+        // loading panel (currentView 'join' with no join data yet).
+        const verifyInterview = async (iid: string, tok: string) => {
+          const key = `${iid}:${tok}`;
+          if (interviewVerifyKeyRef.current === key) return null;
+          interviewVerifyKeyRef.current = key;
+          try {
+            const v = await giinApi.verifyInterviewToken(iid, tok);
+            setInterviewAccess({ interviewId: iid, token: tok, role: v.role === 'lead' ? 'lead' : v.role === 'interviewer' ? 'interviewer' : 'candidate', name: v.name, interview: v.interview, emailConfigured: v.emailConfigured, identityConfirmed: v.identityConfirmed, meetingParticipantId: v.meetingParticipantId || null });
+            setInterviewAccessError('');
+            if (v.meetingParticipantId) {
+              try { localStorage.setItem(`giin_participant_row_${v.interview.meetingId}`, v.meetingParticipantId); } catch (e) {}
+            }
+            return v;
+          } catch (e: any) {
+            setInterviewAccess(null);
+            setInterviewAccessError(e?.message || 'That interview link is not valid.');
+            return null;
+          }
+        };
+        if (interviewIdParam && interviewToken && !id) {
+          setCurrentView('join');
+          void (async () => {
+            const verified = await verifyInterview(interviewIdParam, interviewToken);
+            if (verified) {
+              setJoinMeetingData({ meetingId: verified.interview.meetingId, passcode: '', interviewId: interviewIdParam, token: interviewToken });
+            }
+          })();
+          return;
+        }
         if (!id) return;
         // Host bypass (server truth): if the signed-in user IS this
         // meeting's host, they go straight into the room as host - never
@@ -813,7 +921,8 @@ function App() {
             console.warn('[GiinMeet] Host check failed, using join gate:', (e as any)?.message);
           }
         }
-        setJoinMeetingData({ meetingId: id, passcode });
+        setJoinMeetingData({ meetingId: id, passcode, interviewId: interviewIdParam || undefined, token: interviewToken || undefined });
+        if (interviewIdParam && interviewToken) void verifyInterview(interviewIdParam, interviewToken);
         setCurrentView('join');
       }
     };
@@ -2116,6 +2225,38 @@ function App() {
     );
   }
 
+  // Live Interview Mode: an interview-only link is still verifying
+  // (no meeting id yet), or the token did not verify.
+  if (currentView === 'join' && !joinMeetingData) {
+    if (interviewAccessError) {
+      return (
+        <div className="flex-center" style={{ minHeight: '80vh', padding: '2rem' }}>
+          <div className="glass-panel" style={{ maxWidth: '400px', width: '100%', padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', marginBottom: '0.5rem' }}>{t('interview.this_link_is_not_valid')}</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{interviewAccessError} {t('interview.ask_the_host_for_a_fresh_link')}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setInterviewAccessError(''); interviewVerifyKeyRef.current = ''; setCurrentView(user ? 'dashboard' : 'auth'); }}
+              className="premium-btn premium-btn-primary"
+              style={{ width: '100%', justifyContent: 'center' }}
+            >
+              {t('interview.back_to_dashboard')}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="flex-center" style={{ minHeight: '80vh', padding: '2rem' }}>
+        <div className="glass-panel" style={{ maxWidth: '400px', width: '100%', padding: '2.5rem', textAlign: 'center' }}>
+          <span style={{ fontSize: '0.95rem', color: 'var(--text-muted)' }}>{t('interview.checking_your_interview_link')}</span>
+        </div>
+      </div>
+    );
+  }
+
   if (currentView === 'join' && joinMeetingData) {
     // Pre-join prerequisite check FIRST (defect #1): guests who follow a
     // WhatsApp link used to go Waitroom -> MeetingRoom and never see any
@@ -2129,6 +2270,7 @@ function App() {
           meetingId={joinMeetingData.meetingId}
           meetingTitle={joinMeetingTitle}
           user={user}
+          initialDisplayName={interviewAccess?.name || undefined}
           onComplete={(displayName, videoOn, audioOn) => {
             setPreJoinName(displayName);
             setPreJoinVideoOn(videoOn);
@@ -2141,6 +2283,62 @@ function App() {
         />
       );
     }
+    // Live Interview Mode: the candidate sees consent + identity
+    // between the device check and the waiting room.
+    if (interviewAccess && interviewAccess.role === 'candidate' && !interviewConsentDone) {
+      return (
+        <InterviewConsent
+          interview={interviewAccess.interview}
+          candidateName={interviewAccess.name}
+          token={interviewAccess.token}
+          emailConfigured={interviewAccess.emailConfigured}
+          identityConfirmed={interviewAccess.identityConfirmed}
+          onComplete={() => setInterviewConsentDone(true)}
+          onBack={() => {
+            setCurrentView(user ? 'dashboard' : 'auth');
+          }}
+        />
+      );
+    }
+    // A token link that is still verifying: wait for the verdict before
+    // showing the passcode gate.
+    if (joinMeetingData.interviewId && joinMeetingData.token && !interviewAccess && !interviewAccessError && !interviewJoinAsGuest) {
+      return (
+        <div className="flex-center" style={{ minHeight: '80vh', padding: '2rem' }}>
+          <div className="glass-panel" style={{ maxWidth: '400px', width: '100%', padding: '2.5rem', textAlign: 'center' }}>
+            <span style={{ fontSize: '0.95rem', color: 'var(--text-muted)' }}>{t('interview.checking_your_interview_link')}</span>
+          </div>
+        </div>
+      );
+    }
+    if (interviewAccessError && !interviewJoinAsGuest) {
+      return (
+        <div className="flex-center" style={{ minHeight: '80vh', padding: '2rem' }}>
+          <div className="glass-panel" style={{ maxWidth: '400px', width: '100%', padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-heading)', color: 'var(--text-main)', marginBottom: '0.5rem' }}>{t('interview.this_link_is_not_valid')}</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{interviewAccessError} {t('interview.ask_the_host_for_a_fresh_link')}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setInterviewJoinAsGuest(true)}
+              className="premium-btn premium-btn-primary"
+              style={{ width: '100%', justifyContent: 'center' }}
+            >
+              {t('interview.join_as_a_guest_instead')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setInterviewAccessError(''); interviewVerifyKeyRef.current = ''; setCurrentView(user ? 'dashboard' : 'auth'); }}
+              className="premium-btn premium-btn-secondary"
+              style={{ width: '100%', justifyContent: 'center' }}
+            >
+              {t('interview.back_to_dashboard')}
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <Waitroom
         meetingId={joinMeetingData.meetingId}
@@ -2149,6 +2347,7 @@ function App() {
         user={user}
         brandName={brandName}
         logoUrl={logoUrl}
+        bypassPasscode={!!interviewAccess}
         onAdmitted={(title, _participantId, displayName, passcode) => {
           setIsP2PCall(false);
           setActiveCallTitle(title);
@@ -2185,6 +2384,7 @@ function App() {
           initialMutedState={!preJoinAudioOn}
           isP2PCall={false}
           isHost={false}
+          interview={interviewAccess ? { interviewId: interviewAccess.interviewId, role: interviewAccess.role, token: interviewAccess.token, candidateName: interviewAccess.name, candidateRowId: interviewAccess.meetingParticipantId, meetingId: activeMeetingId } : undefined}
         />
       </div>
     );
@@ -3077,6 +3277,37 @@ function App() {
             />
           )}
 
+          {/* Live Interview Mode: the interviews view. One compact
+              list, a setup form, and the integrity report. */}
+          {currentView === 'interviews' && user && (
+            <div style={{ maxWidth: '880px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <button
+                type="button"
+                onClick={() => setCurrentView('dashboard')}
+                className="premium-btn premium-btn-secondary"
+                style={{ alignSelf: 'flex-start', height: '38px', padding: '0 1rem', fontSize: '0.85rem' }}
+              >
+                {t('interview.back_to_dashboard')}
+              </button>
+              {interviewView === 'list' && (
+                <InterviewList
+                  onNew={() => setInterviewView('new')}
+                  onOpenReport={(id) => { setReportInterviewId(id); setInterviewView('report'); }}
+                  onOpenRoom={(meetingId) => { window.location.hash = `#/join?id=${meetingId}`; }}
+                />
+              )}
+              {interviewView === 'new' && (
+                <InterviewSetup
+                  onCreated={() => setInterviewView('list')}
+                  onCancel={() => setInterviewView('list')}
+                />
+              )}
+              {interviewView === 'report' && reportInterviewId && (
+                <InterviewReport interviewId={reportInterviewId} onBack={() => setInterviewView('list')} />
+              )}
+            </div>
+          )}
+
           {currentView === 'teams' && (
             <Teams
               user={user}
@@ -3127,6 +3358,7 @@ function App() {
               onMinimizeToggle={(minimized) => {
                 setCurrentView(minimized ? 'dashboard' : 'meeting');
               }}
+              interview={interviewContext || undefined}
             />
           )}
 
